@@ -1,0 +1,35 @@
+---
+# Playbook: Get Interface Counters
+# Purpose: Safely retrieve and validate interface performance metrics from Cisco ASA/Firepower devices.
+# Standards: Idempotency (Read-only), Observability (Assertions), FQCN usage, and Robust Error Handling.
+- name: Get Interface Counters
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve interface statistics via CLI
+      # Use platform-specific FQCN for better command parsing and reliability.
+      # This operation is inherently idempotent as it does not modify device state.
+      cisco.asa.asa_command:
+        commands:
+          - "show interface | include (OK|input packets|output packets)"
+      register: counters_output
+      # Error Handling: Fail if the transport fails or if the command returns no data.
+      failed_when:
+        - counters_output.failed | default(false)
+        - "not counters_output.stdout[0]"
+
+    - name: Validate counter data integrity
+      # Observability: Assert that the output contains expected keywords to ensure valid data capture.
+      ansible.builtin.assert:
+        that:
+          - "counters_output.stdout is defined"
+          - "'input packets' in counters_output.stdout[0]"
+          - "'output packets' in counters_output.stdout[0]"
+        fail_msg: "Interface counters were not retrieved correctly or the device returned an unexpected format."
+        success_msg: "Interface counters successfully retrieved and validated."
+
+    - name: Display processed interface statistics
+      # Documentation: Provide visibility into the registered data for auditing/logging purposes.
+      ansible.builtin.debug:
+        msg: "{{ counters_output.stdout[0].split('\n') }}"

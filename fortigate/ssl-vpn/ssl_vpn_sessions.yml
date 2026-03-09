@@ -1,0 +1,39 @@
+---
+# FortiGate SSL VPN Session Monitoring
+# Improved: 2026-03-08
+# Standards: Idempotency (Read-only), Observability (Assert), FQCN, Error Handling
+#
+- name: FortiGate SSL VPN Sessions Analysis
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve active SSL VPN session data
+      # Using FQCN: ansible.netcommon.cli_command
+      # This operation is idempotent as it is a read-only 'get' command that does not alter device configuration.
+      ansible.netcommon.cli_command:
+        command: get sslvpn session
+      register: vpn_sessions
+      # Error Handling: Catch cases where the command is rejected or the feature is disabled
+      failed_when: 
+        - vpn_sessions.failed
+        - "'Command fail' in vpn_sessions.stdout or 'Unknown action' in vpn_sessions.stdout"
+
+    - name: Validate session retrieval success
+      # Observability: Ensure the command returned a valid response before proceeding
+      ansible.builtin.assert:
+        that:
+          - vpn_sessions.stdout is defined
+          - vpn_sessions.rc == 0
+        fail_msg: "Failed to retrieve SSL VPN session information from {{ inventory_hostname }}"
+        success_msg: "Successfully captured SSL VPN session state."
+
+    - name: Display SSL VPN session report
+      # Documentation: Format output for operator visibility and audit logging
+      ansible.builtin.debug:
+        msg: |
+          ======================================================================
+          SSL VPN SESSIONS ON: {{ inventory_hostname }}
+          TIMESTAMP: {{ ansible_date_time.iso8601 | default('N/A') }}
+          ======================================================================
+          {{ vpn_sessions.stdout | default('No active SSL VPN sessions found.') }}

@@ -1,0 +1,34 @@
+---
+- name: Cisco ASA DHCP Statistics Retrieval
+  # This playbook retrieves and validates DHCP statistics from Cisco ASA/Firepower devices.
+  # It adheres to Standard:s for idempotency, observability, and error handling.
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get DHCP statistics from device
+      # Read-only commands are inherently idempotent as they do not modify device configuration.
+      # Using FQCN cisco.asa.asa_command for platform-specific execution and reliability.
+      cisco.asa.asa_command:
+        commands:
+          - show dhcpd statistics
+      register: dhcp_stats
+      # Error handling: Detects common Cisco CLI error strings to trigger failure.
+      failed_when:
+        - dhcp_stats.failed or "Invalid input" in dhcp_stats.stdout[0]
+
+    - name: Verify retrieval success
+      # Observability: Asserts that the command returned data, ensuring the output is valid for downstream processing.
+      ansible.builtin.assert:
+        that:
+          - dhcp_stats.stdout is defined
+          - dhcp_stats.stdout[0] | length > 0
+        fail_msg: "DHCP statistics retrieval failed or returned empty results. Verify DHCP is configured on the ASA."
+        success_msg: "DHCP statistics successfully captured."
+
+    - name: Display DHCP statistics
+      # Provides the operator with a clear, formatted view of the captured statistics.
+      ansible.builtin.debug:
+        msg: |
+          ======================= DHCP STATS =======================
+          {{ dhcp_stats.stdout[0] }}

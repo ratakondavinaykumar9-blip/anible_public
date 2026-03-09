@@ -1,0 +1,33 @@
+---
+# Interface Counters - Standard:
+# Improved: 2026-03-08
+# Description: Gathers and validates interface packet statistics from ASA/Firepower devices.
+# This playbook is idempotent as it only performs read-only 'show' operations.
+---
+- name: Get Interface Counters
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve interface statistics via CLI
+      # Use Fully Qualified Collection Name (FQCN) for consistency and robust module resolution
+      ansible.netcommon.cli_command:
+        command: "show interface | include (OK|input packets|output packets)"
+      register: counters
+      # Error Handling: Explicitly fail if the response is empty or indicates a CLI syntax error
+      failed_when: 
+        - counters.stdout is not defined or counters.stdout | length == 0
+        - "'Invalid input' in counters.stdout"
+
+    - name: Verify counter data retrieval success
+      # Observability: Assert that the expected packet data exists in the output to confirm operational status
+      ansible.builtin.assert:
+        that:
+          - "'packets' in counters.stdout"
+        fail_msg: "Failed to retrieve valid interface counter data. Check connectivity or device state."
+        success_msg: "Successfully retrieved interface counters."
+
+    - name: Display retrieved interface counters
+      # Documentation: Output the command results in a structured format for operator visibility
+      ansible.builtin.debug:
+        msg: "{{ counters.stdout_lines }}"

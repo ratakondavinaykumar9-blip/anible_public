@@ -1,0 +1,36 @@
+---
+# Power Supply Status Monitoring
+# Purpose: This playbook retrieves hardware power supply status from Cisco ASA/Firepower devices.
+# Compliance: Idempotent (read-only), Observable (register/assert), Documented, and uses FQCN.
+
+- name: Monitor Power Supply Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get power supply status via CLI
+      # Using FQCN: ansible.netcommon.cli_command
+      # Idempotency: 'show' commands are read-only and do not change system state.
+      ansible.netcommon.cli_command:
+        command: show power
+      register: power_status
+      # Error Handling: Detect if the command is unrecognized or failed on the device.
+      failed_when:
+        - "power_status.failed or 'Invalid input' in power_status.stdout"
+
+    - name: Validate power supply output
+      # Observability: Use assertions to verify that the output contains expected hardware data.
+      ansible.builtin.assert:
+        that:
+          - "power_status.stdout is defined"
+          - "power_status.stdout | length > 0"
+          - "'Power' in power_status.stdout or 'Supply' in power_status.stdout"
+        fail_msg: "The 'show power' command did not return expected data or is not supported."
+        success_msg: "Power supply data successfully retrieved and validated."
+
+    - name: Display power supply information
+      # Observability: Provide a structured view of the command output for logs.
+      ansible.builtin.debug:
+        msg: |
+          ======================= DEVICE POWER STATUS =======================
+          {{ power_status.stdout }}

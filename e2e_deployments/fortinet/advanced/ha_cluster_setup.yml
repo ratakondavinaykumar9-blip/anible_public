@@ -1,0 +1,29 @@
+---
+- name: Fortinet Advanced - High Availability Cluster Setup
+  hosts: fortigate
+  gather_facts: no
+  collections:
+    - fortinet.fortios
+  vars:
+    vdom: "root"
+
+  tasks:
+    - name: Configure HA Active-Passive settings
+      fortios_system_ha:
+        vdom: "{{ vdom }}"
+        system_ha:
+          mode: "a-p"
+          group_id: 10
+          group_name: "FGT_Enterprise_Cluster"
+          password: "HA_S3cure_Password!"
+          hbdev:
+            - name: "port7"
+              priority: 50
+            - name: "port8"
+              priority: 100
+          session_pickup: "enable"
+          override: "disable"
+          priority: 200  # Set higher on primary, lower on secondary
+          monitor:
+            - name: "port1"
+            - name: "port2"

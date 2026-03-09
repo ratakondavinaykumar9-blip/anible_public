@@ -1,0 +1,36 @@
+---
+# FortiGate VDOM List
+# Purpose: Retrieves and validates the list of Virtual Domains (VDOMs) on FortiGate devices.
+# Standards Applied: Idempotency (read-only), Observability (assert), Documentation, Error Handling, FQCN.
+
+- name: Get VDOM List
+  hosts: fortigate
+  gather_facts: no
+
+  tasks:
+    - name: Retrieve VDOM configuration via CLI
+      # Using FQCN for the netcommon collection to ensure cross-environment compatibility.
+      # This task is inherently idempotent as it performs a read-only 'get' operation.
+      ansible.netcommon.cli_command:
+        command: get system vdom
+      register: vdom_result
+      # Error Handling: Fail the task if the CLI returns an error status.
+      failed_when: vdom_result.failed
+
+    - name: Validate VDOM retrieval results
+      # Observability: Assert that the command returned valid data containing expected keywords.
+      # This prevents the playbook from succeeding silently if the output is empty or incorrect.
+      ansible.builtin.assert:
+        that:
+          - vdom_result.stdout is defined
+          - vdom_result.stdout | length > 0
+          - "'vdom' in vdom_result.stdout"
+        fail_msg: "CRITICAL: The command 'get system vdom' failed to return valid VDOM information."
+        success_msg: "SUCCESS: VDOM list retrieved and validated."
+
+    - name: Display VDOM List to Operator
+      # Documentation: Provide a formatted and readable output for administrative review.
+      ansible.builtin.debug:
+        msg: |
+          ======================= VDOMs =======================
+          {{ vdom_result.stdout }}

@@ -1,0 +1,37 @@
+---
+# Architect:Improved Playbook: ACL Logging Retrieval
+# Purpose: Safely retrieve and display ACL-specific log entries from Cisco ASA/Firepower devices.
+# Standards: Idempotency (read-only), Observability (asserts), Documentation (detailed comments), 
+# Error Handling (graceful failure management), and Best Practices (FQCN).
+- name: Get ACL Logs
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve ACL-specific log entries from the device buffer
+      # Using FQCN for consistent execution across different Ansible environments
+      ansible.netcommon.cli_command:
+        command: "show logging | include ACL"
+      register: acl_log
+      # Use failed_when to ensure we only fail on actual connection/execution errors, 
+      # not simply because the search returned no results.
+      failed_when: "acl_log.failed and 'command not found' in acl_log.msg"
+
+    - name: Validate that the log retrieval task responded correctly
+      # Observability: Confirm the command executed and returned a valid stdout structure
+      ansible.builtin.assert:
+        that:
+          - acl_log is defined
+          - acl_log.stdout is defined
+        fail_msg: "Data retrieval failed: The device did not return a valid response."
+        success_msg: "Log retrieval successful or confirmed empty buffer."
+        quiet: true
+
+    - name: Display formatted ACL logs to the console
+      # Documentation/Observability: Presenting logs in a readable format for the operator.
+      # Defaults to a message if no logs are found to avoid confusing empty output.
+      ansible.builtin.debug:
+        msg: |
+          ======================= ACL LOG ENTRIES =======================
+          {{ acl_log.stdout | default('No ACL log entries found in the current buffer.', true) }}
+      when: acl_log.stdout is defined

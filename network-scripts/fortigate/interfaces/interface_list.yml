@@ -1,0 +1,38 @@
+---
+# FortiGate Interface List - Production Optimized
+# Purpose: Retrieves and validates the current interface configuration from FortiGate devices.
+# Standards: Idempotency (Read-only), Observability, FQCN, and Robust Error Handling.
+- name: Get Interface List
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve interface status via CLI
+      # Using FQCN for network-common CLI module for long-term compatibility
+      ansible.netcommon.cli_command:
+        command: "get system interface"
+      register: intf_output
+      # Error Handling: Fail explicitly if the command is not recognized or returns an error
+      failed_when: 
+        - intf_output.failed
+        - "'command parse error' in intf_output.stdout"
+      ignore_errors: false
+
+    - name: Validate interface data integrity
+      # Observability: Assert that the output is defined and contains expected data
+      ansible.builtin.assert:
+        that:
+          - "intf_output.stdout is defined"
+          - "intf_output.stdout | length > 0"
+          - "'Interface' in intf_output.stdout"
+        fail_msg: "Failed to retrieve a valid interface list from the device."
+        success_msg: "Interface list successfully retrieved and validated."
+
+    - name: Display formatted interface information
+      # Documentation: Provides a structured view of the CLI output for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE INTERFACES =======================
+          {{ intf_output.stdout }}
+
+---

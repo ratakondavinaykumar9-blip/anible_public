@@ -1,0 +1,57 @@
+---
+- name: Cisco SDA Edge Node Configuration
+  hosts: sda_edge
+  gather_facts: false
+  connection: cisco.ios.network_cli
+
+  tasks:
+    - name: Gather initial device state
+      # FQCN: cisco.ios.ios_facts
+      # Purpose: Collects baseline facts to ensure the device is reachable and to support idempotency checks.
+      cisco.ios.ios_facts:
+        gather_subset:
+          - interfaces
+      register: initial_state
+
+    - name: Ensure SDA RLOC Loopback interface is configured
+      # Idempotency: Uses 'state: merged' to only apply changes if the current config differs.
+      # FQCN: cisco.ios.ios_l3_interfaces
+      cisco.ios.ios_l3_interfaces:
+        config:
+          - name: Loopback0
+            description: "SDA RLOC Loopback"
+            ipv4:
+              - address: 10.255.255.1/32
+        state: merged
+      register: loopback_config
+      # Error Handling: Explicitly fail if the module cannot reach the device or apply the change.
+      failed_when: loopback_config.failed | default(false)
+
+    - name: Verify Loopback configuration success
+      # Observability: Use assert to validate that the configuration is in the desired state.
+      ansible.builtin.assert:
+        that:
+          - loopback_config.failed == false
+        fail_msg: "SDA Loopback0 configuration failed to apply or verify."
+        success_msg: "SDA Loopback0 configuration is verified and idempotent."
+
+    - name: Configure Global LISP parameters for SDA
+      # FQCN: cisco.ios.ios_config
+      # Idempotency: 'match: line' ensures we do not duplicate commands in the running-config.
+      # Documentation: Router LISP is the control plane protocol for the SDA fabric.
+      cisco.ios.ios_config:
+        lines:
+          - instance-id 0
+          -   remote-rloc-probing
+          -   service ipv4
+        parents: router lisp
+        match: line
+      register: lisp_config
+
+    - name: Validate LISP configuration application
+      # Observability: Registering results and asserting success ensures the playbook stops on configuration errors.
+      ansible.builtin.assert:
+        that:
+          - lisp_config.failed == false
+        fail_msg: "SDA LISP configuration failed."
+        success_msg: "SDA LISP configuration successfully applied/verified."

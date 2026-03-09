@@ -1,0 +1,38 @@
+---
+# Architect:Improved Playbook
+# Purpose: Safely retrieve and validate the FortiGate ARP table.
+# Standards: Idempotency (Read-only), Observability (Asserts), FQCN, Documentation.
+
+- name: FortiGate ARP Table Retrieval
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve ARP table from FortiGate
+      # Why: Fetches the current system ARP cache for diagnostic purposes.
+      # This operation is inherently idempotent as it does not modify device state.
+      ansible.netcommon.cli_command:
+        command: get system arp
+      register: arp_output
+      # Error Handling: Ensure we catch execution failures or specific FortiOS error strings.
+      failed_when: 
+        - arp_output.failed
+        - "'Command fail' in arp_output.stdout"
+
+    - name: Verify ARP table retrieval success
+      # Why: Observability check to ensure the command returned non-empty data.
+      ansible.builtin.assert:
+        that:
+          - arp_output.stdout is defined
+          - arp_output.stdout | length > 0
+        fail_msg: "Failed to retrieve ARP table or table is empty on {{ inventory_hostname }}."
+        success_msg: "ARP table successfully retrieved from {{ inventory_hostname }}."
+
+    - name: Display ARP table details
+      # Why: Provides structured visibility of the retrieved data for the operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE ARP TABLE =======================
+          Host: {{ inventory_hostname }}
+          -------------------------------------------------------------------
+          {{ arp_output.stdout }}

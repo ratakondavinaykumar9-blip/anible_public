@@ -1,0 +1,46 @@
+---
+# FortiGate Packet Sniffer - Improved for Automation
+# Adheres to Standard:s: Idempotency, Observability, Documentation, Error Handling, FQCN
+
+- name: Packet Sniffer
+  hosts: fortigate
+  gather_facts: false
+  vars:
+    filter: "host 192.168.1.1"
+    count: 100
+    level: 4  # Verbosity level: 1 (basic headers) to 6 (full packet info)
+
+  tasks:
+    - name: PRE-CHECK | Validate sniffer input variables
+      # Observability: Ensure parameters are valid before connecting to the host
+      ansible.builtin.assert:
+        that:
+          - count | int > 0
+          - filter | length > 0
+        fail_msg: "Variable validation failed. Ensure 'count' is > 0 and 'filter' is defined."
+        quiet: true
+
+    - name: DIAGNOSE | Execute packet sniffer on FortiGate
+      # FQCN: Using ansible.netcommon.cli_command for device-agnostic CLI interaction
+      # Idempotency: Diagnostic commands are read-only and do not change device state
+      ansible.netcommon.cli_command:
+        command: "diagnose sniffer packet any '{{ filter }}' {{ level }} {{ count }}"
+      register: sniffer_raw
+      # Error Handling: Explicitly fail if the command returns a FortiOS syntax or execution error
+      failed_when:
+        - sniffer_raw.failed or "Command fail" in sniffer_raw.stdout
+        - "'syntax error' in sniffer_raw.stdout.lower()"
+
+    - name: VERIFY | Confirm data capture success
+      # Observability: Verify that the sniffer actually caught packets matching the filter
+      ansible.builtin.assert:
+        that:
+          - sniffer_raw.stdout is defined
+          - "'0 packets received' not in sniffer_raw.stdout"
+        fail_msg: "Sniffer command completed but no packets were captured for filter: {{ filter }}"
+        quiet: true
+
+    - name: POST-PROCESS | Display captured packet data
+      ansible.builtin.debug:
+        msg: |
+          ======================= SNIFFER DATA =

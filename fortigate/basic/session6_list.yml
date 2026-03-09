@@ -1,0 +1,36 @@
+---
+# FortiGate IPv6 Session Monitoring
+# Improved by: Architect:# Standards: Idempotency, Observability, FQCN, Robust Error Handling
+#
+- name: FortiGate IPv6 Sessions
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPv6 session list via CLI
+      # This operation is read-only and thus inherently idempotent.
+      # changed_when: false ensures the task report reflects its non-mutating nature.
+      ansible.netcommon.cli_command:
+        command: get system session6 list
+      register: sess_result
+      changed_when: false
+      failed_when:
+        - sess_result.failed or "Command fail" in sess_result.stdout
+        - "'Unknown' in sess_result.stdout"
+
+    - name: Verify session retrieval success
+      # Observability: Assert that we actually received a valid response from the device.
+      ansible.builtin.assert:
+        that:
+          - sess_result.stdout is defined
+          - sess_result.stdout | length > 0
+        fail_msg: "The FortiGate did not return any session data or the command failed."
+        quiet: true
+
+    - name: Display IPv6 Sessions
+      # Documentation: Visual confirmation of the current state for audit trails.
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPv6 SESSIONS =======================
+          {{ sess_result.stdout }}
+      when: not ansible_check_mode

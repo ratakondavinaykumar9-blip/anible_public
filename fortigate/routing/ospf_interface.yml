@@ -1,0 +1,38 @@
+---
+# FortiGate OSPF Interface Retrieval
+# This playbook retrieves and validates OSPF interface information from FortiGate devices.
+# Adheres to standards for idempotency, observability, and robust error handling.
+
+- name: Get OSPF Interface
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve OSPF interface status from device
+      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction.
+      ansible.netcommon.cli_command:
+        command: get router info ospf interface
+      register: ospf_interface_result
+      # Idempotency: Retrieval tasks must set changed_when to false as they do not modify state.
+      changed_when: false
+      # Error Handling: Ensure the task fails if the command is unrecognized or execution fails.
+      failed_when: >
+        ospf_interface_result.failed or
+        "command parse error" in ospf_interface_result.stdout | lower or
+        "unknown command" in ospf_interface_result.stdout | lower
+
+    - name: Validate OSPF data capture
+      # Observability: Assert that the command returned non-empty output to verify success.
+      ansible.builtin.assert:
+        that:
+          - ospf_interface_result.stdout is defined
+          - ospf_interface_result.stdout | length > 0
+        fail_msg: "OSPF interface information could not be retrieved or the output is empty."
+        success_msg: "OSPF interface data successfully captured."
+
+    - name: Display OSPF Interface Report
+      # Documentation: Provides a formatted view of the operational data for auditing.
+      ansible.builtin.debug:
+        msg: |
+          ======================= OSPF INTERFACE =======================
+          {{ ospf_interface_result.stdout }}

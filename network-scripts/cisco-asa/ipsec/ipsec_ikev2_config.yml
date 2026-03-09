@@ -1,0 +1,53 @@
+---
+# IKEv2 and IPsec Profile Configuration Retrieval
+# Standards: Idempotent, Observable, Documented, Error-Resilient, FQCN
+- name: Get IKEv2 and IPsec Configuration
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get IKEv2 profile configuration
+      # Using FQCN for Cisco ASA specific command module
+      cisco.asa.asa_command:
+        commands:
+          - show running-config crypto ikev2
+      register: ikev2_output
+      # Error Handling: Fail if the command returns a Cisco-specific error string
+      failed_when: 
+        - '"Invalid input" in ikev2_output.stdout[0]'
+        - '"ERROR" in ikev2_output.stdout[0]'
+
+    - name: Verify IKEv2 configuration retrieval
+      # Observability: Ensure the command returned data
+      ansible.builtin.assert:
+        that:
+          - ikev2_output.stdout is defined
+          - ikev2_output.stdout | length > 0
+        fail_msg: "Failed to retrieve IKEv2 configuration or output is empty."
+        success_msg: "Successfully retrieved IKEv2 configuration."
+
+    - name: Get crypto ipsec profile configuration
+      cisco.asa.asa_command:
+        commands:
+          - show running-config crypto ipsec profile
+      register: ipsec_profile_output
+      failed_when: 
+        - '"Invalid input" in ipsec_profile_output.stdout[0]'
+        - '"ERROR" in ipsec_profile_output.stdout[0]'
+
+    - name: Verify IPsec profile retrieval
+      ansible.builtin.assert:
+        that:
+          - ipsec_profile_output.stdout is defined
+        fail_msg: "Failed to retrieve IPsec profile configuration."
+        success_msg: "Successfully retrieved IPsec profile configuration."
+
+    - name: Display Security Configuration Summary
+      # Documentation: Providing a structured view of the gathered state
+      ansible.builtin.debug:
+        msg:
+          - "======================= IKEv2 CONFIG ======================="
+          - "{{ ikev2_output.stdout[0] }}"
+          - "======================= IPSEC PROFILE ======================"
+          - "{{ ipsec_profile_output.stdout[0] }}"
+...

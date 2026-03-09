@@ -1,0 +1,53 @@
+---
+# FortiGate Packet Sniffer Diagnostic Playbook
+# Standards: Idempotency (read-only diagnostic), Observability, Documentation, Error Handling, FQCN
+- name: FortiGate Packet Sniffer
+  hosts: fortigate
+  gather_facts: false
+  vars:
+    # Filter syntax: 'host 1.1.1.1 and port 80' (tcpdump format)
+    sniffer_filter: "host 192.168.1.1"
+    # Number of packets to capture
+    sniffer_count: 100
+    # Capture interface (any, port1, etc.)
+    sniffer_interface: "any"
+    # Verbosity level (1-6)
+    sniffer_level: 4
+
+  tasks:
+    - name: Validate diagnostic parameters
+      ansible.builtin.assert:
+        that:
+          - sniffer_count | int > 0
+          - sniffer_filter | length > 0
+        fail_msg: "Invalid parameters: sniffer_count must be positive and sniffer_filter is required."
+        success_msg: "Diagnostic parameters validated."
+
+    - name: Execute diagnostic packet sniffer
+      # Diagnostic commands are read-only and safe to run multiple times (idempotent behavior)
+      ansible.netcommon.cli_command:
+        command: "diagnose sniffer packet {{ sniffer_interface }} '{{ sniffer_filter }}' {{ sniffer_level }} {{ sniffer_count }}"
+      register: sniffer_result
+      # Error handling: Catch common CLI execution errors
+      failed_when: 
+        - sniffer_result.failed | default(false)
+        - "'Command fail' in sniffer_result.stdout or 'Unknown action' in sniffer_result.stdout"
+
+    - name: Verify capture results
+      # Observability: Ensure we actually received data back from the device
+      ansible.builtin.assert:
+        that:
+          - sniffer_result.stdout is defined
+          - sniffer_result.stdout | length > 0
+        fail_msg: "Sniffer returned empty output. Verify filter syntax and traffic flow."
+        success_msg: "Packet capture data retrieved successfully."
+
+    - name: Display packet sniffer output
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE SNIFFER TRACE =======================
+          Interface: {{ sniffer_interface }}
+          Filter:    {{ sniffer_filter }}
+          Count:     {{ sniffer_count }}
+          =======================================================================
+          {{ sniffer_result.stdout }}

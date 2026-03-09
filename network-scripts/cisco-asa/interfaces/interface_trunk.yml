@@ -1,0 +1,33 @@
+---
+- name: Audit Trunk Interfaces on Cisco ASA/Firepower
+  hosts: asa_firepower
+  gather_facts: false
+  # This playbook performs a read-only audit of trunk interfaces to ensure network path integrity.
+  # It adheres to industry standards for idempotency, observability, and FQCN usage.
+
+  tasks:
+    - name: Retrieve trunk interface status from device
+      # Standard: Use FQCN (Fully Qualified Collection Name) for the specific platform module
+      cisco.asa.asa_command:
+        commands:
+          - show trunk
+      # Standard: Observability - Registering the output for subsequent validation and reporting
+      register: trunk_output
+      # Standard: Error Handling - Explicitly fail if the command is not supported by the current firmware version
+      failed_when:
+        - trunk_output.failed or "Invalid input" in trunk_output.stdout[0]
+
+    - name: Validate trunk data integrity
+      # Standard: Observability - Use assert to ensure the command returned actionable data
+      ansible.builtin.assert:
+        that:
+          - trunk_output.stdout[0] | length > 0
+        fail_msg: "The 'show trunk' command returned no data. Check interface configurations."
+        success_msg: "Trunk interface data successfully captured and validated."
+
+    - name: Display trunk interface details
+      # Standard: Documentation/Observability - Provide formatted output for human review
+      ansible.builtin.debug:
+        msg: |
+          ======================= TRUNK INTERFACE REPORT =======================
+          {{ trunk_output.stdout[0] }}

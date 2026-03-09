@@ -1,0 +1,180 @@
+---
+- name: Deploy Route-Based IPsec VPN with BGP on FortiGate
+  hosts: fortigates
+  connection: httpapi
+  gather_facts: false
+  vars:
+    # VDOM context (default is root). VDOMs provide logical separation within a physical FortiGate.
+    vdom: "root"
+    
+    # Phase 1 Parameters: Defines the IKE negotiation settings.
+    vpn_p1_name: "VPN_TO_REMOTE_SITE"
+    wan_interface: "wan1"
+    remote_gateway: ""
+    pre_shared_key: ""
+    ike_version: "2"
+    p1_proposal: "aes256-sha256"
+    
+    # Phase 2 Parameters: Defines the IPsec security association (SA) settings.
+    vpn_p2_name: "VPN_TO_REMOTE_SITE_P2"
+    p2_proposal: "aes256-sha256"
+    
+    # Tunnel Interface IP Configuration: Point-to-point addressing for the VTI.
+    # Format: "ip mask"
+    tunnel_local_ip: "169.254.100.1 255.255.255.252"
+    tunnel_remote_ip: "169.254.100.2 255.255.255.252"
+    
+    # BGP Configuration: Dynamic routing over the tunnel for high availability and scalability.
+    local_as: 65000
+    remote_as: 65001
+    neighbor_ip: "169.254.100.2"
+    
+    # Security Policy Parameters: Controls traffic flow between internal networks and the VPN tunnel.
+    internal_interface: "port1"
+    source_address: "all"
+    destination_address: "all"
+
+  tasks:
+    - name: VPN and BGP Deployment Orchestration
+      block:
+        - name: VPN Phase 1 - Create Virtual Tunnel Interface (VTI)
+          # Idempotency: 'state: present' ensures the interface is only created if it doesn't exist.
+          fortinet.fortios.fortios_vpn_ipsec_phase1_interface:
+            vdom: "{{ vdom }}"
+            state: "present"
+            vpn_ipsec_phase1_interface:
+              name: "{{ vpn_p1_name }}"
+              interface: "{{ wan_interface }}"
+              remote_gw: "{{ remote_gateway }}"
+              psksecret: "{{ pre_shared_key }}"
+              ikevers: "{{ ike_version }}"
+              proposal: "{{ p1_proposal }}"
+              # BGP handles routing; disable 'add_route' to prevent static route conflicts.
+              add_route: "disable"
+              keylife: 28800
+              dpd: "on-idle"
+          register: p1_config
+
+        - name: Verify VPN Phase 1 Configuration Success
+          # Observability: Immediate verification of module execution.
+          ansible.builtin.assert:
+            that:
+              - p1_config is success
+            fail_msg: "Failed to configure VPN Phase 1 Interface: {{ vpn_p1_name }}"
+
+        - name: VPN Phase 2 - Link to Phase 1 Interface
+          # Defines encryption/hashing for the actual data tunnel.
+          fortinet.fortios.fortios_vpn_ipsec_phase2_interface:
+            vdom: "{{ vdom }}"
+            state: "present"
+            vpn_ipsec_phase2_interface:
+              name: "{{ vpn_p2_name }}"
+              p1name: "{{ vpn_p1_name }}"
+              proposal: "{{ p2_proposal }}"
+              keylifeseconds: 3600
+              pfs: "enable"
+          register: p2_config
+
+        - name: Verify VPN Phase 2 Configuration Success
+          ansible.builtin.assert:
+            that:
+              - p2_config is success
+            fail_msg: "Failed to configure VPN Phase 2 Interface: {{ vpn_p2_name }}"
+
+        - name: Interface - Assign IP and Remote-IP for BGP Peering
+          # Remote-IP is mandatory on FortiGate VTIs for BGP to establish correctly.
+          fortinet.fortios.fortios_system_interface:
+            vdom: "{{ vdom }}"
+            state: "present"
+            system_interface:
+              name: "{{ vpn_p1_name }}"
+              ip: "{{ tunnel_local_ip }}"
+              remote_ip: "{{ tunnel_remote_ip }}"
+              allowaccess: "ping"
+          register: intf_config
+
+        - name: Verify Interface IP Assignment
+          ansible.builtin.assert:
+            that:
+              - intf_config is success
+            fail_msg: "Failed to assign IP to tunnel interface: {{ vpn_p1_name }}"
+
+        - name: Router BGP - Configure Local Process and Neighbor
+          # router_id derived from the local tunnel IP for process identification.
+          fortinet.fortios.fortios_router_bgp:
+            vdom: "{{ vdom }}"
+            state: "present"
+            router_bgp:
+              as: "{{ local_as }}"
+              router_id: "{{ tunnel_local_ip.split(' ')[0] }}"
+              neighbor:
+                - ip: "{{ neighbor_ip }}"
+                  remote_as: "{{ remote_as }}"
+                  interface: "{{ vpn_p1_name }}"
+                  # High availability features: GR and Soft-Reconfig.
+                  capability_graceful_restart: "enable"
+                  soft_reconfiguration: "enable"
+          register: bgp_config
+
+        - name: Verify BGP Neighbor Configuration
+          ansible.builtin.assert:
+            that:
+              - bgp_config is success
+            fail_msg: "Failed to configure BGP process or neighbor: {{ neighbor_ip }}"
+
+        - name: Policy - Outbound Traffic (Internal to Tunnel)
+          # Permits traffic originating from the local network to enter the VPN.
+          fortinet.fortios.fortios_firewall_policy:
+            vdom: "{{ vdom }}"
+            state: "present"
+            firewall_policy:
+              name: "OUT_{{ vpn_p1_name }}"
+              srcintf: [{ name: "{{ internal_interface }}" }]
+              dstintf: [{ name: "{{ vpn_p1_name }}" }]
+              srcaddr: [{ name: "{{ source_address }}" }]
+              dstaddr: [{ name: "{{ destination_address }}" }]
+              action: "accept"
+              schedule: "always"
+              service: [{ name: "ALL" }]
+          register: policy_out
+
+        - name: Policy - Inbound Traffic (Tunnel to Internal)
+          # Permits traffic exiting the VPN to enter the local network.
+          fortinet.fortios.fortios_firewall_policy:
+            vdom: "{{ vdom }}"
+            state: "present"
+            firewall_policy:
+              name: "IN_{{ vpn_p1_name }}"
+              srcintf: [{ name: "{{ vpn_p1_name }}" }]
+              dstintf: [{ name: "{{ internal_interface }}" }]
+              srcaddr: [{ name: "{{ source_address }}" }]
+              dstaddr: [{ name: "{{ destination_address }}" }]
+              action: "accept"
+              schedule: "always"
+              service: [{ name: "ALL" }]
+          register: policy_in
+
+        - name: Verify Firewall Policies
+          ansible.builtin.assert:
+            that:
+              - policy_out is success
+              - policy_in is success
+            fail_msg: "Security policy provisioning failed for {{ vpn_p1_name }}"
+
+      rescue:
+        - name: Error Reporting - Config Rollback Notification
+          # Error Handling: Provide context-rich failure messages for faster MTTR.
+          ansible.builtin.fail:
+            msg: |
+              CRITICAL FAILURE in FortiGate VPN/BGP provisioning.
+              Troubleshooting Steps:
+              1. Verify WAN interface '{{ wan_interface }}' reachability.
+              2. Validate PSK alignment with remote peer.
+              3. Check for BGP neighbor '{{ neighbor_ip }}' adjacency status.
+              Details: {{ ansible_failed_result }}
+
+      always:
+        - name: Verification - Final Status Log
+          # Observability: Ensures a summary is always produced for logging.
+          ansible.builtin.debug:
+            msg: "Deployment sequence for {{ vpn_p1_name }} finalized. Run 'get vpn tunnel list' on CLI to verify state."

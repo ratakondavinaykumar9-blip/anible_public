@@ -1,0 +1,103 @@
+---
+# ==============================================================================
+# Playbook: Configure Nexus 9000 Hostname
+# ==============================================================================
+# Author: Network Automation Framework (OpenClaw)
+# Version: 1.2.0
+# Last Updated: 2026-03-08
+# Description: Configure hostname on Cisco Nexus 9000 switches with idempotency,
+#              validation, and comprehensive observability.
+#
+# Platforms: Cisco Nexus 9000 series (N9K-C9300, N9K-C9500, N9K-C9800)
+# Requirements: cisco.nxos collection
+# ==============================================================================
+
+- name: Configure Switch Hostname
+  hosts: nexus9k
+  gather_facts: false
+  connection: network_cli
+
+  vars:
+    # Default to inventory_hostname if not provided via extra vars
+    expected_hostname: "{{ inventory_hostname }}"
+
+  tasks:
+    - name: Validate hostname format (Compliance check)
+      ansible.builtin.assert:
+        that:
+          - expected_hostname | length <= 63
+          - expected_hostname is match('^[a-zA-Z][a-zA-Z0-9\-\.]*$')
+        fail_msg: |
+          Invalid hostname '{{ expected_hostname }}'.
+          Rules: Must start with letter, contain only alphanumeric, hyphens, or dots. Max 63 chars.
+        success_msg: "Hostname '{{ expected_hostname }}' passed format validation."
+      changed_when: false
+
+    - name: Retrieve current device state
+      cisco.nxos.nxos_command:
+        commands:
+          - show hostname
+      register: current_hostname_output
+      changed_when: false
+      failed_when:
+        - current_hostname_output.failed
+        - current_hostname_output.stdout is not defined
+
+    - name: Parse current hostname for idempotency check
+      ansible.builtin.set_fact:
+        actual_hostname: "{{ (current_hostname_output.stdout[0] | regex_search('Hostname:\\s+(\\S+)', '\\1') | first) if 'Hostname:' in current_hostname_output.stdout[0] else current_hostname_output.stdout[0] | trim }}"
+
+    - name: Manage hostname configuration workflow
+      block:
+        - name: Apply hostname configuration
+          cisco.nxos.nxos_config:
+            lines:
+              - "hostname {{ expected_hostname }}"
+          # Idempotency: Only attempt change if current state differs from target
+          when: actual_hostname != expected_hostname
+          register: hostname_change
+          notify: Save configuration
+
+        - name: Post-change verification
+          cisco.nxos.nxos_command:
+            commands:
+              - show hostname
+          register: verify_hostname_output
+          when: hostname_change.changed | default(false)
+          changed_when: false
+
+        - name: Assert configuration accuracy
+          ansible.builtin.assert:
+            that:
+              - expected_hostname in verify_hostname_output.stdout[0]
+            fail_msg: "Verification failed! Device reports: {{ verify_hostname_output.stdout[0] }}"
+            success_msg: "Hostname successfully updated and verified: {{ expected_hostname }}"
+          when: hostname_change.changed | default(false)
+
+      rescue:
+        - name: Log configuration failure
+          ansible.builtin.debug:
+            msg: |
+              CRITICAL ERROR: Hostname update failed on {{ inventory_hostname }}.
+              Requested: {{ expected_hostname }}
+              Current: {{ actual_hostname | default('Unknown') }}
+              Error Detail: {{ ansible_failed_result.msg | default('Unknown execution error') }}
+
+        - name: Attempt emergency rollback
+          cisco.nxos.nxos_config:
+            lines:
+              - "hostname {{ actual_hostname }}"
+          when: actual_hostname is defined
+          ignore_errors: true
+
+        - name: Terminate playbook with failure
+          ansible.builtin.fail:
+            msg: "Playbook execution halted due to configuration failure. Rollback attempted."
+
+  handlers:
+    - name: Save configuration
+      cisco.nxos.nxos_config:
+        save: true
+      # Using async to prevent timeout during write-memory operations on busy control planes
+      async: 60
+      poll: 5

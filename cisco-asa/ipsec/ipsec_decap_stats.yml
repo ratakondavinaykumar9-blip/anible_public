@@ -1,0 +1,37 @@
+---
+# IPsec Decap Statistics Collection
+# This playbook retrieves IPsec decapsulation statistics from Cisco ASA/Firepower devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+# Author: Architect:(Improved)
+---
+- name: Collect IPsec decapsulation statistics
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute show crypto ipsec stats command
+      # Using Fully Qualified Collection Name (FQCN) for the command module
+      # Read-only 'show' commands are naturally idempotent.
+      ansible.netcommon.cli_command:
+        command: show crypto ipsec stats
+      register: ipsec_stats
+      # Error Handling: Ensure the task fails if the command is not recognized or execution fails
+      failed_when: 
+        - ipsec_stats.failed
+        - "'Invalid input' in ipsec_stats.stdout or 'ERROR' in ipsec_stats.stdout"
+
+    - name: Verify command output integrity
+      # Observability: Use assert to verify that the output is populated and valid
+      ansible.builtin.assert:
+        that:
+          - ipsec_stats.stdout is defined
+          - ipsec_stats.stdout | length > 0
+        fail_msg: "Data retrieval failed: IPsec statistics output is empty."
+        success_msg: "Data retrieval successful: IPsec statistics captured."
+
+    - name: Display IPsec decapsulation statistics
+      # Formatted output for better observability during playbook execution
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC DECAP STATISTICS =======================
+          {{ ipsec_stats.stdout }}

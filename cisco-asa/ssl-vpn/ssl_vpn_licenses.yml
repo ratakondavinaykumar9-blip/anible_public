@@ -1,0 +1,36 @@
+---
+# SSL VPN License Retrieval and Validation
+# This playbook retrieves SSL VPN license status from Cisco ASA/Firepower devices.
+# It is designed to be idempotent (read-only) and provides verification of the data received.
+
+- name: SSL VPN Licenses Status Check
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve SSL VPN license information
+      # Why: Fetching live license data to audit VPN capacity and status.
+      # Uses FQCN for consistent behavior across different environments.
+      ansible.netcommon.cli_command:
+        command: show sslvpn-license
+      register: license_output
+      # Error Handling: Fail if the command is unrecognized or execution fails.
+      failed_when: 
+        - license_output.failed or "Invalid input" in license_output.stdout
+
+    - name: Verify license data capture
+      # Observability: Validating that we received a non-empty response.
+      # Why: Ensures the device is responding with meaningful data and prevents silent failures.
+      ansible.builtin.assert:
+        that:
+          - license_output.stdout is defined
+          - license_output.stdout | length > 0
+        fail_msg: "Failed to retrieve valid license data from {{ inventory_hostname }}"
+        quiet: true
+
+    - name: Display license report
+      # Why: Provides visual confirmation of license status for audit logs and immediate operator feedback.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SSL VPN LICENSE: {{ inventory_hostname }} =======================
+          {{ license_output.stdout }}

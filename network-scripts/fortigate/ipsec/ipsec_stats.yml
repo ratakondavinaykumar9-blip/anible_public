@@ -1,0 +1,35 @@
+---
+# FortiGate IPSec Statistics Retrieval and Validation
+# This playbook retrieves real-time IPSec VPN statistics for monitoring purposes.
+- name: Get IPSec Stats
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPSec statistics via CLI
+      # Best Practice: Using FQCN for network command execution
+      # Idempotency: Read-only 'get' commands do not modify state and are safe for repeated execution
+      ansible.netcommon.cli_command:
+        command: get vpn ipsec stats
+      register: stats_output
+      # Error Handling: Catch cases where the command is not recognized or fails on the device
+      failed_when:
+        - stats_output.stdout is not defined
+        - "'Unknown command' in stats_output.stdout"
+        - "'Command fail' in stats_output.stdout"
+
+    - name: Validate IPSec statistics data
+      # Observability: Assert that the command returned content to ensure the data is actionable
+      ansible.builtin.assert:
+        that:
+          - stats_output.stdout | length > 0
+          - "'IPsec' in stats_output.stdout"
+        fail_msg: "IPSec statistics retrieval returned empty or invalid data."
+        success_msg: "IPSec statistics successfully validated."
+
+    - name: Display IPSec Statistics
+      # Observability: Provide clear visibility into the command output for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC STATS =======================
+          {{ stats_output.stdout }}

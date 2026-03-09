@@ -1,0 +1,3 @@
+# Ansible Collections Requirements
+ansible.netcommon>=6.0.0
+cisco.asa>=4.0.0

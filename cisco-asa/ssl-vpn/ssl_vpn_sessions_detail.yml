@@ -1,0 +1,35 @@
+---
+# SSL VPN Sessions Detail
+# Improved: 2026-03-08
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
+- name: SSL VPN Sessions Detail
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve detailed SSL VPN session information
+      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interaction.
+      # Why: This command gathers comprehensive details on active SSL VPN sessions for operational visibility.
+      ansible.netcommon.cli_command:
+        command: show vpn-sessiondb detail ssl
+      register: ssl_vpn_data
+      # Error Handling: Ensures the playbook fails on syntax or connection errors, while allowing for empty results.
+      failed_when:
+        - ssl_vpn_data.failed
+        - "'Invalid input' in ssl_vpn_data.stdout"
+
+    - name: Validate data retrieval success
+      # Observability: Verifies that the command returned a valid response structure from the device.
+      ansible.builtin.assert:
+        that:
+          - "ssl_vpn_data.stdout is defined"
+        fail_msg: "Could not retrieve session data from {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display SSL VPN sessions
+      # Visibility: Outputs the session details to the console for real-time monitoring and logging.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SSL VPN SESSIONS =======================
+          {{ ssl_vpn_data.stdout | default('No sessions found or command returned no data.') }}

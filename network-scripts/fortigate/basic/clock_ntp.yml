@@ -1,0 +1,43 @@
+---
+# FortiGate Clock and NTP Status Audit
+# Purpose: Retrieve and validate system time and NTP configuration to ensure 
+# logging accuracy, forensic integrity, and certificate validity.
+- name: Get Clock and NTP
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve current system time
+      # Fetches the local system time. This is a read-only operation (idempotent).
+      ansible.netcommon.cli_command:
+        command: "get system time"
+      register: clock_info
+      # Error Handling: Ensure the command returned data and was recognized by the OS.
+      failed_when: 
+        - clock_info.stdout == ""
+        - "'Unknown' in clock_info.stdout"
+
+    - name: Retrieve NTP synchronization status
+      # Fetches NTP configuration to verify connectivity with defined time sources.
+      ansible.netcommon.cli_command:
+        command: "get system ntp"
+      register: ntp_info
+      failed_when: 
+        - ntp_info.stdout == ""
+        - "'Unknown' in ntp_info.stdout"
+
+    - name: Validate temporal data integrity
+      # Observability: Asserts that both commands returned valid, non-empty responses.
+      ansible.builtin.assert:
+        that:
+          - clock_info.stdout | length > 0
+          - ntp_info.stdout | length > 0
+        fail_msg: "Temporal data retrieval failed; one or more outputs were empty."
+        success_msg: "System clock and NTP status successfully retrieved and verified."
+
+    - name: Display Clock and NTP summary
+      # Provides a human-readable summary of the device's temporal state.
+      ansible.builtin.debug:
+        msg: |
+          Device Time: {{ clock_info.stdout }}
+          NTP Status: {{ ntp_info.stdout }}

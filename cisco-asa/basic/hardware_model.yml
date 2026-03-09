@@ -1,0 +1,34 @@
+---
+# Hardware Model Info - Enhanced for Production
+# Improved: 2026-03-08
+# Role: Architect:#
+# Standards: Idempotency (Read-only), Observability (Assert), FQCN, Error Handling.
+---
+- name: Get Hardware Model Info
+  hosts: asa_firepower
+  gather_facts: false # Facts are not required for this read-only command operation
+
+  tasks:
+    - name: Fetch hardware model information from the device
+      # Using FQCN for cross-platform compatibility and clarity.
+      # This task is idempotent as it performs a read-only 'show' operation.
+      ansible.netcommon.cli_command:
+        command: "show version | include (Hardware|Model)"
+      register: model_output
+      # Error Handling: Mark as failed if the command execution fails or returns an empty string.
+      failed_when: 
+        - model_output.failed or (model_output.stdout | length == 0)
+
+    - name: Validate that hardware information was successfully captured
+      # Observability: Assert ensures that subsequent tasks rely on valid, non-empty data.
+      ansible.builtin.assert:
+        that:
+          - "model_output.stdout is defined"
+          - "model_output.stdout | length > 0"
+        fail_msg: "Failed to retrieve hardware model information from {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved hardware model info for {{ inventory_hostname }}."
+
+    - name: Display the retrieved hardware model
+      # Observability: Provide the operator with the specific results registered in the previous task.
+      ansible.builtin.debug:
+        msg: "Hardware Model: {{ model_output.stdout }}"

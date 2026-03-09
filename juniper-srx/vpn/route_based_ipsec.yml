@@ -1,0 +1,224 @@
+---
+- name: Deploy Route-Based IPsec VPN on Juniper SRX
+  hosts: juniper_srx
+  gather_facts: false
+  connection: junipernetworks.junos.remote
+  vars:
+    # --- Peer Connectivity ---
+    vpn_peer_name: "REMOTE_BRANCH_01"
+    vpn_remote_gateway_ip: ""
+    vpn_external_interface: "ge-0/0/0.0"
+    vpn_preshared_key: "CHANGE_ME_VIA_VAULT" # Use Ansible Vault in production
+    
+    # --- Tunnel Interface Configuration ---
+    vpn_st0_unit: 0
+    vpn_st0_ip: "" # e.g., 10.255.255.1/30
+    vpn_st0_zone: "vpn"
+    vpn_tcp_mss: 1350
+    
+    # --- Routing & Policies ---
+    vpn_remote_subnets: [] # List of CIDRs, e.g., ["192.168.10.0/24"]
+    vpn_local_zone: "trust"
+    
+    # --- IKE Phase 1 (Gateway) ---
+    ike_version: "v2"
+    ike_proposal_name: "PRO_IKE_PH1"
+    ike_policy_name: "POL_IKE_PH1"
+    ike_gateway_name: "GW_IPSEC_PEER"
+    ike_dh_group: "group14"
+    ike_encryption: "aes-256-cbc"
+    ike_authentication: "sha-256"
+    ike_lifetime: 28800
+    
+    # --- IPsec Phase 2 (VPN) ---
+    ipsec_proposal_name: "PRO_IPSEC_PH2"
+    ipsec_policy_name: "POL_IPSEC_PH2"
+    ipsec_vpn_name: "VPN_TUNNEL_ST0"
+    ipsec_encryption: "aes-256-gcm"
+    ipsec_authentication: "hmac-sha-256-128"
+    ipsec_perfect_forward_secrecy: "group14"
+    ipsec_lifetime: 3600
+
+  tasks:
+    - name: VPN Deployment Block
+      block:
+        # 1. Resource Module: Define the st0 logical interface
+        # Why: st0 is the virtual tunnel interface required for route-based VPNs in Junos.
+        - name: Configure st0 logical tunnel interface
+          junipernetworks.junos.junos_interfaces:
+            config:
+              - name: "st0"
+                description: "IPsec Tunnel to {{ vpn_peer_name }}"
+                units:
+                  - name: "{{ vpn_st0_unit }}"
+                    description: "VPN Tunnel Unit {{ vpn_st0_unit }}"
+            state: merged
+          register: res_st0_int
+
+        - name: Assert st0 interface configuration success
+          ansible.builtin.assert:
+            that:
+              - res_st0_int.failed == false
+            quiet: true
+
+        # 2. Resource Module: Assign IP address to the st0 unit
+        # Why: Provides the tunnel endpoint an identity for routing and reachability.
+        - name: Configure IPv4 on st0 interface
+          junipernetworks.junos.junos_l3_interfaces:
+            config:
+              - name: "st0.{{ vpn_st0_unit }}"
+                ipv4:
+                  - address: "{{ vpn_st0_ip }}"
+            state: merged
+          register: res_st0_ip
+
+        - name: Assert st0 IP configuration success
+          ansible.builtin.assert:
+            that:
+              - res_st0_ip.failed == false
+            quiet: true
+
+        # 3. Resource Module: Map st0 to the security zone
+        # Why: Junos is a flow-based firewall; interfaces must be in zones to process traffic.
+        - name: Assign st0 unit to security zone
+          junipernetworks.junos.junos_security_zones:
+            config:
+              - name: "{{ vpn_st0_zone }}"
+                interfaces:
+                  - name: "st0.{{ vpn_st0_unit }}"
+                    host_inbound_traffic:
+                      protocols:
+                        - all
+                      services:
+                        - all
+            state: merged
+          register: res_st0_zone
+
+        - name: Assert security zone assignment success
+          ansible.builtin.assert:
+            that:
+              - res_st0_zone.failed == false
+            quiet: true
+
+        # 4. Config Module: IKE and IPsec Engine Configuration
+        # Why: Defines the cryptographic parameters and gateway binding for the encrypted tunnel.
+        - name: Configure IKE and IPsec Proposals/Policies/Gateways
+          junipernetworks.junos.junos_config:
+            update: merge
+            lines:
+              # IKE Phase 1 Proposal
+              - "set security ike proposal {{ ike_proposal_name }} authentication-method pre-shared-keys"
+              - "set security ike proposal {{ ike_proposal_name }} dh-group {{ ike_dh_group }}"
+              - "set security ike proposal {{ ike_proposal_name }} authentication-algorithm {{ ike_authentication }}"
+              - "set security ike proposal {{ ike_proposal_name }} encryption-algorithm {{ ike_encryption }}"
+              - "set security ike proposal {{ ike_proposal_name }} lifetime-seconds {{ ike_lifetime }}"
+              # IKE Phase 1 Policy
+              - "set security ike policy {{ ike_policy_name }} proposals {{ ike_proposal_name }}"
+              - "set security ike policy {{ ike_policy_name }} pre-shared-key ascii-text {{ vpn_preshared_key }}"
+              # IKE Phase 1 Gateway
+              - "set security ike gateway {{ ike_gateway_name }} ike-policy {{ ike_policy_name }}"
+              - "set security ike gateway {{ ike_gateway_name }} address {{ vpn_remote_gateway_ip }}"
+              - "set security ike gateway {{ ike_gateway_name }} external-interface {{ vpn_external_interface }}"
+              - "set security ike gateway {{ ike_gateway_name }} version {{ ike_version }}"
+              # IPsec Phase 2 Proposal
+              - "set security ipsec proposal {{ ipsec_proposal_name }} protocol esp"
+              - "set security ipsec proposal {{ ipsec_proposal_name }} authentication-algorithm {{ ipsec_authentication }}"
+              - "set security ipsec proposal {{ ipsec_proposal_name }} encryption-algorithm {{ ipsec_encryption }}"
+              - "set security ipsec proposal {{ ipsec_proposal_name }} lifetime-seconds {{ ipsec_lifetime }}"
+              # IPsec Phase 2 Policy
+              - "set security ipsec policy {{ ipsec_policy_name }} perfect-forward-secrecy keys {{ ipsec_perfect_forward_secrecy }}"
+              - "set security ipsec policy {{ ipsec_policy_name }} proposals {{ ipsec_proposal_name }}"
+              # IPsec VPN Binding
+              - "set security ipsec vpn {{ ipsec_vpn_name }} bind-interface st0.{{ vpn_st0_unit }}"
+              - "set security ipsec vpn {{ ipsec_vpn_name }} ike gateway {{ ike_gateway_name }}"
+              - "set security ipsec vpn {{ ipsec_vpn_name }} ike ipsec-policy {{ ipsec_policy_name }}"
+              - "set security ipsec vpn {{ ipsec_vpn_name }} establish-tunnels immediately"
+              # TCP MSS Adjustment to prevent fragmentation issues across the tunnel
+              - "set security flow tcp-mss ipsec-vpn mss {{ vpn_tcp_mss }}"
+            comment: "Configured Route-Based VPN for {{ vpn_peer_name }}"
+          register: res_crypto_config
+
+        - name: Assert crypto configuration success
+          ansible.builtin.assert:
+            that:
+              - res_crypto_config.failed == false
+            quiet: true
+
+        # 5. Resource Module: Create static routes through the tunnel
+        # Why: Directs traffic destined for remote subnets into the st0 interface.
+        - name: Configure static routes for remote subnets
+          junipernetworks.junos.junos_static_routes:
+            config:
+              - destination: "{{ item }}"
+                next_hop: "st0.{{ vpn_st0_unit }}"
+            state: merged
+          loop: "{{ vpn_remote_subnets }}"
+          register: res_static_routes
+
+        - name: Assert static route configuration success
+          ansible.builtin.assert:
+            that:
+              - item.failed == false
+            quiet: true
+          loop: "{{ res_static_routes.results }}"
+
+        # 6. Resource Module: Permit traffic between Trust and VPN zones
+        # Why: Statefully allows traffic flow between the local protected zone and the VPN tunnel.
+        - name: Configure security policies for VPN traffic
+          junipernetworks.junos.junos_security_policies:
+            config:
+              - from_zone: "{{ vpn_local_zone }}"
+                to_zone: "{{ vpn_st0_zone }}"
+                policy:
+                  - name: "PERMIT_LAN_TO_VPN"
+                    match:
+                      source_address: ["any"]
+                      destination_address: ["any"]
+                      application: ["any"]
+                    then:
+                      action: permit
+              - from_zone: "{{ vpn_st0_zone }}"
+                to_zone: "{{ vpn_local_zone }}"
+                policy:
+                  - name: "PERMIT_VPN_TO_LAN"
+                    match:
+                      source_address: ["any"]
+                      destination_address: ["any"]
+                      application: ["any"]
+                    then:
+                      action: permit
+            state: merged
+          register: res_sec_policies
+
+        - name: Assert security policy configuration success
+          ansible.builtin.assert:
+            that:
+              - res_sec_policies.failed == false
+            quiet: true
+
+      rescue:
+        - name: Rollback Configuration on Error
+          junipernetworks.junos.junos_config:
+            rollback: 0
+          register: rollback_status
+
+        - name: Report Failure
+          ansible.builtin.fail:
+            msg: >
+              VPN Deployment failed. Configuration rolled back.
+              Ensure gateway IP, interface unit, and pre-shared key are valid.
+              Rollback status: {{ rollback_status.msg | default('Unknown') }}
+
+      always:
+        - name: Verify IKE Security Association Status
+          junipernetworks.junos.junos_command:
+            commands:
+              - "show security ike sa"
+              - "show security ipsec sa"
+          register: vpn_status
+          ignore_errors: true # Do not fail the playbook if the tunnel is not up yet
+
+    - name: Display VPN Verification Output
+      ansible.builtin.debug:
+        var: vpn_status.stdout_lines
+---

@@ -1,0 +1,35 @@
+---
+# FortiGate System Information Retrieval
+# This playbook fetches system status from FortiGate devices using CLI.
+# Standards: Idempotency (Read-only), Observability (Assert), FQCN.
+- name: Get FortiGate System Information
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Fetch system information via CLI
+      # Using FQCN and capturing output for observability. 
+      # CLI 'get' commands are inherently idempotent as they do not modify state.
+      ansible.netcommon.cli_command:
+        command: get system info
+      register: info
+      # Error Handling: Ensure we catch execution failures or common FortiOS error strings.
+      failed_when: 
+        - info.rc | default(0) != 0
+        - "'Unknown command' in info.stdout or 'Command fail' in info.stdout"
+
+    - name: Validate system information response
+      # Observability: Confirm the output is not empty and contains valid data.
+      ansible.builtin.assert:
+        that:
+          - info.stdout is defined
+          - info.stdout | length > 0
+        fail_msg: "The system info command failed to return data."
+        success_msg: "System information successfully captured and validated."
+
+    - name: Display formatted system information
+      # Best Practice: Provide clear visibility into the captured data.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SYSTEM INFO =======================
+          {{ info.stdout }}

@@ -1,0 +1,52 @@
+---
+# Detailed IPSec Tunnel Information Analysis
+# Purpose: Gathers comprehensive VPN state for troubleshooting and auditing on ASA/Firepower devices.
+# Standards: Idempotent (Read-only), Observable (Asserts), Documented, FQCN-compliant.
+- name: Get Detailed IPSec Tunnel Info
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Peer IP address to filter results. Can be overridden via extra-vars: -e "tunnel_peer=1.2.3.4"
+    tunnel_peer: ""
+
+  tasks:
+    - name: Retrieve VPN session database details
+      # FQCN: Using ansible.netcommon.cli_command for standardized CLI interaction.
+      # Logic: Conditional command string to filter by peer if provided, reducing output noise.
+      ansible.netcommon.cli_command:
+        command: "{{ 'show vpn-sessiondb l2l filter-ipaddress=' + tunnel_peer if tunnel_peer else 'show vpn-sessiondb l2l' }}"
+      register: tunnel_detail
+      # Error Handling: Ensure the command was accepted and executed by the device shell.
+      failed_when: 
+        - tunnel_detail.failed or "Invalid input" in tunnel_detail.stdout
+
+    - name: Validate VPN session data retrieval
+      # Observability: Verifies that the command returned a valid stdout object before proceeding.
+      ansible.builtin.assert:
+        that:
+          - "tunnel_detail.stdout is defined"
+        fail_msg: "Data retrieval failed for {{ inventory_hostname }}. Check device connectivity or credentials."
+
+    - name: Retrieve Crypto IPsec SA details
+      # Purpose: Phase 2 SAs verify data plane encryption/decryption counters.
+      ansible.netcommon.cli_command:
+        command: "{{ 'show crypto ipsec sa peer ' + tunnel_peer if tunnel_peer else 'show crypto ipsec sa' }}"
+      register: crypto_sa
+      # Error Handling: Tunnels may be down; ignore_errors prevents the playbook from stopping if no SAs are found.
+      ignore_errors: true
+
+    - name: Retrieve IKEv1 Phase 1 details
+      # Purpose: Audits legacy Phase 1 (ISAKMP) state.
+      ansible.netcommon.cli_command:
+        command: "show crypto isakmp sa detail"
+      register: ikev1_detail
+      ignore_errors: true
+
+    - name: Retrieve IKEv2 Phase 1 details
+      # Purpose: Audits modern Phase 1 (IKEv2) state.
+      ansible.netcommon.cli_command:
+        command: "show crypto ikev2 sa detail"
+      register: ikev2_detail
+      ignore_errors: true
+
+    - name: Display Aggregated IPS

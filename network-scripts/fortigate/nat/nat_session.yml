@@ -1,0 +1,35 @@
+---
+# Playbook: FortiGate NAT Session Retrieval
+# Purpose: Retrieves active NAT-translated sessions from FortiGate devices.
+# This read-only operation is inherently idempotent and safe for repeated execution.
+
+- name: Retrieve and Validate FortiGate NAT Sessions
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Fetch NAT session list via CLI
+      # Use Fully Qualified Collection Name (FQCN) to ensure predictable module resolution.
+      # Filtering for 'NAT' at the source reduces data transfer and processing overhead.
+      ansible.netcommon.cli_command:
+        command: get system session list | grep NAT
+      register: nat_sess_result
+      # Error Handling: Do not fail if grep finds no matches (exit code 1 in many shells),
+      # but fail if the device returns an explicit command execution error.
+      failed_when: 
+        - nat_sess_result.failed
+        - "'Command fail' in nat_sess_result.stderr or 'Unknown action' in nat_sess_result.stderr"
+
+    - name: Assert session command completion
+      # Observability: Verify that we received a valid response object before proceeding.
+      ansible.builtin.assert:
+        that:
+          - nat_sess_result.stdout is defined
+        fail_msg: "Failed to capture output from the session table command."
+        success_msg: "Session table command executed and captured successfully."
+
+    - name: Output NAT session details
+      # Documentation: Provide clear visibility into the current state of NAT translations.
+      ansible.builtin.debug:
+        msg: |
+          =======================

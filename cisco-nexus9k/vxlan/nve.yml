@@ -1,0 +1,143 @@
+---
+# ==============================================================================
+# Playbook: Configure NVE Interface for VXLAN (Nexus 9000)
+# ==============================================================================
+# Author: Network Automation Framework (OpenClaw)
+# Version: 1.1.0
+# Last Updated: 2026-03-08
+# Description: Configure Network Virtualization Edge (NVE) interface for VXLAN
+#              tunneling on Nexus 9000 switches. This improved version uses
+#              resource-specific modules for better idempotency and observability.
+#
+# Platforms: Cisco Nexus 9000 series (N9K-C9300, N9K-C9500)
+# Requirements: cisco.nxos collection
+# ==============================================================================
+
+- name: Configure NVE Interface for VXLAN
+  hosts: nexus9k
+  gather_facts: false
+  connection: network_cli
+
+  vars:
+    nve_source_interface: "loopback0"
+    nve_source_ip: "{{ vtep_ip | default(ansible_host) }}"
+    
+    # List of VNIs to associate with NVE
+    # Example format: - { vni: 10010, multicast_group: 239.1.1.2 }
+    nve_vnis: []
+
+    ingress_replication: true
+    suppress_arp: true
+    nve_interface: "nve1"
+
+  tasks:
+    - name: Validate NVE prerequisites
+      ansible.builtin.assert:
+        that:
+          - nve_source_ip is defined
+          - nve_vnis | length > 0
+        fail_msg: |
+          ERROR: Missing NVE prerequisites
+          - nve_source_ip must be defined (VTEP IP)
+          - nve_vnis must have at least one VNI defined
+        success_msg: "NVE prerequisites validated"
+      changed_when: false
+
+    - name: Configure NVE Interface and VNI Mapping
+      block:
+        - name: Ensure required NX-OS features are enabled
+          cisco.nxos.nxos_feature:
+            feature: "{{ item }}"
+            state: enabled
+          loop:
+            - nv overlay
+            - vn-segment-vlan-based
+          register: feature_enable
+          # Enabling overlay features is a prerequisite for NVE operations
+
+        - name: Configure base NVE interface
+          cisco.nxos.nxos_vxlan_vtep:
+            interface: "{{ nve_interface }}"
+            source_interface: "{{ nve_source_interface }}"
+            host_reachability: true
+            state: present
+          register: nve_base
+          # host_reachability: true enables 'host-reachability protocol bgp'
+
+        - name: Configure ARP suppression on NVE interface
+          cisco.nxos.nxos_config:
+            lines:
+              - suppress-arp
+            parents: "interface {{ nve_interface }}"
+          register: nve_arp
+          when: suppress_arp | bool
+          # Reduces BUM traffic by suppressing ARP flooding within the fabric
+
+        - name: Associate VNIs with NVE interface
+          cisco.nxos.nxos_vxlan_vtep_vni:
+            interface: "{{ nve_interface }}"
+            vni: "{{ item.vni }}"
+            multicast_group: "{{ item.multicast_group | default(omit) }}"
+            ingress_replication: "{{ 'bgp' if item.ingress_replication | default(ingress_replication) else omit }}"
+            state: present
+          loop: "{{ nve_vnis }}"
+          register: vni_assoc
+          # Resource-specific module ensures idempotency for VNI mappings
+
+        - name: Verify NVE runtime configuration
+          cisco.nxos.nxos_command:
+            commands:
+              - show interface {{ nve_interface }}
+              - show nve vni
+          register: nve_verify
+          changed_when: false
+          # Captures operational state to verify control plane stability
+
+        - name: Validate NVE operational state
+          ansible.builtin.assert:
+            that:
+              - "'up' in nve_verify.stdout[0]"
+            fail_msg: "NVE interface {{ nve_interface }} is not operational (up)"
+            success_msg: "NVE interface {{ nve_interface }} configured and operational"
+
+      rescue:
+        - name: Log NVE configuration failure details
+          ansible.builtin.debug:
+            msg: |
+              ERROR: NVE configuration failed on {{ inventory_hostname }}
+              Source Interface: {{ nve_source_interface }}
+              Target VNIs: {{ nve_vnis | map(attribute='vni') | list }}
+              Module Error: {{ ansible_failed_result.msg | default('Check specific task output') }}
+
+        - name: Rollback NVE interface on failure
+          cisco.nxos.nxos_config:
+            lines:
+              - no interface {{ nve_interface }}
+          when: nve_base.changed
+          failed_when: false
+          # Prevents leaving a partial or broken NVE configuration on the device
+
+        - name: Signal task failure
+          ansible.builtin.fail:
+            msg: "NVE configuration failed - refer to rescue logs for details"
+
+      always:
+        - name: Save configuration to startup-config
+          cisco.nxos.nxos_config:
+            save: yes
+          when: 
+            - (feature_enable is changed) or (nve_base is changed) or (nve_arp is changed) or (vni_assoc is changed)
+          # Only executes save if a change was actually detected by the modules
+
+    - name: Display NVE Deployment Summary
+      ansible.builtin.debug:
+        msg: |
+          ======================================================================
+          NVE DEPLOYMENT SUMMARY: {{ inventory_hostname }}
+          ======================================================================
+          Interface:       {{ nve_interface }}
+          Source Int:      {{ nve_source_interface }} ({{ nve_source_ip }})
+          VNIs Configured: {{ nve_vnis | length }}
+          ARP Suppression: {{ 'Enabled' if suppress_arp else 'Disabled' }}
+          State:           COMPLETED
+          ======================================================================

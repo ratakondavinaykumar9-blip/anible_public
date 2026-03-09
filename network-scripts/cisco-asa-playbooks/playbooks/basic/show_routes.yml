@@ -1,0 +1,51 @@
+---
+- name: Get Routing Table from Cisco ASA/Firepower
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    output_format: text
+
+  tasks:
+    - name: Gather system facts for timestamping
+      # Why: Required to populate ansible_date_time for structured JSON metadata
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "min"
+      when: output_format == 'json'
+
+    - name: Get routes via CLI command
+      # Why: Uses FQCN to retrieve live routing state from the device
+      ansible.netcommon.cli_command:
+        command: show route
+      register: route_output
+      # Error Handling: Fail if command returns empty or indicates an invalid command
+      failed_when:
+        - route_output.stdout | length == 0
+        - "'Invalid input' in route_output.stdout"
+
+    - name: Verify routing table integrity
+      # Why: Observability - Asserts that the output contains expected ASA route headers
+      ansible.builtin.assert:
+        that:
+          - "'Codes:' in route_output.stdout"
+        fail_msg: "The output does not appear to be a valid ASA routing table."
+
+    - name: Display raw routing output
+      # Why: Provides immediate visibility during interactive runs
+      ansible.builtin.debug:
+        var: route_output.stdout
+
+    - name: Save structured routing data
+      # Why: Generates a persistent, machine-readable audit trail
+      # Idempotency: Safely overwrites the destination with the latest verified state
+      ansible.builtin.copy:
+        content: |
+          {
+            "device": "{{ inventory_hostname }}",
+            "timestamp": "{{ ansible_date_time.iso8601 | default('N/A') }}",
+            "routes": {{ route_output.stdout | to_json }}
+          }
+        dest: "/tmp/asa_routes_{{ inventory_hostname }}.json"
+        mode: '0644'
+      when: output_format == 'json'

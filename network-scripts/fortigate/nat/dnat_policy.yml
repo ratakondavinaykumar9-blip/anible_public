@@ -1,0 +1,34 @@
+---
+# Playbook: FortiGate DNAT Policies Retrieval
+# Description: This playbook securely retrieves DNAT policy information from FortiGate devices.
+# It implements observability through assertions and ensures idempotency by performing a read-only operation.
+- name: Get DNAT Policies
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve DNAT policy configuration via CLI
+      # Use Fully Qualified Collection Name (FQCN) for reliability
+      ansible.netcommon.cli_command:
+        command: "get firewall dnats"
+      register: dnat_output
+      # Error Handling: Define failure conditions based on command response or execution status
+      failed_when: 
+        - dnat_output.failed or "Unknown action" in dnat_output.stdout 
+        - "'command parse error' in dnat_output.stdout | lower"
+
+    - name: Validate DNAT data observability
+      # Observability: Use assertions to verify that the command returned meaningful content
+      ansible.builtin.assert:
+        that:
+          - dnat_output.stdout is defined
+          - dnat_output.stdout | length > 0
+        fail_msg: "DNAT policies could not be retrieved or the command returned an empty result."
+        success_msg: "DNAT policy information successfully captured from the device."
+
+    - name: Display DNAT Policy Details
+      # Documentation: Formatted output to improve log readability for network operators
+      ansible.builtin.debug:
+        msg: |
+          ======================= DNAT POLICIES =======================
+          {{ dnat_output.stdout }}

@@ -1,0 +1,36 @@
+---
+# Playbook: Show Service Objects
+# Description: Retrieves and displays service object configurations from Cisco ASA/Firepower devices.
+# Standards: Idempotency (Read-only), Observability (Assert), Documentation, FQCN.
+
+- name: Get Service Objects
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve service object configuration
+      # Use FQCN for consistent plugin resolution.
+      # This task fetches the current running-config for service objects to ensure auditability.
+      ansible.netcommon.cli_command:
+        command: show running-config object service
+      register: service_result
+      # Basic error handling: ensure the command was accepted by the device.
+      failed_when: 
+        - service_result.failed is defined and service_result.failed
+        - "'Invalid input' in service_result.stdout"
+
+    - name: Validate service object retrieval
+      # Observability: Confirm that the command returned data and was not an empty string.
+      ansible.builtin.assert:
+        that:
+          - service_result.stdout is defined
+          - service_result.stdout | length > 0
+        fail_msg: "Failed to retrieve service objects or none are configured on the target."
+        success_msg: "Service objects successfully retrieved."
+
+    - name: Display service object details
+      # Enhanced observability for operational transparency.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SERVICE OBJECTS =======================
+          {{ service_result.stdout }}

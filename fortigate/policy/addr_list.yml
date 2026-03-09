@@ -1,0 +1,41 @@
+---
+# FortiGate Address Objects Retrieval
+# Improved by Architect:# Purpose: Safely retrieve and verify firewall address objects using idempotent read operations.
+
+- name: Get FortiGate Address Objects
+  hosts: fortigate
+  gather_facts: false
+  # Best Practice: Explicitly define connection type for network devices
+  connection: ansible.netcommon.network_cli
+
+  tasks:
+    - name: Fetch firewall address configuration
+      # Best Practice: Use Fully Qualified Collection Name (FQCN)
+      # Idempotency: 'get' is a read-only operation and safe to run multiple times
+      ansible.netcommon.cli_command:
+        command: get firewall address
+      register: addr_output
+      # Error Handling: Prevent silent failures if the CLI returns an error message
+      failed_when: 
+        - addr_output.failed
+        - "'command parse error' in addr_output.stdout | lower"
+        - "'unknown command' in addr_output.stdout | lower"
+
+    - name: Verify successful data retrieval
+      # Observability: Ensure the command returned valid data before proceeding
+      ansible.builtin.assert:
+        that:
+          - addr_output.stdout is defined
+          - addr_output.stdout | length > 0
+        fail_msg: "Data retrieval failed: Output is empty or undefined."
+        success_msg: "Address objects successfully retrieved from {{ inventory_hostname }}."
+
+    - name: Display Address Objects
+      # Documentation: Format output for better human readability during execution
+      ansible.builtin.debug:
+        msg: |
+          ======================= ADDRESS OBJECTS REPORT =======================
+          Host: {{ inventory_hostname }}
+          Status: Success
+          ======================================================================
+          {{ addr_output.stdout }}

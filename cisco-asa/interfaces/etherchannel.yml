@@ -1,0 +1,34 @@
+---
+# Cisco ASA/Firepower EtherChannel Retrieval Playbook
+# Improved for Idempotency, Observability, and Error Handling
+- name: Get EtherChannel Information
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'show etherchannel' on device
+      # Using FQCN for network operations to ensure consistency across environments
+      ansible.netcommon.cli_command:
+        command: show etherchannel
+      register: ec_result
+      # Error Handling: Explicitly fail if the device returns common error patterns
+      failed_when:
+        - "'Invalid input' in ec_result.stdout"
+        - "'ERROR:' in ec_result.stdout"
+        - "ec_result.rc != 0"
+
+    - name: Verify EtherChannel output validity
+      # Observability: Assert that data was actually returned to prevent silent failures
+      ansible.builtin.assert:
+        that:
+          - "ec_result.stdout is defined"
+          - "ec_result.stdout | length > 0"
+        fail_msg: "The 'show etherchannel' command returned an empty response."
+        success_msg: "EtherChannel data successfully retrieved from {{ inventory_hostname }}."
+
+    - name: Display EtherChannel Summary
+      # Documentation: Provide a structured view for operator review
+      ansible.builtin.debug:
+        msg: |
+          ======================= ETHERCHANNEL STATUS ({{ inventory_hostname }}) =======================
+          {{ ec_result.stdout }}

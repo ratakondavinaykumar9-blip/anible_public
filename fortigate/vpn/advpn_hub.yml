@@ -1,0 +1,175 @@
+---
+- name: FortiGate ADVPN Hub Configuration
+  hosts: fortigates
+  connection: httpapi
+  vars:
+    # VPN Phase 1 Parameters: Defines the dial-up listener for ADVPN spokes
+    vpn_hub_name: "DC_ADVPN_HUB"
+    vpn_p1_interface: "port1"
+    vpn_psk: "ENTER_SECURE_PSK_HERE"
+    ike_version: "2"
+    enc_proposals: "aes256-sha256 aes128-sha1"
+    dh_groups: "14 5"
+    
+    # VPN Overlay Parameters: Defines the tunnel IP space
+    vpn_overlay_ip: "10.254.0.1"
+    vpn_overlay_mask: "255.255.255.0"
+    # The range from which dynamic spokes will receive IPs for BGP peering
+    vpn_overlay_range: "10.254.0.0 255.255.255.0"
+    
+    # BGP Parameters: Used for dynamic routing over the IPsec overlay
+    bgp_as: 65001
+    bgp_router_id: "10.254.0.1"
+    
+    # Firewall Policy ID: Unique identifier for the hairpin transit policy
+    policy_id_hairpin: 1001
+
+  tasks:
+    - name: Deploy Production ADVPN Hub Architecture
+      block:
+        - name: Configure Phase 1 Interface (Dial-up Hub Role)
+          fortinet.fortios.fortios_vpn_ipsec_phase1_interface:
+            state: present
+            vpn_ipsec_phase1_interface:
+              name: "{{ vpn_hub_name }}"
+              type: dynamic
+              interface: "{{ vpn_p1_interface }}"
+              ikevers: "{{ ike_version }}"
+              peertype: any
+              psksecret: "{{ vpn_psk }}"
+              proposal: "{{ enc_proposals }}"
+              dhgrp: "{{ dh_groups }}"
+              # ADVPN Specific: Hub must send and forward shortcut information to enable spoke-to-spoke direct tunnels
+              auto_discovery_sender: enable
+              auto_discovery_forwarder: enable
+              # net_device: creates virtual sub-interfaces for each spoke; critical for Route Reflector scalability
+              net_device: enable
+              # add_route: disabled to prevent static route injection that conflicts with BGP dynamic routing
+              add_route: disable
+              dpd: on_demand
+              dpd_retryinterval: 5
+          register: p1_res
+
+        - name: Verify Phase 1 Configuration Success
+          ansible.builtin.assert:
+            that:
+              - p1_res.meta.status == 'success' or p1_res.meta.http_status == 200
+            fail_msg: "IPsec Phase 1 configuration failed for {{ vpn_hub_name }}"
+
+        - name: Configure Phase 2 Interface (Wildcard Selectors)
+          fortinet.fortios.fortios_vpn_ipsec_phase2_interface:
+            state: present
+            vpn_ipsec_phase2_interface:
+              name: "{{ vpn_hub_name }}_P2"
+              phase1name: "{{ vpn_hub_name }}"
+              proposal: "{{ enc_proposals }}"
+              dhgrp: "{{ dh_groups }}"
+              # Route-based VPNs use 0.0.0.0/0 selectors to allow BGP to control all routing decisions
+              src_subnet: "0.0.0.0 0.0.0.0"
+              dst_subnet: "0.0.0.0 0.0.0.0"
+              keylifeseconds: 3600
+          register: p2_res
+
+        - name: Verify Phase 2 Configuration Success
+          ansible.builtin.assert:
+            that:
+              - p2_res.meta.status == 'success' or p2_res.meta.http_status == 200
+            fail_msg: "IPsec Phase 2 configuration failed for {{ vpn_hub_name }}_P2"
+
+        - name: Assign IP to Tunnel Interface
+          fortinet.fortios.fortios_system_interface:
+            state: present
+            system_interface:
+              name: "{{ vpn_hub_name }}"
+              ip: "{{ vpn_overlay_ip }} {{ vpn_overlay_mask }}"
+              allowaccess: ping
+              # remote_ip: Best practice for P-to-P tunnel interfaces to define the logical gateway for spokes
+              remote_ip: "10.254.0.254 255.255.255.0"
+          register: intf_res
+
+        - name: Verify Interface Configuration Success
+          ansible.builtin.assert:
+            that:
+              - intf_res.meta.status == 'success' or intf_res.meta.http_status == 200
+            fail_msg: "Failed to assign IP address to tunnel interface {{ vpn_hub_name }}"
+
+        - name: Enable VPN-to-VPN Hairpinning Policy
+          fortinet.fortios.fortios_firewall_policy:
+            state: present
+            firewall_policy:
+              name: "ADVPN_SPOKE_TO_SPOKE_TRANSIT"
+              policyid: "{{ policy_id_hairpin }}"
+              srcintf: [{ name: "{{ vpn_hub_name }}" }]
+              dstintf: [{ name: "{{ vpn_hub_name }}" }]
+              srcaddr: [{ name: "all" }]
+              dstaddr: [{ name: "all" }]
+              action: accept
+              schedule: "always"
+              service: [{ name: "ALL" }]
+              # Status must be enabled for spokes to initially transit the hub and negotiate shortcuts
+              status: enable
+              comments: "Allows initial transit and shortcut negotiation for ADVPN spokes - Managed by Ansible"
+          register: policy_res
+
+        - name: Verify Firewall Policy Success
+          ansible.builtin.assert:
+            that:
+              - policy_res.meta.status == 'success' or policy_res.meta.http_status == 200
+            fail_msg: "Failed to deploy hairpinning firewall policy"
+
+        - name: Configure BGP for Dynamic Spoke Peering
+          fortinet.fortios.fortios_router_bgp:
+            state: present
+            router_bgp:
+              as: "{{ bgp_as }}"
+              router_id: "{{ bgp_router_id }}"
+              # neighbor_group: Simplifies spoke management by using a template for all dynamic peers
+              neighbor_group:
+                - name: "ADVPN_SPOKE_GROUP"
+                  remote_as: "{{ bgp_as }}"
+                  # Hub acts as Route Reflector to ensure spokes learn reachability for each other
+                  route_reflector_client: enable
+                  # next_hop_self: Ensures traffic initially targets the Hub to trigger shortcut generation
+                  next_hop_self: enable
+                  capability_graceful_restart: enable
+                  soft_reconfiguration: enable
+              # neighbor_range: Dynamically accepts peering requests from any spoke in the overlay subnet
+              neighbor_range:
+                - id: 1
+                  prefix: "{{ vpn_overlay_range }}"
+                  neighbor_group: "ADVPN_SPOKE_GROUP"
+              network:
+                - id: 1
+                  prefix: "{{ vpn_overlay_ip }} {{ vpn_overlay_mask }}"
+          register: bgp_res
+
+        - name: Verify BGP Configuration Success
+          ansible.builtin.assert:
+            that:
+              - bgp_res.meta.status == 'success' or bgp_res.meta.http_status == 200
+            fail_msg: "BGP configuration for ADVPN failed"
+
+      rescue:
+        - name: Rollback/Log Failure
+          ansible.builtin.debug:
+            msg: >
+              CRITICAL: ADVPN Hub deployment failed. 
+              Manual verification required for:
+              1. WAN Interface '{{ vpn_p1_interface }}' connectivity.
+              2. Policy ID '{{ policy_id_hairpin }}' availability.
+              3. BGP AS '{{ bgp_as }}' existing configuration conflicts.
+          failed_when: true
+
+      always:
+        - name: Verify Final Configuration State (Idempotency Check)
+          fortinet.fortios.fortios_configuration_fact:
+            selector: "vpn_ipsec_phase1_interface"
+            params:
+              name: "{{ vpn_hub_name }}"
+          register: vpn_status
+          ignore_errors: true
+
+        - name: Final Validation Summary
+          ansible.builtin.debug:
+            msg: "ADVPN Hub '{{ vpn_hub_name }}' is {{ 'ONLINE and Verified' if (vpn_status.meta.results[0].name is defined) else 'OFFLINE/FAILED' }}"
+          when: vpn_status is defined

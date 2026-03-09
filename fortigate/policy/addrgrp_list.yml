@@ -1,0 +1,39 @@
+---
+# FortiGate Address Groups Retrieval
+# This playbook fetches the operational state of firewall address groups.
+# Standards: Idempotency (Read-only), Observability (Assert), Documentation, FQCN.
+
+- name: Get FortiGate Address Groups
+  hosts: fortigate
+  gather_facts: false # Performance: Disabling facts as they are not needed for CLI command execution.
+
+  tasks:
+    - name: Fetch address group configuration from device
+      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction.
+      # Idempotency: Read-only operations are inherently idempotent as they do not change state.
+      ansible.netcommon.cli_command:
+        command: get firewall addrgrp
+      register: groups_output
+      # Error Handling: Ensure the command was successful and check for FortiOS-specific failure strings.
+      failed_when:
+        - groups_output.rc != 0
+        - "'Command fail' in groups_output.stdout"
+        - "'entry not found' in groups_output.stdout"
+
+    - name: Validate address group data retrieval
+      # Observability: Verify that the output is defined and not empty to ensure operational visibility.
+      ansible.builtin.assert:
+        that:
+          - groups_output.stdout is defined
+          - groups_output.stdout | length > 0
+        fail_msg: "Failed to retrieve address groups or the configuration is empty."
+        success_msg: "Successfully retrieved address group configuration from {{ inventory_hostname }}."
+
+    - name: Display Address Groups
+      # Documentation: Formatting output for clear visibility during audit or troubleshooting.
+      ansible.builtin.debug:
+        msg: |
+          ======================= ADDRESS GROUPS =======================
+          HOST: {{ inventory_hostname }}
+          ==============================================================
+          {{ groups_output.stdout }}

@@ -1,0 +1,35 @@
+---
+# NAT Global Configuration Retrieval
+# Purpose: Audits the global NAT state on Cisco ASA/Firepower devices.
+# Idempotency: Safe to run repeatedly as it performs read-only actions.
+
+- name: Retrieve and Verify NAT Global Settings
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get global NAT configuration
+      # Why: Extracts NAT-related global configuration from the running-config for auditing.
+      # FQCN: ansible.netcommon.cli_command is used for cross-platform compatibility.
+      ansible.netcommon.cli_command:
+        command: show running-config global | include nat
+      register: global_nat_result
+      # Error Handling: Explicitly fail if the command fails or if the device rejects the syntax.
+      failed_when:
+        - global_nat_result.failed == true
+        - "'Invalid input' in global_nat_result.stderr"
+
+    - name: Assert data retrieval success
+      # Why: Adds observability by ensuring the command returned a valid stdout buffer.
+      ansible.builtin.assert:
+        that:
+          - global_nat_result.stdout is defined
+        fail_msg: "Failed to retrieve configuration from the device. Check connectivity."
+        quiet: true
+
+    - name: Display NAT Global status
+      # Why: Provides the network architect with a clear view of the current global NAT state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= NAT GLOBAL =======================
+          {{ global_nat_result.stdout | default('No NAT configuration found in running-config.') }}

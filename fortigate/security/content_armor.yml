@@ -1,0 +1,36 @@
+---
+# Content Armor
+# Auto-improved: 2026-03-08
+# Author: Analyst (OpenClaw) / Improved by Architect:#
+---
+- name: FortiGate Content Armor Retrieval
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Execute CLI command to get firewall profile-groups
+      # Using Fully Qualified Collection Name (FQCN). 
+      # Note: Read-only 'get' commands are inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: get firewall profile-group
+      register: armor_output
+      # Error Handling: Identify FortiOS-specific error strings or non-zero return codes
+      failed_when:
+        - "armor_output.rc != 0"
+        - "'Command fail' in armor_output.stdout"
+        - "'Unknown action' in armor_output.stdout"
+
+    - name: Verify retrieved armor configuration integrity
+      # Observability: Ensure the command returned data to prevent silent empty successes
+      ansible.builtin.assert:
+        that:
+          - "armor_output.stdout | length > 0"
+        fail_msg: "Retrieved Content Armor output is empty. Please verify profile-groups exist on the target."
+        quiet: true
+
+    - name: Display Content Armor Report
+      # Documentation: Structured output for auditing and visibility during execution
+      ansible.builtin.debug:
+        msg: |
+          ======================= CONTENT ARMOR REPORT =======================
+          {{ armor_output.stdout }}

@@ -1,0 +1,38 @@
+---
+# Standard: FortiGate Interface Traffic Monitoring
+# Purpose: Retrieves real-time interface traffic statistics using high-reliability patterns.
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
+- name: Get FortiGate Interface Traffic
+  hosts: fortigate
+  gather_facts: false # Performance: FortiOS devices do not support standard Ansible facts
+
+  tasks:
+    - name: Retrieve interface traffic statistics from the device
+      # Best Practice: Use Fully Qualified Collection Names (FQCN) for consistency
+      ansible.netcommon.cli_command:
+        command: get system interface traffic
+      register: traffic_capture
+      # Idempotency: This is a read-only query; ensure it never reports a 'changed' status
+      changed_when: false
+      # Error Handling: Fail explicitly if the command returns no data or an error string
+      failed_when:
+        - traffic_capture.stdout is not defined
+        - traffic_capture.stdout | length == 0 or "Unknown command" in traffic_capture.stdout
+
+    - name: Validate traffic data integrity
+      # Observability: Assert that the command returned the expected content
+      ansible.builtin.assert:
+        that:
+          - traffic_capture.stdout != ""
+          - "'interface' in traffic_capture.stdout or 'Name' in traffic_capture.stdout"
+        fail_msg: "The traffic data retrieved from {{ inventory_hostname }} is invalid or empty."
+        success_msg: "Successfully verified interface traffic data capture."
+
+    - name: Display Interface Traffic Report
+      # Observability: Provide a clear, formatted view of the captured data
+      ansible.builtin.debug:
+        msg: |
+          ======================= INTERFACE TRAFFIC =======================
+          Device: {{ inventory_hostname }}
+          =================================================================
+          {{ traffic_capture.stdout }}

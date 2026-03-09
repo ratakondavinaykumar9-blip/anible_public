@@ -1,0 +1,137 @@
+---
+# ==============================================================================
+# Playbook: FortiGate IPSec Status
+# ==============================================================================
+# Author: Architect:# Version: 1.2.0
+# Last Updated: 2026-03-08
+# Description: Monitor IPSec VPN tunnel status on FortiGate firewalls with
+#              health validation, idempotency, and enhanced observability.
+#
+# Platforms: FortiGate 60E/100E/200E/600E/1200D and higher
+# Requirements: fortinet.fortios collection, ansible.netcommon
+# ==============================================================================
+
+- name: Get IPSec Status
+  hosts: fortigate
+  # Gather facts to ensure ansible_date_time is available for the report metadata
+  gather_facts: yes
+  connection: httpapi
+
+  vars:
+    vdom: "root"
+    alert_on_down: false
+    output_dir: /tmp/vpn_status
+
+  tasks:
+    - name: Initialize VPN monitoring facts
+      ansible.builtin.set_fact:
+        up_tunnels: 0
+        down_tunnels: 0
+        vpn_error: false
+
+    - name: IPSec Status Collection Block
+      # Grouping CLI operations to provide structured error handling and observability
+      block:
+        - name: Retrieve IPSec tunnel status
+          ansible.netcommon.cli_command:
+            command: "get vpn ipsec status"
+          register: ipsec_status
+          # Read-only operation; ensures task is idempotent and reports no change
+          changed_when: false
+          # Validation: Fail if command execution fails or returns no output
+          failed_when:
+            - ipsec_status.failed or ipsec_status.stdout | length == 0
+
+        - name: Verify IPSec status data integrity
+          ansible.builtin.assert:
+            that:
+              - "'IPsec' in ipsec_status.stdout"
+            fail_msg: "Received malformed output from 'get vpn ipsec status' on {{ inventory_hostname }}"
+            quiet: true
+
+        - name: Retrieve detailed IKE status
+          ansible.netcommon.cli_command:
+            command: "diagnose vpn ike status"
+          register: ike_status
+          changed_when: false
+          # Non-critical command; allow failure if IKE is not currently active
+          failed_when: false
+
+        - name: Retrieve IPSec statistics
+          ansible.netcommon.cli_command:
+            command: "get vpn ipsec statistics"
+          register: ipsec_stats
+          changed_when: false
+          failed_when: false
+
+        - name: Parse tunnel states from CLI output
+          # Extract metrics using regex for observability and logic branches
+          ansible.builtin.set_fact:
+            up_tunnels: "{{ ipsec_status.stdout | regex_findall('connected') | length | int }}"
+            down_tunnels: "{{ ipsec_status.stdout | regex_findall('(disconnected|down)') | length | int }}"
+
+        - name: Validate VPN health state
+          # Conditional health check: alerts if alert_on_down is enabled and no tunnels are active
+          ansible.builtin.assert:
+            that:
+              - up_tunnels | int > 0
+            fail_msg: "CRITICAL: No active IPSec tunnels found on {{ inventory_hostname }}"
+            success_msg: "VPN Health Check Passed: {{ up_tunnels }} tunnels active"
+            quiet: "{{ not alert_on_down | bool }}"
+          when: alert_on_down | bool
+
+      rescue:
+        - name: Log VPN status collection failure
+          ansible.builtin.debug:
+            msg: "ERROR: Failed to retrieve IPSec data from {{ inventory_hostname }}. Verify connectivity and API permissions."
+
+        - name: Flag host with error state
+          ansible.builtin.set_fact:
+            vpn_error: true
+
+      always:
+        - name: Display IPSec status summary
+          ansible.builtin.debug:
+            msg: |
+              ========================================
+              IPSec VPN Summary: {{ inventory_hostname }}
+              ========================================
+              Active Tunnels:   {{ up_tunnels }}
+              Inactive Tunnels: {{ down_tunnels }}
+              Total Configured: {{ up_tunnels | int + down_tunnels | int }}
+              System State:     {{ 'Degraded' if vpn_error else 'Healthy' }}
+              ========================================
+
+    - name: Ensure local reporting directory exists
+      # Idempotent: ensures path exists without redundant changes
+      ansible.builtin.file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+
+    - name: Generate persistent VPN status report
+      # Idempotent: only overwrites if content differs, preserving file timestamps if no changes occur
+      ansible.builtin.copy:
+        content: |
+          # FortiGate IPSec VPN Status Report
+          # Host: {{ inventory_hostname }}
+          # Timestamp: {{ ansible_date_time.iso8601 }}
+          
+          ## Executive Summary
+          - Status: {{ 'ERROR' if vpn_error else 'OK' }}
+          - Active Tunnels: {{ up_tunnels }}
+          - Inactive Tunnels: {{ down_tunnels }}
+          
+          ## Raw Output: get vpn ipsec status
+          {{ ipsec_status.stdout | default('N/A') }}
+          
+          ## Raw Output: diagnose vpn ike status
+          {{ ike_status.stdout | default('N/A') }}
+          
+          ## Raw Output: get vpn ipsec statistics
+          {{ ipsec_stats.stdout | default('N/A') }}
+        dest: "{{ output_dir }}/{{ inventory_hostname }}_ipsec_status.txt"
+        mode: '0640'
+      delegate_to: localhost

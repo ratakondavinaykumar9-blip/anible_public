@@ -1,0 +1,136 @@
+---
+# IPSec Tunnel Troubleshooting for Cisco ASA/Firepower
+# This playbook automates the diagnostic process for L2L VPN tunnels.
+- name: Troubleshoot IPSec Tunnel
+  hosts: asa_firepower
+  gather_facts: yes  # Required for ansible_date_time in JSON output
+  vars:
+    output_format: text
+    tunnel_peer: ""  # Mandatory: The remote gateway IP address
+
+  tasks:
+    - name: Validate input parameters
+      ansible.builtin.assert:
+        that:
+          - tunnel_peer | length > 0
+          - tunnel_peer | ansible.utils.ipaddr
+        fail_msg: "ERROR: tunnel_peer must be a valid IP. Usage: -e 'tunnel_peer=203.0.113.1'"
+        success_msg: "Validation successful: Troubleshooting peer {{ tunnel_peer }}"
+
+    - name: Collect IKEv1 Phase 1 Status
+      # Use FQCN for Cisco ASA specific commands
+      cisco.asa.asa_command:
+        commands:
+          - "show crypto isakmp sa {{ tunnel_peer }}"
+      register: ikev1_sa
+      changed_when: false  # Read-only operation; ensures idempotency
+      ignore_errors: yes   # Continue if IKEv1 is not configured
+
+    - name: Collect IKEv2 Phase 1 Status
+      cisco.asa.asa_command:
+        commands:
+          - "show crypto ikev2 sa {{ tunnel_peer }}"
+      register: ikev2_sa
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Collect IPsec Phase 2 SA Details
+      cisco.asa.asa_command:
+        commands:
+          - "show crypto ipsec sa peer {{ tunnel_peer }}"
+      register: ipsec_sa
+      changed_when: false
+      # We don't fail here because a missing SA is a valid troubleshooting finding
+      failed_when: false
+
+    - name: Collect VPN Session Database Entry
+      cisco.asa.asa_command:
+        commands:
+          - "show vpn-sessiondb l2l filter-ipaddress={{ tunnel_peer }}"
+      register: tunnel_session
+      changed_when: false
+
+    - name: Check Interface Status and IP Assignment
+      cisco.asa.asa_command:
+        commands:
+          - "show interface ip brief"
+      register: interface_brief
+      changed_when: false
+
+    - name: Retrieve Recent Syslog Errors
+      cisco.asa.asa_command:
+        commands:
+          - "show logging | include errors | last 50"
+      register: error_logs
+      changed_when: false
+
+    - name: Verify data collection success
+      ansible.builtin.assert:
+        that:
+          - ikev1_sa is defined
+          - ikev2_sa is defined
+          - ipsec_sa is defined
+        fail_msg: "Data collection failed for one or more critical components."
+
+    - name: Generate JSON Report for External Monitoring
+      ansible.builtin.copy:
+        content: |
+          {
+            "device": "{{ inventory_hostname }}",
+            "timestamp": "{{ ansible_date_time.iso8601 }}",
+            "troubleshooting_peer": "{{ tunnel_peer }}",
+            "ikev1_sa": {{ ikev1_sa.stdout[0] | to_json }},
+            "ikev2_sa": {{ ikev2_sa.stdout[0] | to_json }},
+            "ipsec_sa": {{ ipsec_sa.stdout[0] | to_json }},
+            "tunnel_session": {{ tunnel_session.stdout[0] | to_json }},
+            "interfaces": {{ interface_brief.stdout[0] | to_json }},
+            "error_logs": {{ error_logs.stdout[0] | to_json }}
+          }
+        dest: "/tmp/asa_ipsec_troubleshoot_{{ inventory_hostname }}_{{ tunnel_peer }}.json"
+        mode: '0644'
+      when: output_format == 'json'
+
+    - name: Display Human-Readable Troubleshooting Results
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          IPSec Troubleshooting Report: {{ inventory_hostname }}
+          Timestamp: {{ ansible_date_time.iso8601 }}
+          Target Peer: {{ tunnel_peer }}
+          ============================================================
+
+          [IKEv1 Phase 1]
+          {{ ikev1_sa.stdout[0] | default('No data') }}
+
+          [IKEv2 Phase 1]
+          {{ ikev2_sa.stdout[0] | default('No data') }}
+
+          [IPsec Phase 2]
+          {{ ipsec_sa.stdout[0] | default('No active SAs found') }}
+
+          [VPN Session Detail]
+          {{ tunnel_session.stdout[0] | default('No active session found') }}
+
+          [Recent Errors]
+          {{ error_logs.stdout[0] | default('No relevant logs found') }}
+      when: output_format == 'text'
+
+    - name: Final Status Summary
+      ansible.builtin.debug:
+        msg: |
+          =======================
+          TUNNEL STATUS SUMMARY
+          =======================
+          Peer: {{ tunnel_peer }}
+          {% if 'AM_ACTIVE' in ikev1_sa.stdout[0] or 'UP-ACTIVE' in ikev2_sa.stdout[0] %}
+          ✅ IKE Phase 1: UP
+          {% else %}
+          ❌ IKE Phase 1: DOWN (Check ISAKMP/IKEv2 configurations)
+          {% endif %}
+
+          {% if 'peer' in ipsec_sa.stdout[0] | lower %}
+          ✅ IPsec Phase 2: UP
+          {% else %}
+          ❌ IPsec Phase 2: DOWN (Check Proxy-IDs and Crypto Maps)
+          {% endif %}
+      when: output_format == 'text'

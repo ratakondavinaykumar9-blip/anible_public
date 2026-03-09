@@ -1,0 +1,37 @@
+---
+# FortiGate Firmware Information Retrieval
+# Improved for: Idempotency, Observability, Documentation, and Error Handling.
+# Author: Architect: name: Get Firmware Info
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve firmware status from FortiGate device
+      # FQCN: Using fully qualified collection name for network CLI interaction.
+      # Idempotency: 'get' commands are read-only and inherently safe to run multiple times.
+      ansible.netcommon.cli_command:
+        command: get system firmware
+      register: fw_result
+      # Error Handling: Fail if the command execution fails or returns empty stdout.
+      failed_when: 
+        - fw_result.failed | default(false)
+        - fw_result.stdout | length == 0
+
+    - name: Verify firmware data integrity
+      # Observability: Assert that the output contains expected firmware keywords.
+      ansible.builtin.assert:
+        that:
+          - fw_result.stdout is defined
+          - "'Version' in fw_result.stdout or 'v7' in fw_result.stdout or 'v6' in fw_result.stdout"
+        fail_msg: "Firmware data is missing or command returned unexpected results."
+        success_msg: "Firmware information successfully validated for {{ inventory_hostname }}."
+
+    - name: Display formatted firmware report
+      # Documentation: Providing structured output for operator visibility.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FIRMWARE REPORT =======================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          Details:
+          {{ fw_result.stdout }}

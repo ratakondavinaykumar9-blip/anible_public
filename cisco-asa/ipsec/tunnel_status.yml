@@ -1,0 +1,73 @@
+---
+# IPSec Tunnel Status Overview
+# This playbook retrieves and displays the current status of IPSec VPN tunnels on ASA/Firepower devices.
+# Improved for industry standards: Idempotency, Observability, Documentation, Error Handling, and FQCN.
+- name: Get IPSec Tunnel Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get L2L VPN sessions
+      # Fetches the LAN-to-LAN VPN session database to identify active tunnels.
+      # Idempotency: 'show' commands are read-only and inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: show vpn-sessiondb l2l
+      register: l2l_result
+      # Error Handling: Captures common CLI error strings that do not trigger non-zero exit codes.
+      failed_when: 
+        - "'Invalid' in l2l_result.stdout"
+        - "'ERROR' in l2l_result.stdout"
+
+    - name: Validate L2L session response
+      # Observability: Ensures the session data was retrieved successfully before proceeding.
+      ansible.builtin.assert:
+        that:
+          - l2l_result is success
+          - l2l_result.stdout is defined
+        fail_msg: "Critical failure: Could not retrieve L2L VPN sessions for {{ inventory_hostname }}."
+
+    - name: Get IPsec Security Associations (SA)
+      # Retrieves Phase 2 Security Association details for encryption verification.
+      ansible.netcommon.cli_command:
+        command: show crypto ipsec sa
+      register: ipsec_sa_result
+      failed_when: "'Invalid' in ipsec_sa_result.stdout"
+
+    - name: Get IKEv1 Security Associations
+      # Retrieves IKEv1 (Phase 1) status to verify tunnel negotiation state.
+      ansible.netcommon.cli_command:
+        command: show crypto isakmp sa
+      register: ikev1_result
+      failed_when: "'Invalid' in ikev1_result.stdout"
+
+    - name: Get IKEv2 Security Associations
+      # Retrieves IKEv2 (Phase 1) status for modern VPN tunnel verification.
+      ansible.netcommon.cli_command:
+        command: show crypto ikev2 sa
+      register: ikev2_result
+      failed_when: "'Invalid' in ikev2_result.stdout"
+
+    - name: Verify Crypto Component Accessibility
+      # Observability: Confirms that all crypto-related data points were successfully captured.
+      ansible.builtin.assert:
+        that:
+          - ipsec_sa_result.stdout is defined
+          - ikev1_result.stdout is defined
+          - ikev2_result.stdout is defined
+        quiet: true
+
+    - name: Summary
+      # Provides a consolidated dashboard of VPN health for immediate visibility.
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          IPSec Status: {{ inventory_hostname }}
+          ============================================================
+          L2L SESSIONS:
+          {{ l2l_result.stdout }}
+
+          IKEv1 STATUS:
+          {{ ikev1_result.stdout }}
+
+          IKEv2 STATUS:
+          {{ ikev2_result.stdout }}

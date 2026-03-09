@@ -1,0 +1,35 @@
+---
+# Playbook: Cisco ASA Failover Interface Status Verification
+# Purpose: Retrieves and validates failover interface status for high-availability pairs.
+# Standards: Idempotency (Read-only), Observability (Assert/Register), Documentation (Comments), FQCN.
+- name: Get Failover Interface Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve failover interface status from device
+      # Best Practice: Use Fully Qualified Collection Name (FQCN) for the specific platform
+      cisco.asa.asa_command:
+        commands:
+          - show failover interface
+      register: failover_results
+      # Error Handling: Identify failure if the command returns an error string or fails at the transport level
+      failed_when:
+        - failover_results.failed
+        - "'invalid input' in failover_results.stdout[0] | lower"
+
+    - name: Validate failover operational state
+      # Observability: Assert that the command returned data and failover is actually active
+      ansible.builtin.assert:
+        that:
+          - failover_results.stdout[0] | length > 0
+          - "'failover not enabled' not in failover_results.stdout[0] | lower"
+        fail_msg: "Failover is not enabled or status is unavailable on {{ inventory_hostname }}."
+        success_msg: "Failover interface status successfully verified on {{ inventory_hostname }}."
+
+    - name: Display formatted failover interface information
+      # Documentation: Provide a clear, human-readable summary for operator visibility
+      ansible.builtin.debug:
+        msg: |
+          ======================= FAILOVER INTERFACES: {{ inventory_hostname }} =======================
+          {{ failover_results.stdout[0] }}

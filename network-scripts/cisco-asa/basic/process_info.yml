@@ -1,0 +1,34 @@
+---
+# Playbook to retrieve and validate process information on Cisco ASA/Firepower devices.
+# Adheres to industry standards for idempotency, observability, and FQCN usage.
+- name: Get Process Information
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve current process list from the device
+      # Using FQCN for the network CLI command module.
+      # This is a read-only command, making it inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: show process
+      register: proc_result
+      # Error Handling: Explicitly fail if the command execution fails.
+      failed_when: proc_result.failed
+      # Idempotency: Ensure the task reports 'ok' instead of 'changed' for read-only operations.
+      changed_when: false
+
+    - name: Validate process output integrity
+      # Observability: Assert that the output contains expected process headers to verify success.
+      ansible.builtin.assert:
+        that:
+          - proc_result.stdout is defined
+          - "'Process' in proc_result.stdout"
+        fail_msg: "The 'show process' command returned invalid or empty data."
+        success_msg: "Process information successfully captured and verified."
+
+    - name: Display formatted process information
+      # Documentation: Provide visibility into the captured state for logging and audit trails.
+      ansible.builtin.debug:
+        msg: |
+          ======================= PROCESSES =======================
+          {{ proc_result.stdout }}

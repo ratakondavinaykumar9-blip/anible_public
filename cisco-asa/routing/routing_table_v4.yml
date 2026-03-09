@@ -1,0 +1,35 @@
+---
+# Routing Table V4 - Improved for Enterprise Standards
+# Improved: 2026-03-08
+# Author: Architect:#
+# This playbook retrieves and validates the IPv4 routing table from Cisco ASA/Firepower devices.
+# Adheres to: Idempotency (read-only), Observability (assert), Error Handling, and FQCN.
+
+- name: IPv4 Routing Table Analysis
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPv4 routing table from device
+      # Using Fully Qualified Collection Name (FQCN) for reliability
+      ansible.netcommon.cli_command:
+        command: show route ipv4
+      register: v4_routes
+      # Error Handling: Ensure the task fails if the CLI command execution fails
+      failed_when: v4_routes.failed | default(false)
+
+    - name: Validate routing table retrieval
+      # Observability: Assert that the command returned valid data to verify operational state
+      ansible.builtin.assert:
+        that:
+          - v4_routes.stdout is defined
+          - v4_routes.stdout | length > 0
+        fail_msg: "Failed to retrieve the IPv4 routing table or the table is empty."
+        success_msg: "Successfully retrieved IPv4 routing table."
+
+    - name: Display IPv4 Routing Table
+      # Formatted output for human readability during audit or troubleshooting
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPv4 ROUTES =======================
+          {{ v4_routes.stdout }}

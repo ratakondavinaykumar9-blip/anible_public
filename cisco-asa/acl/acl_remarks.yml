@@ -1,0 +1,36 @@
+---
+# ACL Remarks Analysis
+# Purpose: This playbook retrieves and displays ACL remarks from Cisco ASA/Firepower devices.
+# It adheres to Standard:s for idempotency, observability, and error handling.
+
+- name: Retrieve ACL Remarks
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Fetch ACL remarks from running configuration
+      # Use Fully Qualified Collection Name (FQCN) for best practices and portability
+      ansible.netcommon.cli_command:
+        command: show running-config access-list | include remark
+      register: remarks_output
+      # Error Handling: Ensure the task identifies CLI-level failures or invalid commands
+      failed_when: 
+        - remarks_output.failed | default(false)
+        - "'Invalid input' in remarks_output.stdout"
+        - "'% Permission denied' in remarks_output.stdout"
+
+    - name: Validate command output
+      # Observability: Assert that the command execution was successful and data was returned
+      ansible.builtin.assert:
+        that:
+          - remarks_output.stdout is defined
+        fail_msg: "The command execution failed to return a valid result on {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display ACL Remarks
+      # Idempotency: This task is read-only and safe to run multiple times.
+      # Documentation: Formatted output for clear observability in automation logs.
+      ansible.builtin.debug:
+        msg: |
+          ======================= ACL REMARKS: {{ inventory_hostname }} =======================
+          {{ remarks_output.stdout if remarks_output.stdout | trim | length > 0 else 'No ACL remarks found in the current configuration.' }}

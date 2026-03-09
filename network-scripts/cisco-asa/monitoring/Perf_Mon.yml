@@ -1,0 +1,55 @@
+---
+# Performance Monitoring Playbook
+# Purpose: Collects and validates performance and traffic statistics from ASA/Firepower devices.
+# Standards: Idempotency (Read-only), Observability (Register/Assert), FQCN, Error Handling.
+
+- name: Performance Monitoring
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get performance monitoring statistics
+      # Using FQCN for consistent cross-platform network command execution
+      ansible.netcommon.cli_command:
+        command: show perfmon
+      register: perf
+      # Error Handling: Fail if the command is not recognized or execution fails
+      failed_when: 
+        - perf.failed or "Invalid input" in perf.stdout
+
+    - name: Verify performance monitoring output
+      # Observability: Assert that data was successfully captured
+      ansible.builtin.assert:
+        that:
+          - perf.stdout is defined
+          - perf.stdout | length > 0
+        fail_msg: "Performance monitoring data collection returned no content."
+        success_msg: "Performance monitoring data successfully captured."
+
+    - name: Get traffic statistics
+      ansible.netcommon.cli_command:
+        command: show traffic
+      register: traffic
+      failed_when: 
+        - traffic.failed or "Invalid input" in traffic.stdout
+
+    - name: Verify traffic statistics output
+      ansible.builtin.assert:
+        that:
+          - traffic.stdout is defined
+          - traffic.stdout | length > 0
+        fail_msg: "Traffic statistics collection returned no content."
+        success_msg: "Traffic statistics successfully captured."
+
+    - name: Display Performance and Traffic Report
+      # Formatted debug for improved human-readability and observability
+      ansible.builtin.debug:
+        msg: |
+          ======================= PERFORMANCE REPORT =======================
+          DEVICE: {{ inventory_hostname }}
+          
+          --- SHOW PERFMON ---
+          {{ perf.stdout }}
+          
+          --- SHOW TRAFFIC ---
+          {{ traffic.stdout }}

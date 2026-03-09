@@ -1,0 +1,39 @@
+---
+# Failover Config Check
+# Improved to follow Standard:s (Idempotency, Observability, Documentation, Error Handling, FQCN)
+# Date: 2026-03-08
+- name: Failover Config Check
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve current failover status from the security appliance
+      # FQCN: Using ansible.netcommon to ensure consistent module resolution
+      # Documentation: This task is read-only and inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: show failover
+      register: failover_output
+      # Error Handling: Ensure we catch both transport failures and CLI syntax errors
+      failed_when: 
+        - failover_output.failed or "Invalid" in failover_output.stdout
+
+    - name: Verify failover is active and operational
+      # Observability: Using assertions to programmatically validate the operational state
+      ansible.builtin.assert:
+        that:
+          - "'Failover On' in failover_output.stdout"
+        fail_msg: "CRITICAL: Failover is NOT enabled or is misconfigured on {{ inventory_hostname }}"
+        success_msg: "SUCCESS: Failover is active on {{ inventory_hostname }}"
+      # Error Handling: Continue execution to allow status reporting for all devices
+      ignore_errors: true
+
+    - name: Display formatted failover details
+      # Documentation: Provides human-readable output for troubleshooting and auditing
+      ansible.builtin.debug:
+        msg: |
+          ======================================================================
+          DEVICE: {{ inventory_hostname }}
+          FAILOVER STATUS REPORT:
+          ======================================================================
+          {{ failover_output.stdout }}
+          ======================================================================

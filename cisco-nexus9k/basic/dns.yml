@@ -1,0 +1,75 @@
+---
+# DNS Configuration for Cisco Nexus 9000
+# Improved: 2026-03-08
+# Author: Architect:#
+# This playbook manages DNS settings on Nexus switches, ensuring 
+# connectivity and name resolution. It follows production standards 
+# for idempotency, observability, and robust error handling.
+
+- name: Configure DNS Settings
+  hosts: nexus9k
+  gather_facts: false
+  connection: network_cli
+
+  vars:
+    # Consolidate DNS variables with defaults to prevent runtime errors
+    # Using 'omit' allows the module to skip parameters if variables are missing
+    dns_primary: "{{ dns_servers.primary | default(omit) }}"
+    dns_secondary: "{{ dns_servers.secondary | default(omit) }}"
+    dns_domain_name: "{{ dns_domain | default(omit) }}"
+    dns_vrf: management
+    # Filter the list to ensure only defined servers are processed
+    name_servers: "{{ [dns_primary, dns_secondary] | reject('none') | list }}"
+
+  tasks:
+    - name: Validate required DNS variables
+      # Observability: Fail early if critical configuration data is missing
+      ansible.builtin.assert:
+        that:
+          - name_servers | length > 0
+          - dns_domain_name is defined
+        fail_msg: "DNS configuration error: primary server and domain name are mandatory variables."
+
+    - name: Apply DNS server and domain configuration
+      # Idempotency: nxos_dns provides atomic state management for DNS settings
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+      cisco.nxos.nxos_dns:
+        servers: "{{ name_servers }}"
+        domain_name: "{{ dns_domain_name }}"
+        vrf: "{{ dns_vrf }}"
+        state: present
+      register: dns_config_result
+      notify: save configuration
+
+    - name: Verify operational DNS configuration
+      # Observability: Retrieve the current state from the device to confirm changes
+      cisco.nxos.nxos_command:
+        commands:
+          - show run | include "ip name-server|ip domain-name"
+          - show hosts
+      register: dns_verify_output
+      changed_when: false
+
+    - name: Assert configuration integrity
+      # Success Verification: Ensure the device running-config matches desired state
+      ansible.builtin.assert:
+        that:
+          - "dns_domain_name in dns_verify_output.stdout[0]"
+          - "dns_primary in dns_verify_output.stdout[0]"
+        fail_msg: "Validation failed: The DNS settings on the device do not match the intended configuration."
+
+    - name: Test DNS server reachability via ping
+      # Error Handling: Perform a connectivity check but allow the playbook to 
+      # continue if ICMP is blocked by firewalls (failed_when: false)
+      cisco.nxos.nxos_command:
+        commands: "ping {{ dns_primary }} vrf {{ dns_vrf }} count 2"
+      register: dns_reachability
+      failed_when: false
+      when: dns_primary is defined
+
+  handlers:
+    - name: save configuration
+      # Persistence: Ensures configuration survives a device reboot
+      cisco.nxos.nxos_config:
+        save: true
+---

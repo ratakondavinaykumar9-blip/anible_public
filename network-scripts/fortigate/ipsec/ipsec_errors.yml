@@ -1,0 +1,31 @@
+---
+# FortiGate IPSec VPN Error Analysis Playbook
+# Purpose: Retrieves IKE/IPSec log entries for troubleshooting. 
+# This playbook is idempotent as it performs read-only diagnostic operations.
+- name: Get IPSec Errors
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPSec log buffer from FortiGate
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: diagnose vpn ike log
+      register: errors_output
+      # Error Handling: Ensure the task fails if the command is unrecognized by the OS
+      failed_when: 
+        - errors_output.failed or "unknown command" in errors_output.stdout
+
+    - name: Validate command execution and data capture
+      # Observability: Use assert to verify the register contains stdout
+      ansible.builtin.assert:
+        that:
+          - errors_output.stdout is defined
+        fail_msg: "Failed to capture output from the FortiGate device."
+        quiet: true
+
+    - name: Display IPSec Error Details
+      # Documentation: Presenting logs in a structured format for better operator visibility
+      ansible.builtin.debug:
+        msg: |
+          =======================

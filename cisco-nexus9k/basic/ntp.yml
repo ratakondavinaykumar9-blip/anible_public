@@ -1,0 +1,118 @@
+---
+# ==============================================================================
+# Playbook: Configure NTP Settings on Nexus 9000
+# ==============================================================================
+# Author: Analyst (OpenClaw)
+# Improved By: Architect:(Senior Network Automation Expert)
+# Version: 1.2.0
+# Description: Idempotent configuration of NTP servers and timezone on Cisco 
+#              Nexus 9000 switches with integrated validation and sync checks.
+# ==============================================================================
+
+- name: Configure NTP Time Synchronization
+  hosts: nexus9k
+  gather_facts: no
+  connection: network_cli
+
+  vars:
+    # Ensure ntp_server_list is a list, defaulting to empty to prevent template errors
+    ntp_server_list: "{{ ntp_servers | default([]) }}"
+    ntp_vrf: management
+    ntp_source_interface: mgmt0
+    timezone_config: "{{ timezone | default('UTC 0 0') }}"
+    save_config: true
+
+  tasks:
+    - name: NTP Configuration and Validation Block
+      block:
+        - name: Verify Prerequisites
+          ansible.builtin.assert:
+            that:
+              - ntp_server_list | length > 0
+            fail_msg: "CRITICAL: Variable 'ntp_servers' must be defined and contains at least one server."
+
+        - name: Configure NTP Servers (Idempotent)
+          cisco.nxos.nxos_config:
+            lines:
+              - "ntp server {{ item }} use-vrf {{ ntp_vrf }}"
+          loop: "{{ ntp_server_list }}"
+          register: ntp_config_results
+          # Idempotency is maintained as nxos_config checks the running-config state.
+
+        - name: Configure NTP Source Interface
+          cisco.nxos.nxos_config:
+            lines:
+              - "ntp source-interface {{ ntp_source_interface }}"
+          register: ntp_source_config
+
+        - name: Configure Clock Timezone
+          cisco.nxos.nxos_config:
+            lines:
+              - "clock timezone {{ timezone_config }}"
+          register: timezone_result
+
+        - name: Verify Configuration Applied
+          cisco.nxos.nxos_command:
+            commands:
+              - show run | include ntp
+          register: ntp_verify_output
+          changed_when: false
+
+        - name: Assert Server Presence in Configuration (Observability)
+          ansible.builtin.assert:
+            that:
+              - "'ntp server ' + item in ntp_verify_output.stdout[0]"
+            loop: "{{ ntp_server_list }}"
+            quiet: true
+            fail_msg: "Verification failed: NTP server {{ item }} not found in running configuration."
+
+        - name: Wait for NTP Synchronization
+          cisco.nxos.nxos_command:
+            commands: "show ntp peer-status"
+          register: ntp_sync_status
+          retries: 15
+          delay: 10
+          # Wait until system peer '*' is elected or 'synchronized' is present
+          until:
+            - "ntp_sync_status.stdout[0] is defined"
+            - "'*' in ntp_sync_status.stdout[0] or 'synchronized' in ntp_sync_status.stdout[0]"
+          changed_when: false
+          # We ignore errors to avoid breaking the playbook if sync takes longer than the timeout.
+          failed_when: false
+          when: >
+            (ntp_config_results.results | selectattr('changed') | list | length > 0) or
+            (ntp_source_config.changed)
+
+      rescue:
+        - name: Report Configuration Failure
+          ansible.builtin.debug:
+            msg: "FAILURE: NTP configuration failed on {{ inventory_hostname }}. Check VRF reachability or credentials."
+          failed_when: true
+
+      always:
+        - name: Persist Changes to Startup-Config
+          cisco.nxos.nxos_config:
+            save: yes
+          when:
+            - save_config | bool
+            - >
+              (ntp_config_results.results | selectattr('changed') | list | length > 0) or
+              (ntp_source_config.changed) or
+              (timezone_result.changed)
+          register: final_save_status
+
+    - name: Final Operational Summary
+      ansible.builtin.debug:
+        msg:
+          - "------------------------------------------------"
+          - "Host: {{ inventory_hostname }}"
+          - "NTP Servers: {{ ntp_server_list | join(', ') }}"
+          - "Timezone: {{ timezone_config }}"
+          - "Sync Status: {{ 'Synchronized' if (ntp_sync_status.stdout is defined and '*' in ntp_sync_status.stdout[0]) else 'Pending/Unsynchronized' }}"
+          - "Changes Saved: {{ final_save_status.changed | default(false) }}"
+          - "------------------------------------------------"
+
+  handlers:
+    - name: save configuration
+      cisco.nxos.nxos_config:
+        save: yes

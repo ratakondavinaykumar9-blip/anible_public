@@ -1,0 +1,33 @@
+---
+# FortiGate IPSec Phase 2 Retrieval and Validation
+# Standards: Idempotent (Read-only), FQCN, Assertion-based observability
+- name: Get and Verify IPSec Phase 2
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPSec Phase 2 configuration from FortiGate
+      # FQCN: Using ansible.netcommon.cli_command for platform-agnostic CLI interaction
+      # Idempotency: Read-only operations are inherently idempotent
+      ansible.netcommon.cli_command:
+        command: get vpn ipsec phase2
+      register: ph2_output
+      # Error Handling: Fail if the command returns a common FortiOS error string
+      failed_when: 
+        - ph2_output.failed or "Command fail" in ph2_output.stdout
+
+    - name: Verify Phase 2 configuration data integrity
+      # Observability: Ensure the command returned expected output before proceeding
+      ansible.builtin.assert:
+        that:
+          - ph2_output.stdout is defined
+          - ph2_output.stdout | length > 0
+        fail_msg: "IPSec Phase 2 configuration could not be retrieved or is empty."
+        success_msg: "IPSec Phase 2 configuration successfully captured."
+
+    - name: Display IPSec Phase 2 Details
+      # Documentation: Providing a formatted view of the operational state
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC PHASE 2 OPERATIONAL STATE =======================
+          {{ ph2_output.stdout }}

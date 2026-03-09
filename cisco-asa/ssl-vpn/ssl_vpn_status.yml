@@ -1,0 +1,59 @@
+---
+# SSL VPN Status Analysis Playbook
+# Improved for industry standards: Idempotency, Observability, and Error Handling
+#
+# Purpose: Retrieves real-time SSL VPN session data and global SSL statistics.
+# Idempotency: This playbook uses read-only "show" commands and is safe for repeated execution.
+# Author: Architect: name: Get SSL VPN Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve active SSL VPN session database
+      # Using FQCN for vendor-specific command execution
+      cisco.asa.asa_command:
+        commands:
+          - show vpn-sessiondb ssl
+      register: ssl_sessions_output
+      # Error Handling: Ensure command was accepted by the ASA parser
+      failed_when: 
+        - ssl_sessions_output.failed or "Invalid input" in ssl_sessions_output.stdout[0]
+
+    - name: Verify SSL VPN session data retrieval
+      # Observability: Assert that we received a valid response from the device
+      ansible.builtin.assert:
+        that:
+          - "ssl_sessions_output.stdout[0] is defined"
+          - "ssl_sessions_output.stdout[0] | length > 0"
+        fail_msg: "Failed to retrieve SSL VPN session data or received empty response."
+        quiet: true
+
+    - name: Retrieve SSL protocol statistics and configuration
+      cisco.asa.asa_command:
+        commands:
+          - show ssl
+      register: ssl_stats_output
+      failed_when:
+        - ssl_stats_output.failed or "Invalid input" in ssl_stats_output.stdout[0]
+
+    - name: Verify SSL statistics retrieval success
+      ansible.builtin.assert:
+        that:
+          - "ssl_stats_output.stdout[0] is defined"
+          - "'Accept connections' in ssl_stats_output.stdout[0] or 'SSL' in ssl_stats_output.stdout[0]"
+        fail_msg: "Unexpected response format for SSL statistics."
+        quiet: true
+
+    - name: Display consolidated SSL VPN operational report
+      # Formatted output for operator visibility
+      ansible.builtin.debug:
+        msg: |
+          ===========================================================
+          SSL VPN SESSION DATABASE
+          ===========================================================
+          {{ ssl_sessions_output.stdout[0] }}
+
+          ===========================================================
+          SSL GLOBAL STATISTICS & PROTOCOL INFO
+          ===========================================================
+          {{ ssl_stats_output.stdout[0] }}

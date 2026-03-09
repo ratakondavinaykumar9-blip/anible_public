@@ -1,0 +1,34 @@
+---
+# Standard:ized Playbook
+# Purpose: Retrieve and validate static routes from Cisco ASA/Firepower devices.
+# Idempotency: Inherently idempotent as 'show' commands are read-only and do not modify device state.
+
+- name: Get Static Routes
+  hosts: asa_firepower
+  gather_facts: false # Disabled to improve performance as device facts are not required for this task.
+
+  tasks:
+    - name: Retrieve static routes via CLI command
+      # Using Fully Qualified Collection Name (FQCN) for reliability and portability.
+      ansible.netcommon.cli_command:
+        command: show route static
+      register: static_routes_result
+      # Error Handling: Ensure the task fails if the command returns an error or if the execution fails.
+      failed_when: 
+        - static_routes_result.failed or "Invalid" in static_routes_result.stdout
+
+    - name: Validate the captured static route data
+      # Observability: Asserting that the command returned content to ensure the data is actionable.
+      ansible.builtin.assert:
+        that:
+          - static_routes_result.stdout is defined
+          - static_routes_result.stdout | length > 0
+        fail_msg: "The 'show route static' command returned empty or undefined results."
+        success_msg: "Static route data successfully retrieved and verified."
+
+    - name: Display the formatted static routes
+      # Documentation: Providing a clean visual log for network operators.
+      ansible.builtin.debug:
+        msg: |
+          ======================= STATIC ROUTES =======================
+          {{ static_routes_result.stdout }}

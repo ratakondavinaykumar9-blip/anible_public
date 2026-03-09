@@ -1,0 +1,35 @@
+---
+# FortiGate Wireless Controller Status Retrieval
+# Purpose: Gathers operational data for Wireless Termination Points (WTP)
+# Standards: Idempotent, Observable, Documented, Error-Resilient, FQCN
+- name: Get Wireless Controller Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve WTP status via CLI
+      # Why: Uses cli_command to capture raw operational state for auditing.
+      # This operation is read-only and therefore inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: "get wireless-controller wtp"
+      register: wtp_info
+      # Error Handling: Identify failure if the output contains common FortiOS error strings
+      failed_when:
+        - wtp_info.failed == true
+        - "'command fail' in wtp_info.stdout"
+
+    - name: Validate WTP data retrieval
+      # Observability: Ensure the command returned actual content to avoid silent failures.
+      ansible.builtin.assert:
+        that:
+          - "wtp_info.stdout is defined"
+          - "wtp_info.stdout | length > 0"
+        fail_msg: "Wireless Controller data retrieval returned empty results. Verify WTPs are configured."
+        success_msg: "Successfully retrieved Wireless Controller WTP status."
+
+    - name: Display Wireless Status
+      # Observability: Provide formatted output for logging and manual verification.
+      ansible.builtin.debug:
+        msg: |
+          ======================= WIRELESS WTP STATUS =======================
+          {{ wtp_info.stdout }}

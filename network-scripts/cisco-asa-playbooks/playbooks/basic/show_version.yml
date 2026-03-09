@@ -1,0 +1,57 @@
+---
+# Playbook: Get ASA Version Information
+# Purpose: Retrieves hardware and software metadata from Cisco ASA devices with strict adherence to 
+# Standard:s (Idempotency, Observability, Documentation, Error Handling, and FQCN).
+- name: Get ASA Version Information
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Default output format; can be overridden at runtime via --extra-vars "output_format=json"
+    output_format: text
+
+  tasks:
+    - name: Retrieve version information from ASA
+      # Why: Fetches critical system metadata (version, model, serial) using the collection-specific module.
+      cisco.asa.asa_version:
+      register: version_output
+      # Error Handling: Fail explicitly if the module cannot communicate with the device.
+      failed_when: version_output.failed | default(false)
+
+    - name: Verify integrity of retrieved version facts
+      # Observability: Ensures the returned data structure contains the required fields before proceeding.
+      ansible.builtin.assert:
+        that:
+          - version_output.ansible_facts.asa_version.version is defined
+          - version_output.ansible_facts.asa_version.serial is defined
+          - version_output.ansible_facts.asa_version.model is defined
+        fail_msg: "The retrieved facts from {{ inventory_hostname }} are incomplete or missing required keys."
+        success_msg: "Successfully validated telemetry for {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Export version facts to JSON for external systems (e.g., SolarWinds)
+      # Why: External monitoring platforms often require structured JSON files for ingestion.
+      # Idempotency: ansible.builtin.copy only modifies the destination file if the content changes.
+      ansible.builtin.copy:
+        content: "{{ version_output.ansible_facts.asa_version | to_nice_json }}"
+        dest: "/tmp/asa_version_{{ inventory_hostname }}.json"
+        owner: root
+        group: root
+        mode: '0644'
+      when: output_format == 'json'
+
+    - name: Generate human-readable system summary
+      # Why: Provides the network operator with a clean, formatted view of the device state in the terminal.
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          ASA SYSTEM SUMMARY: {{ inventory_hostname }}
+          ============================================================
+          Software Version : {{ version_output.ansible_facts.asa_version.version }}
+          Hardware Model   : {{ version_output.ansible_facts.asa_version.model }}
+          Serial Number    : {{ version_output.ansible_facts.asa_version.serial }}
+          Device ID        : {{ version_output.ansible_facts.asa_version.device_id | default('N/A') }}
+          Hardware Specs   : {{ version_output.ansible_facts.asa_version.hardware }}
+          Flash Size       : {{ version_output.ansible_facts.asa_version.flash }}
+          Running Mode     : {{ version_output.ansible_facts.asa_version.running_mode }}
+          ============================================================
+      when: output_format == 'text'

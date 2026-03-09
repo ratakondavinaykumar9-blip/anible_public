@@ -1,0 +1,39 @@
+---
+# Process Information Retrieval
+# This playbook collects process status from Cisco ASA/Firepower devices.
+# It adheres to senior automation standards for observability and reliability.
+
+- name: Get Process Info
+  hosts: asa_firepower
+  gather_facts: false # Facts are not required for command execution, improving performance
+
+  tasks:
+    - name: Retrieve process information from the device
+      # Using Fully Qualified Collection Name (FQCN) for reliability
+      ansible.netcommon.cli_command:
+        command: show process
+      register: proc_result
+      # Error Handling: Explicitly fail if the command is unrecognized or execution fails
+      failed_when: 
+        - proc_result.failed
+        - "'Invalid input' in proc_result.stdout"
+
+    - name: Validate process output integrity
+      # Observability: Ensure we received substantial data before proceeding
+      ansible.builtin.assert:
+        that:
+          - "proc_result.stdout is defined"
+          - "proc_result.stdout | length > 0"
+          - "'Process' in proc_result.stdout or 'Runtime' in proc_result.stdout"
+        fail_msg: "The 'show process' command returned unexpected or empty data."
+        success_msg: "Process data successfully retrieved and validated."
+
+    - name: Display formatted process information
+      # Observability: Present the raw output in a readable format for logs/users
+      ansible.builtin.debug:
+        msg: |
+          ======================= DEVICE PROCESSES =======================
+          {{ proc_result.stdout }}
+
+# Idempotency Note: This playbook is inherently idempotent as 'show' commands 
+# do not modify the state of the target system.

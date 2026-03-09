@@ -1,0 +1,38 @@
+---
+# ACL ACE Count Analysis
+# This playbook retrieves and displays the Access Control Entry (ACE) counts for each ACL
+# on Cisco ASA/Firepower devices. This is essential for monitoring resource limits
+# and ensuring security policies are correctly applied.
+- name: Get ACL ACE Count
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve ACL information from device
+      # Using FQCN (Fully Qualified Collection Name) for stability and clarity
+      ansible.netcommon.cli_command:
+        command: show access-list | include (access-list|entries)
+      register: acl_info
+      # Idempotency: show commands do not modify state; changed_when: false prevents false change reports
+      changed_when: false
+      # Error Handling: Fail if the command is unrecognized or if the connection fails
+      failed_when:
+        - acl_info.failed or "Invalid input" in acl_info.stdout
+
+    - name: Verify ACL data retrieval
+      # Observability: Assert that we received a valid response before attempting to display it
+      ansible.builtin.assert:
+        that:
+          - acl_info.stdout is defined
+          - acl_info.stdout | length > 0
+        fail_msg: "The command returned no data. Ensure ACLs are configured on the target device."
+        success_msg: "ACL ACE information successfully retrieved."
+
+    - name: Display ACL ACE count summary
+      # Documentation: Providing a clear, formatted summary of the gathered data
+      ansible.builtin.debug:
+        msg: |
+          ======================= ACL ACE COUNT SUMMARY =======================
+          Device: {{ inventory_hostname }}
+          Output:
+          {{ acl_info.stdout }}

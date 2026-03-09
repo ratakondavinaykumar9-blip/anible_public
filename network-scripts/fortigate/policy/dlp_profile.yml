@@ -1,0 +1,36 @@
+---
+# FortiGate DLP Profile Retrieval
+# Description: This playbook retrieves and verifies the Data Leak Prevention (DLP) profile configuration.
+# Standards: Idempotency (Read-only), Observability (Register/Assert), Error Handling, FQCN.
+
+- name: Retrieve and Verify DLP Profile
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: "DLP | Fetch firewall dlp-profile configuration"
+      # Best Practices: Using Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: "get firewall dlp-profile"
+      register: dlp_output
+      # Error Handling: Identify failure if the command is unrecognized or returns system errors
+      failed_when: 
+        - dlp_output.failed or "Unknown action" in dlp_output.stdout or "Command fail" in dlp_output.stdout
+      # Idempotency: Read operations are inherently idempotent as they do not modify the device state
+
+    - name: "DLP | Observability - Verify retrieval success"
+      # Observability: Ensure that the command returned actionable data
+      ansible.builtin.assert:
+        that:
+          - "dlp_output.stdout is defined"
+          - "dlp_output.stdout | length > 0"
+        fail_msg: "DLP profile data retrieval failed: The output is empty or undefined."
+        success_msg: "DLP profile configuration successfully captured from the device."
+
+    - name: "DLP | Display Profile Details"
+      # Observability: Provide clear, formatted output for logging and operational review
+      ansible.builtin.debug:
+        msg: |
+          ======================= DLP PROFILE DATA =======================
+          {{ dlp_output.stdout }}
+          ================================================================

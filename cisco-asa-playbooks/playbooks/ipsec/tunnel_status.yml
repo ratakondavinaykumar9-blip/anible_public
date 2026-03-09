@@ -1,0 +1,94 @@
+---
+# IPSec Tunnel Status Overview
+# This playbook retrieves the status of IPSec VPN tunnels on Cisco ASA/Firepower devices.
+# It is designed for observability, error resilience, and automated reporting.
+- name: Get IPSec Tunnel Status
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    output_format: text
+
+  tasks:
+    - name: Gather system facts for reporting
+      # Why: Required to capture 'ansible_date_time' for the JSON metadata.
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "min"
+      when: output_format == 'json'
+
+    - name: Get VPN session database for L2L tunnels
+      # Why: Provides a high-level operational status of active Site-to-Site sessions.
+      # FQCN: Using cisco.asa collection for platform-specific command execution.
+      cisco.asa.asa_command:
+        commands:
+          - show vpn-sessiondb l2l
+      register: tunnel_output
+      failed_when: 
+        - tunnel_output.failed
+        - "'Invalid' in tunnel_output.msg"
+
+    - name: Validate tunnel status command execution
+      # Why: Ensures the device responded with valid data before proceeding.
+      ansible.builtin.assert:
+        that:
+          - "tunnel_output.stdout is defined"
+          - "tunnel_output.stdout | length > 0"
+        fail_msg: "Failed to retrieve vpn-sessiondb output from {{ inventory_hostname }}"
+
+    - name: Get IPSec Security Associations (Phase 2)
+      # Why: Details the encryption, hashing, and traffic counters for data plane security.
+      cisco.asa.asa_command:
+        commands:
+          - show crypto ipsec sa
+      register: ipsec_sa_output
+
+    - name: Get IKEv1 Security Associations (Phase 1)
+      # Why: Checks status for legacy IKEv1 negotiation.
+      # Error Handling: Set to ignore errors if IKEv1 is not configured/active on the device.
+      cisco.asa.asa_command:
+        commands:
+          - show crypto isakmp sa
+      register: ikev1_sa_output
+      ignore_errors: true
+
+    - name: Get IKEv2 Security Associations (Phase 1)
+      # Why: Checks status for modern IKEv2 negotiation.
+      cisco.asa.asa_command:
+        commands:
+          - show crypto ikev2 sa
+      register: ikev2_sa_output
+      ignore_errors: true
+
+    - name: Generate structured JSON report
+      # Why: Creates a persistent, machine-readable audit trail of VPN state.
+      # Idempotency: The 'copy' module ensures the file is updated only if content differs.
+      ansible.builtin.copy:
+        content: |
+          {
+            "device": "{{ inventory_hostname }}",
+            "timestamp": "{{ ansible_date_time.iso8601 | default('N/A') }}",
+            "tunnel_summary": {{ tunnel_output.stdout[0] | to_json }},
+            "ipsec_sa": {{ ipsec_sa_output.stdout[0] | to_json }},
+            "ikev1_sa": {{ (ikev1_sa_output.stdout | default(['No IKEv1 data']))[0] | to_json }},
+            "ikev2_sa": {{ (ikev2_sa_output.stdout | default(['No IKEv2 data']))[0] | to_json }}
+          }
+        dest: "/tmp/asa_ipsec_status_{{ inventory_hostname }}.json"
+        mode: '0644'
+      when: output_format == 'json'
+
+    - name: Display human-readable status summary
+      # Why: Provides immediate operational visibility for the engineer.
+      ansible.builtin.debug:
+        msg: |
+          ======================================================================
+          IPSec Tunnel Status: {{ inventory_hostname }}
+          Timestamp: {{ ansible_date_time.iso8601 | default('N/A') }}
+          ======================================================================
+          ACTIVE SESSIONS (L2L):
+          {{ tunnel_output.stdout[0] }}
+
+          IPSEC SECURITY ASSOCIATIONS:
+          {{ ipsec_sa_output.stdout[0] | truncate(1000) }}
+          ======================================================================
+      when: output_format == 'text'

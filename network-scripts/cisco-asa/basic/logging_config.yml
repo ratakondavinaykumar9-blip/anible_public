@@ -1,0 +1,31 @@
+---
+# Network Automation Framework Architect: Cisco ASA/Firepower Logging Configuration Audit
+# Goal: Retrieve, validate, and document the logging state to ensure operational visibility.
+# This playbook is idempotent by nature as it performs read-only state validation.
+
+- name: Audit Cisco ASA/Firepower Logging Configuration
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve logging configuration from device
+      # Use Fully Qualified Collection Name (FQCN) for Cisco ASA command execution
+      cisco.asa.asa_command:
+        commands:
+          - show logging
+      register: logging_result
+      # Error Handling: Ensure the command executed successfully and returned non-empty output
+      failed_when: 
+        - logging_result.stdout is not defined 
+        - logging_result.stdout | length == 0
+
+    - name: Validate that logging is operational
+      # Observability: Automated verification of the device's operational state
+      # This ensures compliance with security standards across the fleet
+      ansible.builtin.assert:
+        that:
+          - "'Logging enable' in logging_result.stdout[0]"
+        fail_msg: "Critical: Logging is DISABLED on {{ inventory_hostname }}. Security compliance failure."
+        success_msg: "Logging is confirmed ENABLED on {{ inventory_hostname }}."
+
+    - name: Display formatted logging

@@ -1,0 +1,38 @@
+---
+# Nat Frag Chain - Improved for Enterprise Standards
+# Purpose: This playbook audits NAT fragmentation chain settings on Cisco ASA/Firepower devices.
+# Idempotency: This is a read-only audit operation, ensuring no state changes occur.
+# Best Practices: Uses Fully Qualified Collection Names (FQCN).
+
+- name: NAT Fragmentation Configuration Audit
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve NAT fragmentation configuration from device
+      # Using FQCN for ansible.netcommon to ensure cross-platform compatibility
+      ansible.netcommon.cli_command:
+        command: show running-config nat | include fragment
+      register: frag_output
+      # Error Handling: Fails only if the command is unrecognized or execution fails
+      failed_when: 
+        - frag_output.failed
+        - "'Invalid' in frag_output.stderr"
+      ignore_errors: false
+
+    - name: Validate data retrieval
+      # Observability: Use assert to verify that the device returned a valid response
+      ansible.builtin.assert:
+        that:
+          - frag_output.stdout is defined
+        fail_msg: "Failed to retrieve configuration from {{ inventory_hostname }}"
+        success_msg: "Configuration successfully retrieved from {{ inventory_hostname }}"
+
+    - name: Display NAT Fragmentation Status
+      # Observability: Provides formatted output for audit logging
+      ansible.builtin.debug:
+        msg: |
+          ======================= NAT FRAGMENTATION =======================
+          Hostname: {{ inventory_hostname }}
+          Config: {{ frag_output.stdout | default('No explicit configuration found (Using System Defaults)', true) }}
+          ==================================================================

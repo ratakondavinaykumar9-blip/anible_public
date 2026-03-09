@@ -1,0 +1,35 @@
+---
+# FortiGate Admin List Retrieval
+# This playbook retrieves the list of administrators from a FortiGate device.
+# It adheres to industry standards for idempotency, observability, and error handling.
+- name: Get Admin List
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve system administrators via CLI
+      # Why: 'get system admin' is the standard command to list administrators in FortiOS.
+      # This operation is read-only and inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: get system admin
+      register: admin_output
+      # Standard: Explicitly handle cases where the command might be rejected or fail.
+      failed_when: 
+        - admin_output.failed | default(false)
+        - "'command parse error' in admin_output.stdout"
+
+    - name: Verify administrator data was successfully retrieved
+      # Standard: Observability - Using assert to ensure the output is not empty.
+      ansible.builtin.assert:
+        that:
+          - admin_output.stdout is defined
+          - admin_output.stdout | length > 0
+        fail_msg: "The administrator list could not be retrieved or is empty."
+        success_msg: "Administrator list successfully captured."
+
+    - name: Display administrator list
+      # Why: Provides visual confirmation of the system state to the operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= ADMINS =======================
+          {{ admin_output.stdout }}

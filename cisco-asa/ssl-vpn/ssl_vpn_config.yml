@@ -1,0 +1,54 @@
+---
+# SSL VPN Configuration Audit
+# This playbook retrieves SSL VPN and Tunnel-Group configurations from Cisco ASA/Firepower devices.
+# Improved for:
+# - Idempotency: Read-only operations are inherently idempotent and safe for repeated execution.
+# - Observability: Utilizing 'register' and 'assert' to verify task success and connectivity.
+# - Error Handling: Using 'ignore_errors' to handle devices where specific features may not be configured.
+# - Best Practices: Using Fully Qualified Collection Names (FQCN) throughout.
+
+- name: Get SSL VPN Configuration
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve WebVPN running configuration
+      # FQCN: Using cisco.asa collection for platform-specific reliability
+      cisco.asa.asa_command:
+        commands:
+          - show run webvpn
+      register: webvpn_output
+      # Error Handling: ignore_errors allows the play to continue if webvpn is not yet initialized
+      ignore_errors: true
+
+    - name: Validate WebVPN command execution
+      # Observability: Ensure the command was sent successfully to the device
+      ansible.builtin.assert:
+        that:
+          - webvpn_output is not failed
+        fail_msg: "Failed to retrieve WebVPN configuration from {{ inventory_hostname }}. Check connectivity/permissions."
+        quiet: true
+
+    - name: Retrieve Tunnel-Group running configuration
+      cisco.asa.asa_command:
+        commands:
+          - show run tunnel-group
+      register: tunnel_group_output
+      ignore_errors: true
+
+    - name: Validate Tunnel-Group command execution
+      ansible.builtin.assert:
+        that:
+          - tunnel_group_output is not failed
+        fail_msg: "Failed to retrieve Tunnel-Group configuration from {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display SSL VPN and Tunnel-Group Details
+      # Documentation: Providing a consolidated view of the network state for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= SSL VPN CONFIG: {{ inventory_hostname }} =======================
+          {{ webvpn_output.stdout[0] if webvpn_output.stdout is defined and webvpn_output.stdout[0] != "" else "No WebVPN configuration found." }}
+          
+          ======================= TUNNEL GROUP CONFIG =======================
+          {{ tunnel_group_output.stdout[0] if tunnel_group_output.stdout is defined and tunnel_group_output.stdout[0] != "" else "No Tunnel-Group configuration found." }}

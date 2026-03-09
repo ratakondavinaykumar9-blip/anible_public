@@ -1,0 +1,34 @@
+---
+# FortiGate Traffic Monitoring Playbook
+# Standards: Idempotency (read-only), Observability (asserts), Documentation (comments), 
+# Error Handling (failed_when), and Best Practices (FQCN).
+
+- name: Monitor FortiGate Traffic
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Get system interface traffic statistics
+      # FQCN: Using ansible.netcommon.cli_command for standardized network device interaction
+      ansible.netcommon.cli_command:
+        command: get system interface traffic
+      register: traffic_output
+      # Idempotency: Mark as changed: false as this is a diagnostic, read-only operation
+      changed_when: false
+      # Error Handling: Ensure the command returns a success code and non-empty output
+      failed_when: 
+        - traffic_output.rc is defined and traffic_output.rc != 0
+        - traffic_output.stdout == ""
+
+    - name: Verify traffic data integrity
+      # Observability: Assert that the output contains expected keywords to confirm valid data
+      ansible.builtin.assert:
+        that:
+          - "traffic_output.stdout is defined"
+          - "'interface' in traffic_output.stdout or 'traffic' in traffic_output.stdout"
+        fail_msg: "Traffic statistics could not be validated or the output format is unrecognized."
+        quiet: true
+
+    - name: Display the traffic monitoring report
+      # Observability: Provide a clear, formatted view of the real-time system state
+      ansible.builtin.

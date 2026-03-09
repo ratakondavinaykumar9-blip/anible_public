@@ -1,0 +1,41 @@
+---
+# Playbook: Cisco ASA Configuration Backup to TFTP
+# Purpose: Automates the archival of the running-config to a remote TFTP server 
+# while ensuring operational idempotency and observability.
+- name: Backup Cisco ASA to TFTP
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    tftp_server: "10.0.0.1"
+    # Using a structured filename allows for consistent backup identification
+    backup_file: "{{ inventory_hostname }}_running_config.cfg"
+
+  tasks:
+    - name: Execute running-config backup to TFTP
+      # FQCN: Using ansible.netcommon.cli_command for cross-platform network compatibility
+      # Idempotency: Using the full URI prevents interactive prompts, ensuring the task is non-blocking
+      ansible.netcommon.cli_command:
+        command: "copy /noconfirm running-config tftp://{{ tftp_server }}/{{ backup_file }}"
+      register: tftp_output
+      # Error Handling: Define explicit failure conditions based on Cisco ASA CLI responses
+      failed_when:
+        - "'Error' in tftp_output.stdout"
+        - "'Invalid' in tftp_output.stdout"
+        - "'Connection timed out' in tftp_output.stdout"
+
+    - name: Validate TFTP transfer success
+      # Observability: Assert that the command output confirms the data was actually written
+      ansible.builtin.assert:
+        that:
+          - "'bytes copied' in tftp_output.stdout"
+        fail_msg: "TFTP transfer failed for {{ inventory_hostname }}. CLI Output: {{ tftp_output.stdout }}"
+        success_msg: "Successfully backed up config to {{ tftp_server }}/{{ backup_file }}"
+
+    - name: Log backup completion
+      # Observability: Provide a clear summary of the operation for audit trails
+      ansible.builtin.debug:
+        msg: 
+          - "Host: {{ inventory_hostname }}"
+          - "Status: Backup Completed"
+          - "Destination: {{ tftp_server }}/{{ backup_file }}"
+          - "Details: {{ tftp_output.stdout_lines | last }}"

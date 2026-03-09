@@ -1,0 +1,34 @@
+---
+# FortiGate HA Peer List
+# Purpose: Retrieves High Availability (HA) peer information from FortiGate devices.
+# This playbook is idempotent as it performs a read-only operation ('get').
+- name: Get HA Peer List
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve HA peer status via CLI
+      # Using FQCN for network common CLI execution.
+      ansible.netcommon.cli_command:
+        command: get system ha peer
+      register: ha_peers
+      # Error Handling: Fail if the command is unrecognized or execution fails.
+      failed_when: 
+        - ha_peers.failed 
+        - "'command parse error' in ha_peers.stdout"
+
+    - name: Verify HA peer data retrieval
+      # Observability: Assert that the command returned valid data to ensure device responsiveness.
+      ansible.builtin.assert:
+        that:
+          - ha_peers.stdout is defined
+          - ha_peers.stdout | length > 0
+        fail_msg: "Failed to retrieve HA peer information or output is empty."
+        success_msg: "Successfully captured HA peer information."
+
+    - name: Display HA Peer Details
+      # Documentation: Visual confirmation of retrieved peer status.
+      ansible.builtin.debug:
+        msg: |
+          ======================= HA PEERS =======================
+          {{ ha_peers.stdout }}

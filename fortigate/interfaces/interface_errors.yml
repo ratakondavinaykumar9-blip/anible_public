@@ -1,0 +1,36 @@
+---
+# FortiGate Interface Error Audit Playbook
+# Retrieves hardware-level NIC statistics to identify potential layer 1/2 issues.
+# Standards: Idempotent (Read-only), Observable (Assert/Register), FQCN used.
+
+- name: FortiGate Interface Error Audit
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve hardware NIC information
+      # Using FQCN and capturing output for observability.
+      # This is a read-only operation and thus inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: diagnose hardware deviceinfo nic
+      register: nic_stats_result
+      # Ensure the command was executed successfully by the device.
+      failed_when: nic_stats_result.rc != 0 or "unknown" in nic_stats_result.stdout
+
+    - name: Validate command output
+      # Observability: Verify that the output is populated to ensure data is available.
+      ansible.builtin.assert:
+        that:
+          - nic_stats_result.stdout is defined
+          - nic_stats_result.stdout | length > 0
+        fail_msg: "No NIC statistics were returned from the device."
+        success_msg: "NIC statistics successfully retrieved."
+
+    - name: Display Interface Error Statistics
+      # Provides clear visibility for the network operator during execution.
+      ansible.builtin.debug:
+        msg: |
+          ================================================================
+          INTERFACE HARDWARE ERRORS AND STATISTICS
+          ================================================================
+          {{ nic_stats_result.stdout }}

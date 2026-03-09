@@ -1,0 +1,52 @@
+---
+# NAT Control Verification and Status Reporting
+# This playbook verifies the status of NAT control on Cisco ASA/Firepower devices.
+# NAT control requires that all traffic through the ASA match a NAT rule.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+- name: NAT Control Status Verification
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Expected state can be adjusted based on security policy (usually 'disabled' in modern configs)
+    expected_nat_control_state: "disabled"
+
+  tasks:
+    - name: Retrieve NAT control configuration from device
+      # Using FQCN for network command execution
+      cisco.asa.asa_command:
+        commands:
+          - show nat-control
+      register: nat_control_output
+      # Graceful handling for devices where the command might be deprecated or unsupported
+      ignore_errors: true
+
+    - name: Validate command execution success
+      # Observability: Ensure the command actually returned data
+      ansible.builtin.assert:
+        that:
+          - nat_control_output.stdout is defined
+          - nat_control_output.stdout | length > 0
+        fail_msg: "Failed to retrieve NAT control status from {{ inventory_hostname }}"
+        success_msg: "Successfully retrieved NAT control status"
+
+    - name: Analyze and report NAT control state
+      # Documentation: Extracting the specific state for visibility and further logic
+      ansible.builtin.set_fact:
+        current_nat_control_status: "{{ 'enabled' if 'is enabled' in nat_control_output.stdout[0] else 'disabled' }}"
+
+    - name: Log current NAT control status
+      ansible.builtin.debug:
+        msg: 
+          - "Device: {{ inventory_hostname }}"
+          - "Raw Output: {{ nat_control_output.stdout[0] }}"
+          - "Parsed Status: {{ current_nat_control_status }}"
+
+    - name: Verify NAT control matches organizational policy
+      # Observability: Assert that the device state matches our desired security baseline
+      ansible.builtin.assert:
+        that:
+          - current_nat_control_status == expected_nat_control_state
+        fail_msg: "POLICY VIOLATION: NAT control is {{ current_nat_control_status }} but should be {{ expected_nat_control_state }}"
+        success_msg: "Compliance Verified: NAT control is {{ current_nat_control_status }}"
+      # failed_when can be used here if we want to stop execution on mismatch
+      ignore_errors: true

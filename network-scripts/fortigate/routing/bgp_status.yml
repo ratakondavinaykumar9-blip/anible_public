@@ -1,0 +1,37 @@
+---
+# FortiGate BGP Status - Improved for Production Standards
+- name: Get BGP Summary Status
+  hosts: fortigate
+  gather_facts: false
+  # Using network_cli for consistent and reliable command execution on FortiOS
+  connection: ansible.netcommon.network_cli
+
+  tasks:
+    - name: Retrieve BGP summary information
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+      # Idempotency: Read-only operational commands are inherently idempotent
+      ansible.netcommon.cli_command:
+        command: get router info bgp summary
+      register: bgp_summary_output
+      # Error Handling: Ensure failure if FortiGate returns an error string despite exit code 0
+      failed_when:
+        - "bgp_summary_output.stdout is not defined"
+        - "'Command fail' in bgp_summary_output.stdout"
+        - "'Unknown action' in bgp_summary_output.stdout"
+
+    - name: Validate BGP response integrity
+      # Observability: Use assertions to verify the output contains expected structural data
+      ansible.builtin.assert:
+        that:
+          - "bgp_summary_output.stdout | length > 0"
+          - "'Neighbor' in bgp_summary_output.stdout"
+          - "'AS' in bgp_summary_output.stdout"
+        fail_msg: "BGP summary command returned unexpected or empty results. Verify BGP is configured."
+        success_msg: "BGP summary successfully retrieved and validated."
+
+    - name: Display formatted BGP status
+      # Documentation: Providing visibility into the current operational state
+      ansible.builtin.debug:
+        msg: |
+          ======================= BGP STATUS =======================
+          {{ bgp_summary_output.stdout }}

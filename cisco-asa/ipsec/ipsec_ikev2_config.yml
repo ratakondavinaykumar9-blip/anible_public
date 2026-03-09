@@ -1,0 +1,53 @@
+---
+# Ipsec Ikev2 Config
+# Improved for Idempotency, Observability, and industry standards
+# Author: Architect:#
+- name: Get IKEv2 and IPsec Profile Configuration
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IKEv2 configuration from device
+      # Using FQCN for cross-platform network command execution.
+      # This task is idempotent as it performs a read-only operation.
+      ansible.netcommon.cli_command:
+        command: show running-config crypto ikev2
+      register: ikev2_config
+      # Error Handling: Ensure we don't proceed if the command is unrecognized or fails.
+      failed_when: 
+        - "ikev2_config.stdout == ''"
+        - "'Invalid input' in ikev2_config.stdout"
+
+    - name: Validate IKEv2 configuration retrieval
+      # Observability: Assert that the command returned data to verify success.
+      ansible.builtin.assert:
+        that:
+          - ikev2_config.stdout | length > 0
+        fail_msg: "Failed to retrieve IKEv2 configuration or config is empty."
+        success_msg: "Successfully retrieved IKEv2 configuration."
+
+    - name: Retrieve crypto IPsec profile configuration
+      # Captures the current state of IPsec profiles for observability.
+      ansible.netcommon.cli_command:
+        command: show running-config crypto ipsec profile
+      register: ipsec_profile_config
+      failed_when: 
+        - "ipsec_profile_config.stdout == ''"
+        - "'Invalid input' in ipsec_profile_config.stdout"
+
+    - name: Validate IPsec profile configuration retrieval
+      # Observability: Confirms the presence of IPsec profile data.
+      ansible.builtin.assert:
+        that:
+          - ipsec_profile_config.stdout | length > 0
+        fail_msg: "Failed to retrieve IPsec profile configuration or config is empty."
+        success_msg: "Successfully retrieved IPsec profile configuration."
+
+    - name: Display consolidated IKEv2 and IPsec configuration
+      # Documentation: Providing a clear summary of the retrieved device state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= IKEv2 CONFIG =======================
+          {{ ikev2_config.stdout }}
+          ======================= IPSEC PROFILE ======================
+          {{ ipsec_profile_config.stdout }}

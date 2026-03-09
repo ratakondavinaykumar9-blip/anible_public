@@ -1,0 +1,167 @@
+---
+- name: Nexus 9000 Production Baseline Configuration
+  hosts: cisco_nexus
+  gather_facts: false
+  vars:
+    # NTP Servers for accurate log timestamps and scheduled operations
+    ntp_servers:
+      - 10.1.1.1
+      - 10.1.1.2
+
+    # DNS Configuration for reachability to external services and FQDNs
+    dns_servers:
+      primary: 10.1.1.10
+      secondary: 10.1.1.11
+    dns_domain: corp.local
+
+    # SNMP Configuration for NMS monitoring and trap delivery
+    snmp:
+      contact: "Network Operations - noc@corp.local"
+      location: "Data Center - Site 01"
+      community_ro: "public-ro"
+      community_rw: "private-rw"
+      traps:
+        - 10.1.1.100
+        - 10.1.1.101
+
+    # Syslog Configuration for centralized event logging and audit trails
+    syslog_servers:
+      - 10.1.1.50
+      - 10.1.1.51
+
+    # Management Connectivity (L3)
+    mgmt_vlan: 999
+    mgmt_interface: mgmt0
+    default_gateway: 10.1.1.254
+
+    # AAA Configuration for Secure Identity and Access Management
+    aaa_servers:
+      tacacs:
+        - { host: 10.1.1.20, key: "{{ vault_tacacs_key }}", timeout: 10 }
+      radius:
+        - { host: 10.1.1.21, key: "{{ vault_radius_key }}", timeout: 10 }
+
+    # Standardized Administrative Users
+    default_users:
+      - { name: netadmin, role: network-admin, sshkey: "{{ vault_netadmin_sshkey }}" }
+      - { name: netops, role: network-operator, sshkey: "{{ vault_netops_sshkey }}" }
+
+    # Legal and Informational Banners
+    banners:
+      motd: |
+        ** AUTHORIZED ACCESS ONLY **
+        This system is for authorized users only.
+        All activities are logged and monitored.
+        Unauthorized access is prohibited.
+      login: |
+        ** Nexus 9000 Switch - Corp Network **
+        Unauthorized access is prohibited.
+
+    # Backup and Operational Defaults
+    backup:
+      path: /opt/backup/nexus9k
+      retention_days: 90
+      pre_change: true
+    timezone: UTC
+
+  tasks:
+    - name: Perform pre-change backup of running-config
+      cisco.nxos.nxos_config:
+        backup: yes
+        backup_options:
+          filename: "{{ inventory_hostname }}_pre_change.cfg"
+          dir_path: "{{ backup.path }}"
+      when: backup.pre_change | bool
+      register: backup_status
+      ignore_errors: yes # Ensures local storage issues don't block network changes
+
+    - name: Configure NTP servers for time synchronization
+      cisco.nxos.nxos_ntp_global:
+        server: "{{ item }}"
+        state: present
+      loop: "{{ ntp_servers }}"
+      register: ntp_config
+
+    - name: Verify NTP configuration success
+      ansible.builtin.assert:
+        that: ntp_config is successful
+        fail_msg: "NTP server configuration failed on {{ inventory_hostname }}"
+
+    - name: Configure DNS name servers and domain suffix
+      cisco.nxos.nxos_dns:
+        servers:
+          - "{{ dns_servers.primary }}"
+          - "{{ dns_servers.secondary }}"
+        domain: "{{ dns_domain }}"
+        state: present
+      register: dns_config
+
+    - name: Configure SNMP Server base details
+      cisco.nxos.nxos_snmp_server:
+        contact: "{{ snmp.contact }}"
+        location: "{{ snmp.location }}"
+      register: snmp_base
+
+    - name: Configure SNMP Communities (Idempotent)
+      cisco.nxos.nxos_snmp_community:
+        community: "{{ item.name }}"
+        access: "{{ item.access }}"
+        state: present
+      loop:
+        - { name: "{{ snmp.community_ro }}", access: ro }
+        - { name: "{{ snmp.community_rw }}", access: rw }
+      register: snmp_comm
+
+    - name: Configure centralized Syslog servers
+      cisco.nxos.nxos_logging_global:
+        remote_server: "{{ item }}"
+        state: present
+      loop: "{{ syslog_servers }}"
+      register: syslog_config
+
+    - name: Configure Management Default Gateway in VRF management
+      cisco.nxos.nxos_static_route:
+        prefix: 0.0.0.0/0
+        next_hop: "{{ default_gateway }}"
+        vrf: management
+      register: route_config
+
+    - name: Configure TACACS+ AAA servers for identity
+      cisco.nxos.nxos_aaa_server_host:
+        server_type: tacacs
+        address: "{{ item.host }}"
+        key: "{{ item.key }}"
+        timeout: "{{ item.timeout }}"
+        state: present
+      loop: "{{ aaa_servers.tacacs }}"
+      register: aaa_config
+
+    - name: Ensure standardized Local Users are present
+      cisco.nxos.nxos_user:
+        name: "{{ item.name }}"
+        role: "{{ item.role }}"
+        sshkey: "{{ item.sshkey }}"
+        state: present
+      loop: "{{ default_users }}"
+      register: user_config
+      no_log: true # Mask sensitive SSH keys in logs
+
+    - name: Apply Login and MOTD Banners
+      cisco.nxos.nxos_banner:
+        banner: "{{ item.key }}"
+        text: "{{ item.value }}"
+        state: present
+      loop: "{{ banners | dict2items }}"
+      register: banner_config
+
+    - name: Commit changes to startup-config
+      cisco.nxos.nxos_config:
+        save_when: modified
+      register: save_config
+
+    - name: Final observability assertion
+      ansible.builtin.assert:
+        that:
+          - save_config is successful
+          - not save_config.failed
+        fail_msg: "Configuration changes failed or could not be saved to startup-config"

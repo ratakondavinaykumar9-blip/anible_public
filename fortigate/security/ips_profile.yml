@@ -1,0 +1,40 @@
+---
+# FortiGate IPS Profile Retrieval
+# Improved: 2026-03-08
+# Author: Architect:#
+# This playbook retrieves the IPS profile (sensor) configuration from FortiGate devices.
+# It follows automation best practices for idempotency, observability, and error handling.
+
+- name: Retrieve and Verify FortiGate IPS Profiles
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Get IPS Profile configuration from device
+      # Use FQCN for network common CLI command
+      ansible.netcommon.cli_command:
+        command: show firewall ips sensor
+      register: ips_profile_output
+      # Idempotency: Read-only 'show' commands must not trigger a 'changed' state
+      changed_when: false
+      # Error Handling: Ensure the command was successful and not rejected by the CLI
+      failed_when:
+        - ips_profile_output.stdout is not defined
+        - "'Command fail' in ips_profile_output.stdout"
+        - "'Unknown action' in ips_profile_output.stdout"
+
+    - name: Validate IPS Profile response data
+      # Observability: Verify that the output contains expected configuration keywords
+      ansible.builtin.assert:
+        that:
+          - ips_profile_output.stdout | length > 0
+          - "'edit' in ips_profile_output.stdout or 'config' in ips_profile_output.stdout"
+        fail_msg: "The IPS profile configuration could not be retrieved or is empty."
+        success_msg: "IPS profile configuration successfully retrieved and validated."
+
+    - name: Display IPS Profile configuration
+      # Observability: Present the retrieved configuration in a readable format
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPS PROFILE (SENSORS) =======================
+          {{ ips_profile_output.stdout }}

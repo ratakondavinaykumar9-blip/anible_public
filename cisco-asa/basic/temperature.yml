@@ -1,0 +1,33 @@
+---
+# Temperature Monitoring Playbook
+# This playbook retrieves and verifies temperature data from Cisco ASA/Firepower devices.
+# It adheres to standards for Idempotency (read-only), Observability, and FQCN usage.
+
+- name: Retrieve and Verify Device Temperature
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve temperature data from device
+      # Use FQCN for cross-platform network CLI compatibility
+      ansible.netcommon.cli_command:
+        command: show temperature
+      register: temperature_result
+      # Error Handling: Ensure the task fails if the command output suggests an error
+      failed_when: 
+        - temperature_result.failed or "Invalid input" in temperature_result.stdout
+
+    - name: Verify temperature data integrity
+      # Observability: Assert that the output contains expected keywords (e.g., Celsius)
+      ansible.builtin.assert:
+        that:
+          - "temperature_result.stdout is defined"
+          - "'Celsius' in temperature_result.stdout or 'Temperature' in temperature_result.stdout"
+        fail_msg: "Temperature output was empty or did not contain valid measurement data."
+        success_msg: "Temperature data successfully retrieved and validated."
+
+    - name: Display temperature status
+      ansible.builtin.debug:
+        msg: |
+          ======================= SYSTEM TEMPERATURE =======================
+          {{ temperature_result.stdout }}

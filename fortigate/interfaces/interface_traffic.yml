@@ -1,0 +1,36 @@
+---
+# FortiGate Interface Traffic Monitoring
+# This playbook retrieves real-time interface traffic statistics from FortiGate devices.
+# Improved for Idempotency, Observability, and Error Handling.
+
+- name: Get FortiGate Interface Traffic
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve traffic statistics from system interfaces
+      # Idempotency: This is a read-only command and is inherently safe to run multiple times.
+      # FQCN: Using the ansible.netcommon.cli_command module for raw CLI output.
+      ansible.netcommon.cli_command:
+        command: "get system interface traffic"
+      register: traffic_info
+      # Error Handling: Ensure the command execution was successful and returned non-empty output.
+      failed_when:
+        - traffic_info.failed or traffic_info.stdout | length == 0
+
+    - name: Assert traffic data validity
+      # Observability: Verifying that the output contains expected keywords to ensure data integrity.
+      ansible.builtin.assert:
+        that:
+          - "'interface' in traffic_info.stdout"
+        fail_msg: "The retrieved output does not contain valid interface traffic statistics."
+        success_msg: "Interface traffic data successfully validated."
+
+    - name: Display Interface Traffic Report
+      # Observability: Providing a formatted view of the retrieved metrics for logs and operators.
+      ansible.builtin.debug:
+        msg: |
+          ======================= INTERFACE TRAFFIC =======================
+          Device: {{ inventory_hostname }}
+          -----------------------------------------------------------------
+          {{ traffic_info.stdout }}

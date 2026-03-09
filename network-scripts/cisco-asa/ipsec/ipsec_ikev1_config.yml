@@ -1,0 +1,74 @@
+---
+# IKEv1 Tunnel Configuration Audit
+# This playbook retrieves and validates the IKEv1/ISAKMP configuration from Cisco ASA devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, and FQCN.
+- name: Get IKEv1 Configuration
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get IKEv1 ISAKMP policy
+      # FQCN: Using the dedicated cisco.asa collection for platform-specific commands
+      cisco.asa.asa_command:
+        commands:
+          - show running-config crypto isakmp policy
+      register: isakmp_output
+      # Idempotency: Read-only commands must not report changes
+      changed_when: false
+      # Error Handling: Catch CLI execution errors or invalid command responses
+      failed_when: 
+        - isakmp_output.failed or "Invalid input" in isakmp_output.stdout[0]
+
+    - name: Verify ISAKMP policy retrieval
+      # Observability: Assert that the command returned meaningful data
+      ansible.builtin.assert:
+        that:
+          - isakmp_output.stdout[0] | length > 0
+        fail_msg: "Failed to retrieve ISAKMP policy or the configuration is empty."
+        quiet: true
+
+    - name: Get IKEv1 crypto map configuration
+      cisco.asa.asa_command:
+        commands:
+          - show running-config crypto map
+      register: crypto_map_output
+      changed_when: false
+      failed_when: 
+        - crypto_map_output.failed or "Invalid input" in crypto_map_output.stdout[0]
+
+    - name: Verify crypto map retrieval
+      ansible.builtin.assert:
+        that:
+          - crypto_map_output.stdout[0] | length > 0
+        fail_msg: "Failed to retrieve Crypto Map configuration."
+        quiet: true
+
+    - name: Get IKEv1 IPsec transform-set
+      cisco.asa.asa_command:
+        commands:
+          - show crypto ipsec transform-set
+      register: transform_set_output
+      changed_when: false
+      failed_when: 
+        - transform_set_output.failed or "Invalid input" in transform_set_output.stdout[0]
+
+    - name: Verify transform-set retrieval
+      ansible.builtin.assert:
+        that:
+          - transform_set_output.stdout[0] | length > 0
+        fail_msg: "Failed to retrieve IPsec Transform-Set configuration."
+        quiet: true
+
+    - name: Display IKEv1 configuration summary
+      # FQCN: Using ansible.builtin for core modules
+      ansible.builtin.debug:
+        msg: |
+          ======================= IKEv1 CONFIG AUDIT =======================
+          ISAKMP Policy:
+          {{ isakmp_output.stdout[0] }}
+          
+          Crypto Map:
+          {{ crypto_map_output.stdout[0] }}
+          
+          Transform Set:
+          {{ transform_set_output.stdout[0] }}

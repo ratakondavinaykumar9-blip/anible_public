@@ -1,0 +1,41 @@
+---
+# FortiGate DNS Settings - Improved Version
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Get FortiGate DNS Settings
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve system DNS settings via CLI
+      # Use FQCN (ansible.netcommon) for portability and adherence to best practices
+      # Register is used for observability and downstream validation of results
+      ansible.netcommon.cli_command:
+        command: "get system dns"
+      register: dns_result
+      # Idempotency: Read-only 'get' commands should never trigger a 'changed' status
+      changed_when: false
+      # Error Handling: Ensure the command was recognized and executed successfully
+      # Catches specific FortiOS error strings that indicate a command or parsing failure
+      failed_when: >
+        (dns_result.rc is defined and dns_result.rc != 0) or
+        "Command fail" in dns_result.stdout or
+        "Unknown action" in dns_result.stdout
+
+    - name: Verify system DNS data retrieval
+      # Observability: Assert ensures the command returned meaningful data
+      # Verifies operational success by checking for expected keywords in the output
+      ansible.builtin.assert:
+        that:
+          - dns_result.stdout is defined
+          - dns_result.stdout | length > 0
+          - "'primary' in dns_result.stdout or 'secondary' in dns_result.stdout"
+        fail_msg: "The retrieved DNS settings are empty or could not be parsed from {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display system DNS settings output
+      # Observability: Provides clear visibility into the results for the operator and logs
+      ansible.builtin.debug:
+        msg: |
+          ======================= DNS ({{ inventory_hostname }}) =======================
+          {{ dns_result.stdout }}
+          ==============================================================================

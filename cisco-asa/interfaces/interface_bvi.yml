@@ -1,0 +1,45 @@
+---
+# Bridge Virtual Interface (BVI) Information Gathering
+# This playbook retrieves the operational status of BVI interfaces on Cisco ASA/Firepower devices.
+# Adheres to standards for Idempotency, Observability, Documentation, and FQCN usage.
+
+- name: Retrieve BVI Interface Details
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'show interface BVI' command
+      # Use FQCN for the specific Cisco ASA collection
+      cisco.asa.asa_command:
+        commands:
+          - show interface BVI
+      register: bvi_output
+      # Error Handling: Use failed_when to handle cases where the interface might not exist without crashing the play
+      failed_when: 
+        - bvi_output.failed
+        - "'Invalid input' not in bvi_output.msg"
+      ignore_errors: true
+
+    - name: Verify BVI command execution
+      # Observability: Assert that the command was attempted and returned a valid response structure
+      ansible.builtin.assert:
+        that:
+          - bvi_output.stdout is defined
+        fail_msg: "Failed to communicate with the device or execute the command."
+        success_msg: "Successfully contacted device for BVI information."
+
+    - name: Determine BVI existence state
+      # Idempotency/Logic: Define a fact based on the output to safely handle conditional logic later
+      ansible.builtin.set_fact:
+        bvi_defined: "{{ bvi_output.stdout is defined and bvi_output.stdout | length > 0 and 'Interface BVI' in bvi_output.stdout[0] }}"
+
+    - name: Display BVI Interface Information
+      # Observability: Provide clear, formatted output for the network operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= BVI STATUS REPORT =======================
+          {% if bvi_defined %}
+          {{ bvi_output.stdout[0] }}
+          {% else %}
+          NOTICE: BVI interface is not configured or not found on this device.
+          {% endif %}

@@ -1,0 +1,33 @@
+---
+# Playbook: FortiGate Resource Monitoring
+# Purpose: Retrieves and validates real-time CPU and memory usage statistics.
+# Standards: Idempotent (read-only), Observability (assertions), FQCN compliance.
+- name: FortiGate Resource Usage Analysis
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve system resource usage statistics
+      # Why: Fetches raw performance metrics from the FortiOS kernel for monitoring.
+      ansible.netcommon.cli_command:
+        command: diagnose system resource usage
+      register: resource_output
+      # Error Handling: Fail explicitly if the command is not recognized or execution fails.
+      failed_when: 
+        - resource_output.failed or "Unknown command" in resource_output.stdout
+
+    - name: Verify resource data capture
+      # Observability: Assert that the output contains expected data to ensure the device responded correctly.
+      ansible.builtin.assert:
+        that:
+          - resource_output.stdout is defined
+          - resource_output.stdout | length > 0
+        fail_msg: "Resource usage data is empty or the command failed to return output."
+        success_msg: "Resource usage data successfully retrieved and validated."
+
+    - name: Display formatted resource usage
+      # Why: Provides a structured view of the resource metrics for the automation operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE RESOURCE USAGE =======================
+          {{ resource_output.stdout }}

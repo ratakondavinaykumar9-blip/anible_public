@@ -1,0 +1,34 @@
+---
+# FortiGate IPAM Status Retrieval
+# Purpose: Fetches the current IPAM configuration and state for visibility and auditing.
+# Standards: Idempotent (Read-only), Observable (Asserts), FQCN usage.
+
+- name: FortiGate IPAM Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Fetch IPAM status via CLI
+      # Use FQCN to execute the operational command on the network device
+      ansible.netcommon.cli_command:
+        command: get system ipam
+      register: ipam_status
+      # Error Handling: Ensure the task fails if the device returns common error strings
+      failed_when:
+        - ipam_status.failed or "Unknown action" in ipam_status.stdout or "Command fail" in ipam_status.stdout
+
+    - name: Verify IPAM status retrieval
+      # Observability: Assert that the command actually returned data for validation
+      ansible.builtin.assert:
+        that:
+          - ipam_status.stdout is defined
+          - ipam_status.stdout | length > 0
+        fail_msg: "IPAM status retrieval failed or returned empty results."
+        success_msg: "IPAM status successfully retrieved."
+
+    - name: Display IPAM Status
+      # Documentation/Observability: Output the results for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPAM STATUS =======================
+          {{ ipam_status.stdout }}

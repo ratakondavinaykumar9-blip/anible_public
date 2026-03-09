@@ -1,0 +1,55 @@
+---
+- name: Retrieve and Audit Cisco ASA Routing Table
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Output format control (text by default, json to export to file)
+    output_format: text
+
+  tasks:
+    - name: Gather minimal system facts for timestamping
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "min"
+      when: output_format == 'json'
+      # Why: To ensure the generated report contains an accurate timestamp for audit trails.
+
+    - name: Execute 'show route' on the device
+      cisco.asa.asa_command:
+        commands:
+          - show route
+      register: route_output
+      # Error Handling: Explicitly fail if the command is unrecognized or the connection fails.
+      failed_when:
+        - route_output.failed
+        - "'Invalid input' in route_output.stdout[0]"
+      # Why: Capturing the routing table state using the device-specific collection module (FQCN).
+
+    - name: Validate routing table integrity
+      ansible.builtin.assert:
+        that:
+          - route_output.stdout[0] is defined
+          - route_output.stdout[0] | length > 0
+          - "'Gateway of last resort' in route_output.stdout[0]"
+        fail_msg: "Routing table validation failed: Output is empty or missing a default gateway."
+        success_msg: "Routing table successfully retrieved and validated."
+      # Why: Observability task to confirm the device is in a valid operational state before processing data.
+
+    - name: Display routing table to console
+      ansible.builtin.debug:
+        msg: "{{ route_output.stdout[0] }}"
+
+    - name: Persist routing data to structured JSON
+      # Idempotency: Ensures the report file is managed with consistent permissions and content.
+      ansible.builtin.copy:
+        content: "{{ report_content | to_nice_json }}"
+        dest: "/tmp/asa_routes_{{ inventory_hostname }}.json"
+        mode: '0644'
+      vars:
+        report_content:
+          device: "{{ inventory_hostname }}"
+          timestamp: "{{ ansible_facts.date_time.iso8601 | default('N/A') }}"
+          routes: "{{ route_output.stdout[0] }}"
+      when: output_format == 'json'
+      # Why: Provides a machine-readable artifact for downstream analysis and observability.

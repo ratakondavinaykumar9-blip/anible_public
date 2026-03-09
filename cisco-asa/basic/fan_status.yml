@@ -1,0 +1,47 @@
+---
+# Fan Status
+# Improved by Architect:# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
+---
+- name: Get Fan Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve fan status from the device
+      # Using FQCN (ansible.netcommon.cli_command) for best practices.
+      # This task is idempotent as it performs a read-only operation.
+      ansible.netcommon.cli_command:
+        command: show fan
+      register: fan_result
+      # Error Handling: Fail the task if the command is unrecognized or the output is null.
+      failed_when:
+        - fan_result.stdout is not defined
+        - "'Invalid' in fan_result.stdout"
+
+    - name: Assert fan status output integrity
+      # Observability: Verify that the command returned a valid response containing expected keywords.
+      ansible.builtin.assert:
+        that:
+          - fan_result.stdout | length > 0
+          - "'Fan' in fan_result.stdout"
+        fail_msg: "Fan status output is empty or invalid. Check device connectivity and command support."
+        success_msg: "Fan status output retrieved and validated."
+
+    - name: Display Fan Status Information
+      # Providing visibility into the raw output for the operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FAN HARDWARE STATUS =======================
+          {{ fan_result.stdout }}
+          ===================================================================
+
+    - name: Verify all fans are in an operational state
+      # Error Handling: Specifically check for hardware failure indicators in the output.
+      ansible.builtin.assert:
+        that:
+          - "'Failed' not in fan_result.stdout"
+          - "'Critical' not in fan_result.stdout"
+          - "'OFF' not in fan_result.stdout"
+        fail_msg: "CRITICAL: A fan failure or hardware warning has been detected!"
+        quiet: true

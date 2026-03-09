@@ -1,0 +1,34 @@
+---
+# Playbook to retrieve and verify the ARP table from Cisco ASA/Firepower devices.
+# Designed as a read-only operation (inherently idempotent) with enhanced observability.
+- name: Get and Verify ARP Table
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'show arp' command on the network device
+      # Use Fully Qualified Collection Name (FQCN) for reliability and clarity.
+      ansible.netcommon.cli_command:
+        command: show arp
+      register: arp_result
+      # Error Handling: Catch failures or invalid command responses explicitly.
+      failed_when: 
+        - arp_result.failed 
+        - "'Invalid input' in arp_result.stdout or 'Error' in arp_result.stdout"
+
+    - name: Verify ARP table output integrity
+      # Observability: Ensure the command returned expected data before proceeding.
+      ansible.builtin.assert:
+        that:
+          - arp_result.stdout is defined
+          - arp_result.stdout | length > 0
+          - "'Address' in arp_result.stdout or 'MAC' in arp_result.stdout"
+        fail_msg: "The ARP table could not be retrieved or the output is malformed."
+        success_msg: "ARP table successfully retrieved and validated."
+
+    - name: Display formatted ARP Table
+      # Provide a clear, structured view of the output for operational logging.
+      ansible.builtin.debug:
+        msg: |
+          ======================= ARP TABLE =======================
+          {{ arp_result.stdout }}

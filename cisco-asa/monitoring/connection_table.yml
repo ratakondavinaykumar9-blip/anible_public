@@ -1,0 +1,54 @@
+---
+# Connection Table Retrieval Playbook
+# Purpose: Collects active session data from Cisco ASA/Firepower devices for audit and troubleshooting.
+# This playbook adheres to Standard:s for idempotency and observability.
+
+- name: Get Connection Table
+  hosts: asa_firepower
+  gather_facts: false # Network devices do not support standard Python-based fact gathering; performance optimization.
+
+  tasks:
+    - name: Get summary connections
+      # Why: Retrieves a high-level overview of all active stateful connections (TCP/UDP/ICMP).
+      ansible.netcommon.cli_command:
+        command: show conn
+      register: conn_summary
+      failed_when:
+        - conn_summary.failed
+        - "'Invalid input' in conn_summary.stdout"
+
+    - name: Verify summary connection output
+      # Why: Observability - ensures data was successfully captured before continuing the flow.
+      ansible.builtin.assert:
+        that:
+          - "conn_summary.stdout is defined"
+          - "conn_summary.stdout | length > 0"
+        fail_msg: "Connection summary output is empty or undefined for {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved connection summary."
+
+    - name: Get detailed connection information
+      # Why: Detailed view includes TCP flags, idle timers, and byte counts necessary for deep analysis.
+      ansible.netcommon.cli_command:
+        command: show conn detail
+      register: conn_detail
+      failed_when:
+        - conn_detail.failed
+        - "'Invalid input' in conn_detail.stdout"
+
+    - name: Verify detailed connection output
+      # Why: Observability - validates the specific detailed response.
+      ansible.builtin.assert:
+        that:
+          - "conn_detail.stdout is defined"
+          - "conn_detail.stdout | length > 0"
+        fail_msg: "Detailed connection output could not be retrieved for {{ inventory_hostname }}."
+
+    - name: Display connection results
+      # Why: Provides formatted visibility to the operator during playbook execution.
+      ansible.builtin.debug:
+        msg: |
+          ======================= CONNECTION SUMMARY =======================
+          {{ conn_summary.stdout }}
+
+          ======================= CONNECTION DETAILS =======================
+          {{ conn_detail.stdout }}

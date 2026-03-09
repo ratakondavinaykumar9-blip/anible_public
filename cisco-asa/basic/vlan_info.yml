@@ -1,0 +1,35 @@
+---
+# VLAN Information Gathering Playbook
+# This playbook retrieves and verifies VLAN status on Cisco ASA/Firepower devices.
+# It is designed to be read-only (idempotent) and provides verification of output integrity.
+
+- name: Get VLAN Info
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'show vlan' on the target device
+      # Use FQCN for best practices and to ensure the correct module is invoked across different environments.
+      ansible.netcommon.cli_command:
+        command: show vlan
+      register: vlan_result
+      # Error Handling: Explicitly fail if the command is not recognized or returns a syntax error.
+      failed_when: 
+        - vlan_result.failed or "Invalid input" in vlan_result.stdout
+
+    - name: Validate that VLAN information was returned
+      # Observability: Use assert to verify the output contains the 'VLAN' keyword, 
+      # ensuring we didn't receive an empty or irrelevant response.
+      ansible.builtin.assert:
+        that:
+          - "'VLAN' in vlan_result.stdout"
+        fail_msg: "The command output does not appear to contain valid VLAN information."
+        success_msg: "VLAN information successfully retrieved and validated."
+
+    - name: Display VLAN configuration details
+      # Documentation: Provide a clear, formatted view of the command output for logs and operators.
+      ansible.builtin.debug:
+        msg: |
+          ======================= DEVICE VLAN STATUS =======================
+          {{ vlan_result.stdout }}
+          ==================================================================

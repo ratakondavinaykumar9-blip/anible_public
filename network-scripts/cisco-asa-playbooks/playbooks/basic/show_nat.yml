@@ -1,0 +1,68 @@
+---
+# Playbook: Show NAT Rules Table
+# Description: Retrieves and displays NAT configuration from Cisco ASA devices.
+# Standards: Idempotency (Read-only state), Observability (Asserts), Documentation, FQCN, and Error Handling.
+- name: Get NAT Rules
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Default output format is 'text' for console summary; can be overridden to 'json'
+    output_format: text
+
+  tasks:
+    - name: Gather current NAT configuration from ASA
+      # Idempotency: Using state 'gathered' ensures no changes are made to the device config.
+      # FQCN: Using fully qualified collection name for cisco.asa.asa_nat.
+      cisco.asa.asa_nat:
+        state: gathered
+      register: nat_output
+      # Error Handling: Ensure the playbook stops if the device is unreachable or the command fails.
+      failed_when: nat_output is failed
+
+    - name: Validate NAT configuration retrieval
+      # Observability: Assert that the gathered data exists to ensure downstream tasks have data.
+      ansible.builtin.assert:
+        that:
+          - nat_output.gathered is defined
+        fail_msg: "Failed to retrieve NAT configuration from {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Output NAT configuration as JSON file
+      # Idempotency: ansible.builtin.copy only writes if the file content would change.
+      ansible.builtin.copy:
+        content: "{{ nat_output.gathered | to_nice_json }}"
+        dest: "/tmp/asa_nat_{{ inventory_hostname }}.json"
+        mode: '0644'
+      register: json_export
+      when: output_format == 'json'
+
+    - name: Verify JSON file persistence
+      # Observability: Confirm the file operation was successful.
+      ansible.builtin.assert:
+        that:
+          - json_export is successful
+        when: output_format == 'json'
+        quiet: true
+
+    - name: Display NAT Rules Summary
+      # Observability: Providing a clear, human-readable summary of the NAT table.
+      # Documentation: Jinja2 logic handles empty rule sets and formats source/destination mappings.
+      ansible.builtin.debug:
+        msg: |
+          ======================================================================
+          NAT Rules Summary: {{ inventory_hostname }}
+          ======================================================================
+          {% if nat_output.gathered %}
+          {% for rule in nat_output.gathered %}
+          Rule #{{ loop.index }}
+          Type: {{ rule.nat_type | default('static') }}
+          Source Real: {{ rule.source_address.real | default('any') }} -> Mapped: {{ rule.source_address.mapped | default('any') }}
+          {% if rule.destination_address is defined %}
+          Dest Real:   {{ rule.destination_address.real | default('any') }} -> Mapped: {{ rule.destination_address.mapped | default('any') }}
+          {% endif %}
+          ----------------------------------------------------------------------
+          {% endfor %}
+          {% else %}
+          No NAT rules configured on {{ inventory_hostname }}.
+          {% endif %}
+      when: output_format == 'text'

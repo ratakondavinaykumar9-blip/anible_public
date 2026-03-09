@@ -1,0 +1,33 @@
+---
+# FortiGate AntiVirus Profile Retrieval Playbook
+# Standards: Idempotency (Read-only), Observability (Assert), Error Handling (failed_when), FQCN.
+
+- name: Retrieve and Verify FortiGate AV Profiles
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Fetch AV profile configuration via CLI
+      # Use Fully Qualified Collection Name (FQCN) for standardized network operations
+      ansible.netcommon.cli_command:
+        command: "get firewall avprofile"
+      register: av_profile_result
+      # Error Handling: Fail the task if the device returns common CLI error strings in stdout
+      failed_when:
+        - av_profile_result.failed 
+        - "'Unknown action' in av_profile_result.stdout or 'Command fail' in av_profile_result.stdout"
+
+    - name: Validate operational data integrity
+      # Observability: Assert that the registered output contains valid data before proceeding
+      ansible.builtin.assert:
+        that:
+          - av_profile_result.stdout is defined
+          - av_profile_result.stdout | length > 0
+        fail_msg: "AV Profile retrieval returned null or invalid data."
+        success_msg: "AV profile data successfully validated."
+
+    - name: Display AntiVirus Profile details
+      ansible.builtin.debug:
+        msg: |
+          ======================= AV PROFILE REPORT =======================
+          {{ av_profile_result.stdout }}

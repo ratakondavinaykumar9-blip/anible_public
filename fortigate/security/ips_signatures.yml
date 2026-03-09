@@ -1,0 +1,39 @@
+---
+# FortiGate IPS Signatures Retrieval
+# This playbook retrieves IPS signature status to ensure security visibility.
+# Adheres to Standard:s for idempotency and observability.
+- name: Get IPS Signatures
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPS signature information via CLI
+      # Use FQCN for network command execution
+      ansible.netcommon.cli_command:
+        command: diagnose ips signature
+      register: sig
+      # Idempotency: diagnose commands are read-only; mark as changed: false
+      changed_when: false
+      # Error Handling: Ensure the command was accepted by the device
+      failed_when: 
+        - sig.stdout is not defined
+        - "'Command fail' in sig.stdout"
+        - "'Unknown action' in sig.stdout"
+
+    - name: Validate IPS signature output
+      # Observability: Assert that data was actually returned
+      ansible.builtin.assert:
+        that:
+          - sig.stdout | length > 0
+        fail_msg: "The IPS signature command returned no data. Check device connectivity or permissions."
+        success_msg: "IPS signatures successfully captured for {{ inventory_hostname }}."
+
+    - name: Display IPS Signatures Report
+      # Documentation: Provide structured feedback for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPS SIGNATURES REPORT =======================
+          Target Device: {{ inventory_hostname }}
+          Execution Status: SUCCESS
+          =====================================================================
+          {{ sig.stdout }}

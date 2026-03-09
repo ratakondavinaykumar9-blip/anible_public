@@ -1,0 +1,51 @@
+---
+# Network Automation Framework Architect: Improved FortiGate Service Audit Playbook
+# This playbook retrieves firewall service objects and groups with built-in validation and error handling.
+- name: FortiGate Service and Group Configuration Audit
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve Firewall Service Objects
+      # FQCN: Using ansible.netcommon for standardized CLI execution
+      # Why: 'show' provides the configuration state which is more descriptive than 'get'
+      ansible.netcommon.cli_command:
+        command: "show firewall service custom"
+      register: svc_result
+      # Error Handling: Catch FortiOS specific command execution failures
+      failed_when:
+        - svc_result.failed or "Command fail" in svc_result.stdout
+
+    - name: Validate Service Objects Retrieval
+      # Observability: Assert that the output contains valid configuration data
+      ansible.builtin.assert:
+        that:
+          - svc_result.stdout is defined
+          - svc_result.stdout | length > 0
+        fail_msg: "Failed to retrieve service objects or the configuration is empty."
+        success_msg: "Successfully validated service objects configuration."
+
+    - name: Retrieve Firewall Service Groups
+      ansible.netcommon.cli_command:
+        command: "show firewall service group"
+      register: grp_result
+      failed_when:
+        - grp_result.failed or "Command fail" in grp_result.stdout
+
+    - name: Validate Service Groups Retrieval
+      # Idempotency Note: These 'show' operations are read-only and inherently idempotent
+      ansible.builtin.assert:
+        that:
+          - grp_result.stdout is defined
+          - grp_result.stdout | length > 0
+        fail_msg: "Failed to retrieve service groups or the configuration is empty."
+        success_msg: "Successfully validated service groups configuration."
+
+    - name: Display Service and Group Summary
+      # Documentation: Providing clear operator visibility into the gathered state
+      ansible.builtin.debug:
+        msg:
+          - "======================= SERVICE OBJECTS ======================="
+          - "{{ svc_result.stdout }}"
+          - "======================= SERVICE GROUPS ======================="
+          - "{{ grp_result.stdout }}"

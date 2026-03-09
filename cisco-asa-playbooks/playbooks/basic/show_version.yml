@@ -1,0 +1,56 @@
+---
+# ==============================================================================
+# Playbook: Get ASA Version Information
+# Purpose: Retrieves and validates system metadata from Cisco ASA devices.
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
+# ==============================================================================
+- name: Get ASA Version Information
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Default output format. Toggle to 'json' via extra-vars for external integrations.
+    output_format: text
+
+  tasks:
+    - name: Retrieve ASA version facts using FQCN
+      # Best Practice: Use Fully Qualified Collection Names (FQCN) for reliability.
+      # Idempotency: Read-only operation; safe to execute multiple times without state change.
+      cisco.asa.asa_version:
+      register: version_output
+      # Error Handling: Ensure we fail immediately if the device is unreachable or the command fails.
+      ignore_errors: false
+
+    - name: Validate telemetry data integrity
+      # Observability: Verify the existence of returned facts before downstream processing.
+      ansible.builtin.assert:
+        that:
+          - version_output.ansible_facts.asa_version is defined
+          - version_output.ansible_facts.asa_version.version is defined
+        fail_msg: "Data Integrity Error: Failed to retrieve version facts for {{ inventory_hostname }}."
+        success_msg: "Data Integrity Verified: ASA facts captured for {{ inventory_hostname }}."
+
+    - name: Persist telemetry data as JSON for external integration
+      # Idempotency: copy module ensures the destination file state matches the provided content.
+      # Use Case: Facilitates integration with external systems like SolarWinds or CMDBs.
+      ansible.builtin.copy:
+        content: "{{ version_output.ansible_facts.asa_version | to_nice_json }}"
+        dest: "/tmp/asa_version_{{ inventory_hostname }}.json"
+        mode: '0644'
+      when: output_format == 'json'
+
+    - name: Output human-readable system summary
+      # Documentation: Provides a structured telemetry report for NOC/SOC operational visibility.
+      ansible.builtin.debug:
+        msg: |
+          ======================================================================
+          ASA DEVICE TELEMETRY: {{ inventory_hostname }}
+          ======================================================================
+          Software Version : {{ version_output.ansible_facts.asa_version.version }}
+          Hardware Model   : {{ version_output.ansible_facts.asa_version.model }}
+          Device ID        : {{ version_output.ansible_facts.asa_version.device_id }}
+          Serial Number    : {{ version_output.ansible_facts.asa_version.serial }}
+          Hardware Specs   : {{ version_output.ansible_facts.asa_version.hardware }}
+          Flash Storage    : {{ version_output.ansible_facts.asa_version.flash }}
+          Running Mode     : {{ version_output.ansible_facts.asa_version.running_mode }}
+          ======================================================================
+      when: output_format == 'text'

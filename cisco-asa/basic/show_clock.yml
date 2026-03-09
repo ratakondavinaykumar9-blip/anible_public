@@ -1,0 +1,49 @@
+---
+# Architect:Improved Playbook
+# Purpose: Retrieve and validate system clock and NTP synchronization status.
+# Standards: Idempotency (read-only), Observability (asserts), Documentation (inline), Error Handling.
+
+- name: Get Clock Information
+  hosts: asa_firepower
+  gather_facts: false # Facts not required for CLI-based status checks.
+
+  tasks:
+    - name: Retrieve system clock status
+      # Using FQCN for network common CLI execution.
+      ansible.netcommon.cli_command:
+        command: show clock
+      register: clock_output
+      # Ensure task fails if command response is empty or contains typical error strings.
+      failed_when: 
+        - clock_output.stdout == ""
+        - "'Invalid' in clock_output.stdout"
+
+    - name: Verify clock data observability
+      # Observability: Confirming the data structure is populated before proceeding.
+      ansible.builtin.assert:
+        that:
+          - "clock_output.stdout is defined"
+          - "clock_output.stdout | length > 0"
+        fail_msg: "System clock information could not be retrieved."
+
+    - name: Retrieve NTP synchronization status
+      ansible.netcommon.cli_command:
+        command: show ntp status
+      register: ntp_output
+      # Error Handling: NTP might not be configured on all nodes; continue to allow clock display.
+      ignore_errors: true
+
+    - name: Validate NTP output structure
+      ansible.builtin.assert:
+        that:
+          - "ntp_output.stdout is defined"
+        fail_msg: "NTP command failed to execute correctly."
+      when: ntp_output is not skipped
+
+    - name: Display synchronized system time and NTP status
+      # Documentation: Providing a clear, formatted summary for the operator.
+      ansible.builtin.debug:
+        msg: |
+          DEVICE: {{ inventory_hostname }}
+          CLOCK:  {{ clock_output.stdout | trim }}
+          NTP:    {{ ntp_output.stdout | default('NTP status unavailable') | trim }}

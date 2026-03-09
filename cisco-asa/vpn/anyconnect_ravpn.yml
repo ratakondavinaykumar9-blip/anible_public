@@ -1,0 +1,174 @@
+---
+- name: Deploy Production Remote Access VPN (AnyConnect) on Cisco ASA
+  hosts: cisco_asa
+  gather_facts: false
+  connection: network_cli
+  vars:
+    # --- Network Addressing ---
+    # Defines the pool from which VPN clients receive their internal IP addresses.
+    vpn_pool_name: "VPN_CLIENT_POOL"
+    vpn_pool_start: "192.168.100.100"
+    vpn_pool_end: "192.168.100.200"
+    vpn_pool_mask: "255.255.255.0"
+    
+    # --- Identity & Authentication ---
+    # LOCAL is used for local database; RADIUS/LDAP groups are recommended for production scale.
+    vpn_auth_server_group: "LOCAL"
+    
+    # --- Client Configuration ---
+    vpn_dns_servers: ["8.8.8.8", "8.8.4.4"]
+    vpn_domain_name: "enterprise.corp"
+    # Internal subnets allowed for split-tunneling (prevents routing all traffic through VPN).
+    vpn_split_networks:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    
+    # --- Infrastructure Parameters ---
+    outside_interface: "outside"
+    # The AnyConnect package must reside on flash (disk0:/) prior to deployment.
+    anyconnect_package_path: "disk0:/anyconnect-win-4.10.05085-webdeploy-k9.pkg"
+    group_policy_name: "RA_VPN_GP"
+    tunnel_group_name: "RA_VPN_TG"
+    # Specify the trustpoint if a CA-signed certificate is available for SSL/TLS.
+    vpn_trustpoint: ""
+
+  tasks:
+    - name: Pre-Deployment Validation
+      block:
+        - name: Check for AnyConnect Image Presence
+          cisco.asa.asa_command:
+            commands: "dir {{ anyconnect_package_path }}"
+          register: image_check
+          failed_when: "'No such file' in image_check.stdout[0] or 'Error' in image_check.stdout[0]"
+          changed_when: false
+          # Why: Deployment will fail if the image referenced in Step 4 is missing.
+
+        - name: Verify Resource Availability (Session Limits)
+          cisco.asa.asa_command:
+            commands: "show vpn-sessiondb license"
+          register: license_check
+          changed_when: false
+          # Why: Ensure the device has available AnyConnect/Apex licenses.
+
+    - name: Remote Access VPN Configuration Block
+      block:
+        - name: Configure VPN Client IP Pool
+          cisco.asa.asa_config:
+            lines:
+              - "ip local pool {{ vpn_pool_name }} {{ vpn_pool_start }}-{{ vpn_pool_end }} mask {{ vpn_pool_mask }}"
+          register: pool_config
+          # Why: Establishes the DHCP-like pool for VPN clients.
+
+        - name: Verify IP Pool Success
+          ansible.builtin.assert:
+            that: "pool_config.failed == false"
+            fail_msg: "VPN Pool configuration failed."
+
+        - name: Configure Split-Tunnel Network Objects
+          cisco.asa.asa_ogs:
+            config:
+              - name: "VPN_INTERNAL_NETS"
+                group_type: network-object
+                network_objects:
+                  - host: "{{ item.split('/') | first }}"
+                    condition: "{{ item.split('/') | last == '32' }}"
+                  - network: "{{ item.split('/') | first }} {{ item.split('/') | last | ansible.utils.ipaddr('netmask') }}"
+                    condition: "{{ item.split('/') | last != '32' }}"
+            state: merged
+          loop: "{{ vpn_split_networks }}"
+          when: item | ansible.utils.ipaddr
+          register: ogs_result
+          # Why: Grouping internal networks for ACL reference simplifies management.
+
+        - name: Configure Split-Tunnel ACL
+          cisco.asa.asa_acls:
+            config:
+              - name: "ACL_VPN_SPLIT_TUNNEL"
+                acl_type: extended
+                aces:
+                  - grant: permit
+                    source:
+                      any: true
+                    destination:
+                      object_group: "VPN_INTERNAL_NETS"
+            state: merged
+          register: acl_result
+          # Why: Defines what traffic is encrypted (tunnelspecified).
+
+        - name: Configure WebVPN and AnyConnect Image
+          cisco.asa.asa_config:
+            lines:
+              - "enable {{ outside_interface }}"
+              - "anyconnect image {{ anyconnect_package_path }} 1"
+              - "anyconnect enable"
+              - "tunnel-group-list enable"
+            parents: ["webvpn"]
+          register: webvpn_config
+          # Why: Activates the SSL VPN service on the perimeter interface.
+
+        - name: Configure AnyConnect Group Policy (Attributes)
+          cisco.asa.asa_config:
+            lines:
+              - "vpn-idle-timeout 30"
+              - "vpn-session-timeout 480"
+              - "vpn-tunnel-protocol ssl-client"
+              - "split-tunnel-policy tunnelspecified"
+              - "split-tunnel-network-list value ACL_VPN_SPLIT_TUNNEL"
+              - "default-domain value {{ vpn_domain_name }}"
+              - "dns-server value {{ vpn_dns_servers | join(' ') }}"
+              - "address-pools value {{ vpn_pool_name }}"
+              - "webvpn"
+              - " anyconnect keep-installer none"
+              - " anyconnect ask none"
+              - " anyconnect dpd-interval client 30"
+            parents: 
+              - "group-policy {{ group_policy_name }} internal"
+              - "group-policy {{ group_policy_name }} attributes"
+          register: gp_config
+          # Why: Defines user-level experience, DNS settings, and session persistence.
+
+        - name: Configure AnyConnect Tunnel Group (Connection Profile)
+          cisco.asa.asa_config:
+            lines:
+              - "type remote-access"
+              - "general-attributes"
+              - " authentication-server-group {{ vpn_auth_server_group }}"
+              - " default-group-policy {{ group_policy_name }}"
+              - "webvpn-attributes"
+              - " group-alias {{ tunnel_group_name }} enable"
+            parents: ["tunnel-group {{ tunnel_group_name }}"]
+          register: tg_config
+          # Why: Maps the incoming connection to the correct Group Policy and Auth mechanism.
+
+        - name: Assign SSL Certificate Trustpoint
+          cisco.asa.asa_config:
+            lines:
+              - "ssl trust-point {{ vpn_trustpoint }} {{ outside_interface }}"
+          when: vpn_trustpoint | length > 0
+          register: ssl_config
+          # Why: Ensures clients trust the identity of the ASA during the TLS handshake.
+
+      rescue:
+        - name: Handle Configuration Errors
+          ansible.builtin.debug:
+            msg: "Deployment failed. Attempting to identify failure point..."
+
+        - name: Fail Deployment
+          ansible.builtin.fail:
+            msg: "RA-VPN deployment aborted. Review register outputs for surgical troubleshooting."
+
+      always:
+        - name: Post-Deployment Verification
+          cisco.asa.asa_command:
+            commands:
+              - "show webvpn anyconnect"
+              - "show vpn-sessiondb summary"
+          register: post_verify
+          ignore_errors: true
+
+        - name: Assert Deployment Integrity
+          ansible.builtin.assert:
+            that: "'AnyConnect is enabled on {{ outside_interface }}' in post_verify.stdout[0]"
+            fail_msg: "WebVPN service is not enabled on the outside interface."
+          when: post_verify.stdout is defined

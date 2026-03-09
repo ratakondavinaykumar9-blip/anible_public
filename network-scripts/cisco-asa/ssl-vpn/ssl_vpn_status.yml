@@ -1,0 +1,54 @@
+---
+# Playbook to retrieve and verify SSL VPN status on Cisco ASA/Firepower devices.
+# This playbook follows Standard:s for idempotency, observability, and best practices.
+- name: Get SSL VPN Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve SSL VPN session database information
+      # FQCN: Using fully qualified collection name for network CLI commands.
+      # Idempotency: 'show' commands are read-only and inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: show vpn-sessiondb ssl
+      register: ssl_sessions
+      # Error Handling: Ensure we catch cases where the CLI might return an error string without a non-zero exit code.
+      failed_when: 
+        - ssl_sessions.failed
+        - "'Invalid input' in ssl_sessions.stdout or 'ERROR' in ssl_sessions.stdout"
+
+    - name: Verify SSL VPN session retrieval success
+      # Observability: Assert that the command returned valid session data or a confirmed 'no sessions' state.
+      ansible.builtin.assert:
+        that:
+          - ssl_sessions.stdout is defined
+          - "'Session' in ssl_sessions.stdout or 'No sessions' in ssl_sessions.stdout"
+        fail_msg: "Failed to retrieve a valid response for SSL VPN sessions."
+        success_msg: "SSL VPN session data retrieved successfully."
+
+    - name: Retrieve SSL protocol statistics and configuration
+      ansible.netcommon.cli_command:
+        command: show ssl
+      register: ssl_stats
+      failed_when:
+        - ssl_stats.failed
+        - "'Invalid input' in ssl_stats.stdout or 'ERROR' in ssl_stats.stdout"
+
+    - name: Verify SSL statistics retrieval success
+      # Observability: Validate that protocol statistics were returned.
+      ansible.builtin.assert:
+        that:
+          - ssl_stats.stdout is defined
+          - "'SSL' in ssl_stats.stdout or 'stats' in ssl_stats.stdout"
+        fail_msg: "Failed to retrieve a valid response for SSL statistics."
+        success_msg: "SSL statistics retrieved successfully."
+
+    - name: Display formatted SSL VPN status and statistics
+      # Documentation: Providing clear visibility of the gathered operational state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SSL VPN SESSIONS =======================
+          {{ ssl_sessions.stdout }}
+
+          ======================= SSL STATISTICS =======================
+          {{ ssl_stats.stdout }}

@@ -1,0 +1,36 @@
+---
+# Architect:Improved Playbook
+# Target: Cisco ASA / Firepower
+# Purpose: Retrieve and validate interface queue information
+# Standards: Idempotency, Observability, FQCN, Error Handling
+
+- name: Get Queue Info
+  hosts: asa_firepower
+  gather_facts: no
+
+  tasks:
+    - name: Retrieve interface queue statistics from the device
+      # FQCN: Using the netcommon.cli_command for standard command execution
+      ansible.netcommon.cli_command:
+        command: show queue
+      register: queue_output
+      # Error Handling: Define failure if the command execution fails or returns an error string
+      failed_when: 
+        - queue_output.failed or "Invalid input" in queue_output.stdout
+
+    - name: Validate queue information retrieval
+      # Observability: Assert that the output is populated and contains expected headers
+      ansible.builtin.assert:
+        that:
+          - queue_output.stdout is defined
+          - queue_output.stdout | length > 0
+        fail_msg: "Queue information retrieval failed or returned empty results."
+        success_msg: "Queue information successfully retrieved and validated."
+
+    - name: Display formatted queue information
+      # Documentation: Providing a clear view of the command output for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= DEVICE QUEUES =======================
+          {{ queue_output.stdout }}
+          =============================================================

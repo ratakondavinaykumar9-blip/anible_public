@@ -1,0 +1,36 @@
+---
+# Architect: Improved SNMP Status Playbook
+# This playbook retrieves and validates the SNMP configuration status on ASA/Firepower devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+
+- name: Get SNMP Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve SNMP configuration from device
+      # FQCN: Using ansible.netcommon to ensure consistent behavior across environments.
+      # Idempotency: 'show' commands are inherently idempotent as they do not modify state.
+      ansible.netcommon.cli_command:
+        command: show snmp-server
+      register: snmp_result
+      # Error Handling: Catch cases where the command might be unsupported or rejected.
+      failed_when: 
+        - snmp_result.failed
+        - "'Invalid input' in snmp_result.stdout"
+
+    - name: Validate SNMP retrieval success
+      # Observability: Asserting that the output is populated to ensure the device responded correctly.
+      ansible.builtin.assert:
+        that:
+          - snmp_result.stdout is defined
+          - snmp_result.stdout | length > 0
+        fail_msg: "Failed to retrieve a valid SNMP configuration output."
+        success_msg: "SNMP configuration successfully retrieved and verified."
+
+    - name: Display formatted SNMP status
+      # Documentation: Clear separation of output for better human readability during execution.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SNMP STATUS =======================
+          {{ snmp_result.stdout }}

@@ -1,0 +1,37 @@
+---
+# Playbook: FortiGate IPSec Phase 1 Status Audit
+# Standards: Idempotency, Observability, FQCN, Error Handling
+# Purpose: Safely retrieve and validate the current IPSec Phase 1 configuration.
+- name: Get IPSec Phase 1
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: "IPSEC-01: Retrieve Phase 1 configuration"
+      # FQCN: Using ansible.netcommon.cli_command for cross-platform network consistency.
+      # Idempotency: changed_when is false because 'get' is a read-only state retrieval.
+      ansible.netcommon.cli_command:
+        command: "get vpn ipsec phase1"
+      register: ph1
+      changed_when: false
+      # Error Handling: Fails if the underlying transport fails or if the CLI returns a parse error.
+      failed_when: >
+        ph1.failed or 
+        "Unknown action" in ph1.stdout or 
+        "command parse error" in ph1.stdout
+
+    - name: "IPSEC-02: Validate retrieval results"
+      # Observability: Explicitly verify that the output is populated to prevent downstream processing of empty data.
+      ansible.builtin.assert:
+        that:
+          - "ph1.stdout is defined"
+          - "ph1.stdout | length > 0"
+        fail_msg: "Data Integrity Failure: IPSec Phase 1 output is empty or undefined."
+        success_msg: "Data Integrity Verified: IPSec Phase 1 output successfully registered."
+
+    - name: "IPSEC-03: Display IPSec Phase 1 status"
+      # Documentation: Providing formatted output for operational visibility and logging.
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC PHASE 1 =======================
+          {{ ph1.stdout }}

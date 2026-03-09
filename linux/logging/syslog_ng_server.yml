@@ -1,0 +1,141 @@
+---
+- name: Enterprise Syslog-ng Centralized Log Server & Network Integration
+  hosts: syslog_servers:network_devices
+  gather_facts: true
+  become: true
+  vars:
+    # --- Global Infrastructure Parameters ---
+    syslog_server_ip: "10.100.10.50"
+    syslog_port: 6514
+    syslog_tls_enabled: true
+    syslog_protocol: "tcp" # Required for TLS/mTLS
+    
+    # --- Linux Server Specifics ---
+    syslog_ng_packages:
+      - syslog-ng
+      - syslog-ng-mod-json
+      - syslog-ng-mod-sql
+    syslog_storage_path: "/var/log/remote"
+    syslog_disk_buffer_size: "2048M"
+    syslog_retention_days: 90
+    
+    # --- PKI / mTLS Configuration ---
+    # In production, these should be sourced from HashiCorp Vault or similar
+    pki_dir: "/etc/syslog-ng/cert.d"
+    ca_cert_path: "{{ pki_dir }}/cacert.pem"
+    server_cert_path: "{{ pki_dir }}/servercert.pem"
+    server_key_path: "{{ pki_dir }}/serverkey.pem"
+    
+    # --- Network Device Specifics ---
+    network_log_severity: "informational"
+    network_management_vrf: "management"
+    network_source_interface: "Management0/0"
+
+  tasks:
+    - name: Linux | Server Preparation and Syslog-ng Deployment
+      when: "'syslog_servers' in group_names"
+      block:
+        - name: Ensure required Syslog-ng packages are present
+          # Use FQCN for package management to ensure predictable behavior across different Linux distributions
+          ansible.builtin.package:
+            name: "{{ syslog_ng_packages }}"
+            state: present
+          register: pkg_install_result
+
+        - name: Assert package installation success
+          # Observability: Verify that the package manager successfully completed the operation
+          ansible.builtin.assert:
+            that:
+              - pkg_install_result is success
+            fail_msg: "Failed to install required syslog-ng packages on {{ inventory_hostname }}"
+
+        - name: Create secure PKI and storage directories
+          # Idempotency: Ensure directories exist with specific ownership and permissions (0750 for PKI material)
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "{{ item.mode }}"
+          loop:
+            - { path: "{{ pki_dir }}", mode: '0750' }
+            - { path: "{{ syslog_storage_path }}", mode: '0755' }
+          register: dir_setup_result
+
+        - name: Verify directory state and security
+          # Observability: Confirm the file system matches the desired security posture
+          ansible.builtin.assert:
+            that:
+              - item.state == 'directory'
+            fail_msg: "Directory creation failed for {{ item.path }}"
+          loop: "{{ dir_setup_result.results }}"
+
+        - name: Deploy Syslog-ng configuration from template
+          # Why: Centralized configuration management allows for dynamic scaling and consistent logging logic
+          ansible.builtin.template:
+            src: "syslog-ng.conf.j2"
+            dest: "/etc/syslog-ng/syslog-ng.conf"
+            owner: root
+            group: root
+            mode: '0644'
+            validate: "/usr/sbin/syslog-ng --syntax-only --cfgfile %s"
+          register: config_deploy_result
+          notify: Restart Syslog-ng
+
+        - name: Confirm configuration deployment
+          ansible.builtin.assert:
+            that:
+              - config_deploy_result.dest == '/etc/syslog-ng/syslog-ng.conf'
+            fail_msg: "Configuration file deployment failed on {{ inventory_hostname }}"
+
+        - name: Ensure Syslog-ng service is enabled and running
+          # Idempotency: service module ensures the process is in the 'started' state regardless of current state
+          ansible.builtin.service:
+            name: syslog-ng
+            state: started
+            enabled: true
+          register: service_state_result
+
+        - name: Final observability check for service health
+          ansible.builtin.assert:
+            that:
+              - service_state_result.state == 'started'
+            fail_msg: "Syslog-ng service failed to reach 'started' state"
+
+    - name: Network | Device Logging Integration
+      when: "'network_devices' in group_names"
+      block:
+        - name: Configure centralized logging to server
+          # Why: Sending logs via TCP/TLS ensures delivery reliability and security over the wire
+          # Use FQCN for vendor-specific modules (assuming Cisco IOS/NX-OS based on vars)
+          cisco.ios.ios_logging_global:
+            config:
+              hosts:
+                - host: "{{ syslog_server_ip }}"
+                  transport:
+                    tcp:
+                      port: "{{ syslog_port }}"
+              source_interface: "{{ network_source_interface }}"
+              trap: "{{ network_log_severity }}"
+              facility: local7
+              vrf: "{{ network_management_vrf }}"
+            state: merged
+          register: net_logging_result
+          # Error Handling: Fail only if critical configuration cannot be applied
+          failed_when: net_logging_result.failed and "invalid input" in net_logging_result.msg
+
+        - name: Assert network logging configuration success
+          ansible.builtin.assert:
+            that:
+              - not net_logging_result.failed
+            fail_msg: "Network device failed to accept logging configuration on {{ inventory_hostname }}"
+
+  handlers:
+    - name: Restart Syslog-ng
+      # Why: Configuration changes require a process restart to load new parameters
+      ansible.builtin.service:
+        name: syslog-ng
+        state: restarted
+      register: handler_result
+      # Error Handling: Explicitly fail if the restart operation crashes
+      failed_when: handler_result is failed

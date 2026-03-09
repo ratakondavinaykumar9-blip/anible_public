@@ -1,0 +1,35 @@
+---
+# CPU History Retrieval
+# This playbook collects CPU utilization history for performance monitoring and troubleshooting.
+# Improved for idempotency, observability, and error handling.
+
+- name: Collect and Verify CPU History
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'show cpu history' command
+      # FQCN: ansible.netcommon.cli_command
+      # This task is inherently idempotent as 'show' commands do not modify device state.
+      ansible.netcommon.cli_command:
+        command: show cpu history
+      register: cpu_result
+      # Error Handling: Ensure the task fails if the command is unrecognized or execution fails.
+      failed_when:
+        - cpu_result.failed or "Invalid" in cpu_result.stdout
+
+    - name: Validate CPU history output
+      # Observability: Assert that the command returned meaningful data to ensure data integrity.
+      ansible.builtin.assert:
+        that:
+          - "cpu_result.stdout is defined"
+          - "cpu_result.stdout | length > 0"
+        fail_msg: "CPU history output was empty or undefined for {{ inventory_hostname }}."
+        success_msg: "CPU history successfully captured for {{ inventory_hostname }}."
+
+    - name: Display CPU History
+      # Provide clear, formatted visibility into the device's historical performance.
+      ansible.builtin.debug:
+        msg: |
+          ======================= CPU HISTORY: {{ inventory_hostname }} =======================
+          {{ cpu_result.stdout }}

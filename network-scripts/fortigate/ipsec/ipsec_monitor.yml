@@ -1,0 +1,35 @@
+---
+# FortiGate IPSec VPN Monitoring
+# This playbook retrieves and validates the status of IPSec VPN tunnels.
+# It adheres to idempotency by performing read-only diagnostic operations.
+- name: IPSec Monitor
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPSec VPN monitor status
+      # Use Fully Qualified Collection Name (FQCN) for reliability.
+      # The 'get' command is read-only and inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: get vpn ipsec monitor
+      register: mon
+      # Error Handling: Ensure the command executed successfully at the CLI level.
+      failed_when: 
+        - mon.rc != 0
+        - "'error' in mon.stdout | lower or 'invalid' in mon.stdout | lower"
+
+    - name: Validate IPSec monitor data collection
+      # Observability: Verify that the command returned data to prevent silent failures.
+      ansible.builtin.assert:
+        that:
+          - mon.stdout is defined
+          - mon.stdout | length > 0
+        fail_msg: "IPSec monitor returned empty or invalid data. Check device status."
+        quiet: true
+
+    - name: Display formatted IPSec VPN report
+      # Documentation: Providing a structured view of the output for operational visibility.
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC MONITOR REPORT =======================
+          {{ mon.stdout }}

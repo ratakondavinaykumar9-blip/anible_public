@@ -1,0 +1,44 @@
+---
+# FortiGate IPSec Errors Diagnostic Playbook
+# Improved by: Architect:# Purpose: Retrieves and validates IPSec VPN diagnostic logs from FortiGate devices.
+# Standards: Idempotency (Read-only), Observability (Asserts), Documentation (Comments), Error Handling, FQCN.
+
+- name: FortiGate IPSec Errors Analysis
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPSec VPN diagnostic logs
+      # FQCN: Utilizing ansible.netcommon for standardized CLI interaction.
+      # Idempotency: Safe for repeated execution as it performs read-only diagnostic operations.
+      # Documentation: This command fetches the current IKE/IPSec log buffer for troubleshooting.
+      ansible.netcommon.cli_command:
+        command: diagnose vpn ike log
+      register: ipsec_logs
+      # Error Handling: Ensure the task fails gracefully if the command is unsupported or restricted.
+      failed_when:
+        - ipsec_logs.failed or "unknown command" in ipsec_logs.stdout | lower
+
+    - name: Verify log retrieval success
+      # Observability: Assert that the command returned valid output for analysis.
+      ansible.builtin.assert:
+        that:
+          - ipsec_logs.stdout is defined
+          - ipsec_logs.stdout | length > 0
+        fail_msg: "No IPSec diagnostic data was returned from {{ inventory_hostname }}."
+        success_msg: "IPSec diagnostic data successfully captured."
+
+    - name: Display IPSec VPN Diagnostics
+      # Documentation: Providing a clear, formatted visual separator for operational visibility.
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC ERRORS =======================
+          {{ ipsec_logs.stdout }}
+
+    - name: Audit logs for critical negotiation failures
+      # Observability: Automatically flag potential negotiation or authentication failures.
+      ansible.builtin.debug:
+        msg: "WARNING: Critical failure indicators (fail/error) detected in IPSec logs."
+      when: 
+        - ipsec_logs.stdout is defined
+        - "'fail' in ipsec_logs.stdout | lower or 'error' in ipsec_logs.stdout | lower"

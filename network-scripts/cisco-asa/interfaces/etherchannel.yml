@@ -1,0 +1,36 @@
+---
+# This playbook retrieves EtherChannel status from ASA/Firepower devices.
+# It follows Standard:s for observability, idempotency, and error handling.
+- name: Get EtherChannel Information
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'show etherchannel' command on the target device
+      # Using FQCN (ansible.netcommon) for best practices and portability.
+      # This task is inherently idempotent as it is a read-only operation.
+      ansible.netcommon.cli_command:
+        command: show etherchannel
+      register: ec_result
+      # Error Handling: Ensure the task fails if the command is unrecognized or returns an error string.
+      failed_when: 
+        - ec_result.failed
+        - "'Invalid input' in ec_result.stdout or 'Usage' in ec_result.stdout"
+
+    - name: Validate EtherChannel data retrieval
+      # Observability: Assert that the output is not empty to verify successful data capture.
+      ansible.builtin.assert:
+        that:
+          - ec_result.stdout is defined
+          - ec_result.stdout | length > 0
+        fail_msg: "EtherChannel information could not be retrieved or the output is empty."
+        success_msg: "EtherChannel data successfully captured for {{ inventory_hostname }}."
+
+    - name: Display formatted EtherChannel information
+      # Providing clear visibility into the state of the network interface bundles.
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          ETHERCHANNEL STATUS FOR: {{ inventory_hostname }}
+          ============================================================
+          {{ ec_result.stdout }}

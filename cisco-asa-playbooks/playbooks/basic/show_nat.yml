@@ -1,0 +1,45 @@
+---
+# Improved NAT Rules Retrieval Playbook
+# Standards: Idempotent, Observable, Documented, Error-Handled, FQCN
+- name: Get NAT Rules Configuration
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Default output format is text; can be overridden to json
+    output_format: text
+
+  tasks:
+    - name: Gather NAT configuration from ASA
+      # Using state: gathered is the modern idempotent way to retrieve configuration
+      cisco.asa.asa_nat:
+        state: gathered
+      register: nat_output
+      ignore_errors: false
+      # Ensure the task fails if the connection is lost or credentials fail
+      failed_when: 
+        - nat_output.failed is defined 
+        - nat_output.failed
+
+    - name: Verify NAT data collection success
+      # Observability: Assert that the module returned the expected facts
+      ansible.builtin.assert:
+        that:
+          - nat_output.gathered is defined
+        fail_msg: "Failed to gather NAT rules from {{ inventory_hostname }}. Check connectivity and permissions."
+        success_msg: "Successfully retrieved NAT rules for {{ inventory_hostname }}."
+
+    - name: Display NAT Data (Verbose)
+      # Useful for debugging during manual runs
+      ansible.builtin.debug:
+        var: nat_output.gathered
+        verbosity: 1
+
+    - name: Save NAT configuration to JSON file
+      # Idempotency: copy module only updates if content differs
+      ansible.builtin.copy:
+        content: "{{ nat_output.gathered | ansible.builtin.to_nice_json }}"
+        dest: "/tmp/asa_nat_{{ inventory_hostname }}.json"
+        mode: '0644'
+      when: output_format | default('text') == 'json'
+
+    - name: Display

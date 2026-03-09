@@ -1,0 +1,34 @@
+---
+# Playbook: Retrieve FortiGate System Metadata
+# Standards: Idempotency (Read-only), Observability (Assert), Best Practices (FQCN)
+- name: Get FortiGate System Information
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve system status from FortiGate
+      # FQCN: Using ansible.netcommon.cli_command for standardized CLI interaction.
+      # Idempotency: This is a read-only 'get' operation, inherently safe for repeated execution.
+      ansible.netcommon.cli_command:
+        command: get system status
+      register: system_status_output
+      # Error Handling: Explicitly fail if the command returns common FortiOS error strings.
+      failed_when: 
+        - system_status_output.failed or "Command fail" in system_status_output.stdout
+
+    - name: Validate system status response integrity
+      # Observability: Ensure the output is populated and contains core keywords to verify a successful poll.
+      ansible.builtin.assert:
+        that:
+          - system_status_output.stdout is defined
+          - "system_status_output.stdout | length > 0"
+          - "'Version' in system_status_output.stdout"
+        fail_msg: "The system status output was empty or failed to return version information."
+        success_msg: "Successfully retrieved and validated FortiGate system status."
+
+    - name: Display retrieved system information
+      # Provides visibility into the collected metadata for administrative review.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SYSTEM INFO =======================
+          {{ system_status_output.stdout }}

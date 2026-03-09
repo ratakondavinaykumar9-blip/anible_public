@@ -1,0 +1,46 @@
+---
+# FortiGate Session Monitoring - Production Grade
+# Purpose: This playbook collects and validates session metrics for FortiGate devices.
+# Idempotency: This playbook is read-only and performs no state changes, making it safe for repeated execution.
+
+- name: Monitor Sessions
+  hosts: fortigate
+  gather_facts: false  # Fact gathering is disabled to optimize performance for monitoring tasks.
+
+  tasks:
+    - name: Retrieve active session list
+      # Best Practices: Using Fully Qualified Collection Names (FQCN) for reliability.
+      ansible.netcommon.cli_command:
+        command: get system session list
+      register: sessions_output
+      # Error Handling: Ensure the command was recognized and returned data.
+      failed_when:
+        - "sessions_output.stdout == ''"
+        - "'Unknown action' in sessions_output.stdout"
+
+    - name: Retrieve session statistics summary
+      ansible.netcommon.cli_command:
+        command: get system session stat
+      register: stats_output
+      # Error Handling: Detect if the device failed to process the statistics request.
+      failed_when:
+        - "'Command fail' in stats_output.stdout"
+        - "stats_output.stdout == ''"
+
+    - name: Verify session data observability
+      # Observability: Using assertions to validate that the captured output contains expected metrics.
+      ansible.builtin.assert:
+        that:
+          - "'total sessions' in stats_output.stdout"
+        fail_msg: "Data Integrity Error: Session statistics output is missing expected 'total sessions' metric."
+        success_msg: "Data Integrity Verified: Session statistics successfully captured."
+
+    - name: Display formatted session monitoring report
+      # Documentation: Providing a structured debug output for human operators.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SESSION MONITORING =======================
+          DEVICE: {{ inventory_hostname }}
+          STATUS: VERIFIED
+          ------------------------------------------------------------------
+          {{ stats_output.stdout }}

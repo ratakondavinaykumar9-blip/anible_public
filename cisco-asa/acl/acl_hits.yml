@@ -1,0 +1,35 @@
+---
+# Architect: Cisco ASA/Firepower ACL Hit Count Retrieval
+# Standards: Idempotency (Read-only), Observability (Assert), Best Practices (FQCN)
+# Purpose: Captures and validates ACL hit statistics for network auditing and monitoring.
+
+- name: Get ACL Hit Counts
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve access-list hit counts
+      # Using Fully Qualified Collection Name (FQCN) for reliability.
+      # This operation is idempotent as it is a read-only command.
+      ansible.netcommon.cli_command:
+        command: "show access-list | include hitcnt"
+      register: hits
+      # Error Handling: Ensure the task fails explicitly if the command execution fails.
+      failed_when: hits.failed | default(false)
+
+    - name: Validate ACL data retrieval
+      # Observability: Use assert to verify the device returned data.
+      # This ensures downstream tasks don't process empty or invalid buffers.
+      ansible.builtin.assert:
+        that:
+          - hits.stdout is defined
+          - hits.stdout | length > 0
+        fail_msg: "ACL hit count retrieval failed or returned no data. Verify ACL configuration on the target."
+        quiet: true
+
+    - name: Display formatted ACL Hit Counts
+      # Documentation/Observability: Provide a clear, human-readable summary of hit counts.
+      ansible.builtin.debug:
+        msg: |
+          ======================= ACL HIT COUNTS =======================
+          {{ hits.stdout }}

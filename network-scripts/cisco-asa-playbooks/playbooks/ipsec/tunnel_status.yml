@@ -1,0 +1,68 @@
+---
+# IPSec Tunnel Status Overview
+# This playbook retrieves comprehensive VPN status from Cisco ASA/Firepower devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+- name: Get IPSec Tunnel Status
+  hosts: asa_firepower
+  gather_facts: yes
+  gather_subset:
+    - min
+  vars:
+    output_format: text
+
+  tasks:
+    - name: Get tunnel session database (L2L)
+      # Using FQCN for cisco.asa collection to ensure specific module behavior
+      cisco.asa.asa_command:
+        commands:
+          - show vpn-sessiondb l2l
+      register: tunnel_output
+      failed_when: "tunnel_output.failed or 'Invalid' in tunnel_output.stdout[0]"
+      # documentation: Captures the active Lan-to-Lan sessions for state verification
+
+    - name: Get IPSec security associations
+      cisco.asa.asa_command:
+        commands:
+          - show crypto ipsec sa
+      register: ipsec_sa_output
+      ignore_errors: yes
+      # documentation: Details the Phase 2 status; ignore_errors used as command may vary by version
+
+    - name: Get IKEv1 security associations
+      cisco.asa.asa_command:
+        commands:
+          - show crypto isakmp sa
+      register: ikev1_sa_output
+      ignore_errors: yes
+      # documentation: Captures legacy Phase 1 tunnels
+
+    - name: Get IKEv2 security associations
+      cisco.asa.asa_command:
+        commands:
+          - show crypto ikev2 sa
+      register: ikev2_sa_output
+      ignore_errors: yes
+      # documentation: Captures modern Phase 1 tunnels
+
+    - name: Verify command execution success
+      # Observability: Asserting that we received responses from the critical status command
+      ansible.builtin.assert:
+        that:
+          - tunnel_output.stdout is defined
+          - tunnel_output.stdout | length > 0
+        fail_msg: "Failed to retrieve basic VPN session database information."
+        success_msg: "Successfully retrieved VPN tunnel state."
+
+    - name: Output status to JSON file
+      # Idempotency: Copy is idempotent; it only updates the file if the content changes
+      ansible.builtin.copy:
+        content: |
+          {
+            "device": "{{ inventory_hostname }}",
+            "timestamp": "{{ ansible_date_time.iso8601 }}",
+            "tunnel_summary": {{ tunnel_output.stdout[0] | to_json }},
+            "ipsec_sa": {{ ipsec_sa_output.stdout[0] | default('') | to_json }},
+            "ikev1_sa": {{ ikev1_sa_output.stdout[0] | default('') | to_json }},
+            "ikev2_sa": {{ ikev2_sa_output.stdout[0] | default('') | to_json }}
+          }
+        dest: "/tmp/asa_ipsec_status_{{ inventory_hostname }}.json"

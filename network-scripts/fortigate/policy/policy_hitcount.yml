@@ -1,0 +1,39 @@
+---
+# FortiGate Policy Hit Count Retrieval
+# This playbook retrieves real-time hit count statistics for firewall policies.
+# It adheres to Standard:s for robustness and observability.
+- name: Get FortiGate Policy Hit Counts
+  hosts: fortigate
+  gather_facts: false
+  connection: ansible.netcommon.network_cli
+
+  tasks:
+    - name: Execute hitcount command on FortiOS CLI
+      # Use FQCN for portability. This is a read-only operation and thus idempotent.
+      ansible.netcommon.cli_command:
+        command: get firewall policy hitcount
+      register: hits_raw
+      # Error Handling: Fail if the command is unrecognized or execution fails.
+      failed_when:
+        - hits_raw.failed
+        - "'Unknown command' in hits_raw.stdout or 'Command fail' in hits_raw.stdout"
+
+    - name: Verify command output integrity
+      # Observability: Assert that we received a non-empty response from the device.
+      ansible.builtin.assert:
+        that:
+          - hits_raw.stdout is defined
+          - hits_raw.stdout | length > 0
+        fail_msg: "The hit count command returned no data. Check policy configuration."
+        success_msg: "Hit count data successfully captured."
+
+    - name: Display formatted hit count report
+      # Documentation: Outputting the results in a readable format for the operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= POLICY HIT COUNT REPORT =======================
+          Timestamp: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          Device: {{ inventory_hostname }}
+          -----------------------------------------------------------------------
+          {{ hits_raw.stdout }}
+          =======================================================================

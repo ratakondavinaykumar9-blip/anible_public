@@ -1,0 +1,159 @@
+---
+- name: Production Deployment of Cisco Nexus 9k vPC Domain
+  hosts: nexus_spine_agg
+  gather_facts: false
+  vars:
+    # Global vPC Domain Settings
+    vpc_domain_id: 10
+    vpc_system_priority: 4096
+    vpc_role_priority: 10 # Recommended: 10 for Primary, 20 for Secondary (set via host_vars)
+    vpc_pkl_vrf: "PKL-VRF"
+    
+    # Peer Keepalive (PKL) Networking - Must be provided via inventory or extra_vars
+    vpc_pkl_src: ""   
+    vpc_pkl_dest: ""  
+    vpc_pkl_intf: "Management0" 
+    
+    # Best Practice vPC Flags
+    vpc_peer_gateway: true
+    vpc_peer_switch: true
+    vpc_auto_recovery: true
+    vpc_delay_restore: 150
+    vpc_ipv6_nd_sync: true
+    
+    # Peer-Link Configuration
+    vpc_peer_link_pc_id: 100
+    vpc_peer_link_interfaces:
+      - "Ethernet1/1"
+      - "Ethernet1/2"
+    vpc_peer_link_mtu: 9216
+
+  tasks:
+    - name: "Pre-Flight: Validate Required Variables"
+      ansible.builtin.assert:
+        that:
+          - vpc_pkl_src | length > 0
+          - vpc_pkl_dest | length > 0
+        fail_msg: "ERROR: vpc_pkl_src and vpc_pkl_dest must be defined for vPC Keepalive."
+
+    - name: Execute vPC Domain Configuration Block
+      block:
+        - name: "Phase 0: Enable Required Features (Idempotent)"
+          cisco.nxos.nxos_feature:
+            feature: "{{ item }}"
+            state: enabled
+          loop:
+            - vpc
+            - lacp
+          register: feature_status
+
+        - name: "Phase 1.1: Configure PKL VRF"
+          cisco.nxos.nxos_vrf:
+            name: "{{ vpc_pkl_vrf }}"
+            description: "Dedicated VRF for vPC Peer-Keepalive"
+            state: present
+          register: vrf_status
+
+        - name: "Phase 1.2: Configure PKL L3 Interface"
+          cisco.nxos.nxos_l3_interfaces:
+            config:
+              - name: "{{ vpc_pkl_intf }}"
+                ipv4:
+                  - address: "{{ vpc_pkl_src }}/30"
+                vrf: "{{ vpc_pkl_vrf }}"
+            state: merged
+          register: l3_intf_status
+
+        - name: "Phase 2: Configure vPC Domain Parameters"
+          cisco.nxos.nxos_vpc_domain:
+            domain: "{{ vpc_domain_id }}"
+            peer_keepalive:
+              dest: "{{ vpc_pkl_dest }}"
+              src: "{{ vpc_pkl_src }}"
+              vrf: "{{ vpc_pkl_vrf }}"
+            role_priority: "{{ vpc_role_priority }}"
+            system_priority: "{{ vpc_system_priority }}"
+            peer_gateway: "{{ vpc_peer_gateway }}"
+            peer_switch: "{{ vpc_peer_switch }}"
+            auto_recovery: "{{ vpc_auto_recovery }}"
+            delay_restore: "{{ vpc_delay_restore }}"
+            ipv6_nd_sync: "{{ vpc_ipv6_nd_sync }}"
+            state: merged
+          register: vpc_domain_status
+
+        - name: "Phase 3.1: Initialize Peer-Link Port-Channel"
+          cisco.nxos.nxos_lag_interfaces:
+            config:
+              - name: "Port-channel{{ vpc_peer_link_pc_id }}"
+                mode: active
+            state: merged
+          register: lag_init_status
+
+        - name: "Phase 3.2: Configure Peer-Link Physical Interfaces (MTU/Description)"
+          cisco.nxos.nxos_ethernet_interfaces:
+            config:
+              - name: "{{ item }}"
+                mtu: "{{ vpc_peer_link_mtu }}"
+                description: "vPC Peer-Link Member"
+            state: merged
+          loop: "{{ vpc_peer_link_interfaces }}"
+          register: eth_intf_status
+
+        - name: "Phase 3.3: Assign Physical Interfaces to Peer-Link Port-Channel"
+          cisco.nxos.nxos_lag_interfaces:
+            config:
+              - name: "Port-channel{{ vpc_peer_link_pc_id }}"
+                members:
+                  - member: "{{ item }}"
+                    mode: active
+            state: merged
+          loop: "{{ vpc_peer_link_interfaces }}"
+          register: lag_member_status
+
+        - name: "Phase 4: Designate Port-Channel as vPC Peer-Link"
+          cisco.nxos.nxos_vpc_interface:
+            config:
+              - name: "Port-channel{{ vpc_peer_link_pc_id }}"
+                peer_link: true
+            state: merged
+          register: vpc_intf_status
+
+        - name: "Phase 5: Verify vPC Operational State"
+          cisco.nxos.nxos_command:
+            commands:
+              - "show vpc brief"
+              - "show vpc peer-keepalive"
+          register: vpc_verify
+          changed_when: false
+
+        - name: "Observability: Assert vPC Peer-Keepalive is Alive"
+          ansible.builtin.assert:
+            that:
+              - "'peer is alive' in vpc_verify.stdout[1]"
+            fail_msg: "vPC Peer-Keepalive is not reaching the neighbor. Check L3 connectivity."
+
+      rescue:
+        - name: "CRITICAL: Capture Diagnostics on Failure"
+          cisco.nxos.nxos_command:
+            commands:
+              - "show vpc brief"
+              - "show vpc consistency-parameters global"
+          register: vpc_diag
+          ignore_errors: true
+
+        - name: "Report Failure Diagnostics"
+          ansible.builtin.debug:
+            msg: 
+              - "vPC Deployment failed on {{ inventory_hostname }}"
+              - "Diagnostics Output: {{ vpc_diag.stdout_lines | default('No diagnostics captured') }}"
+          
+        - name: "Terminate Playbook"
+          ansible.builtin.fail:
+            msg: "vPC Domain setup failed. Adjacency or consistency issues detected."
+
+      always:
+        - name: "Archive Configuration State"
+          cisco.nxos.nxos_config:
+            backup: true
+            save_when: modified
+          register: config_save

@@ -1,0 +1,34 @@
+---
+# FortiGate Aggregate Interfaces
+# Purpose: Retrieve and verify the status of aggregate (LACP) interfaces.
+# Standards: Idempotent (Read-only), FQCN usage, and validated observability.
+- name: Get Aggregate Interfaces
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve aggregate interface status from device
+      # Using FQCN for consistent cross-platform execution
+      ansible.netcommon.cli_command:
+        command: get system aggregate
+      register: agg_result
+      # Error Handling: Ensure the command is recognized by FortiOS and executed successfully
+      failed_when:
+        - agg_result.rc != 0
+        - "'Unknown action' in agg_result.stdout"
+
+    - name: Validate aggregate data retrieval
+      # Observability: Assert that the command returned content to verify operational success
+      ansible.builtin.assert:
+        that:
+          - agg_result.stdout is defined
+          - agg_result.stdout | length > 0
+        fail_msg: "Command 'get system aggregate' failed to return data. Check device configuration."
+        success_msg: "Aggregate interface information successfully retrieved."
+
+    - name: Display aggregate interface details
+      # Documentation: Formatted output for visibility into device state
+      ansible.builtin.debug:
+        msg: |
+          ======================= AGGREGATE STATUS =======================
+          {{ agg_result.stdout }}

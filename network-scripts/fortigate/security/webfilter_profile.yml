@@ -1,0 +1,33 @@
+---
+- name: Get FortiGate Web Filter Profile
+  hosts: fortigate
+  gather_facts: false
+  # Using network_cli connection for direct interaction with FortiOS
+  connection: ansible.netcommon.network_cli
+
+  tasks:
+    - name: Retrieve web filter profile configuration
+      # Using FQCN for stability and adhering to best practices.
+      # This operation is inherently idempotent as it is a read-only request.
+      ansible.netcommon.cli_command:
+        command: "get webfilter profile"
+      register: wf_result
+      # Identify command-level failures even if the transport succeeds.
+      failed_when:
+        - wf_result.failed or "Command fail" in wf_result.stdout or "Unknown action" in wf_result.stdout
+
+    - name: Validate configuration capture
+      # Observability: Ensure the captured output is not empty before proceeding.
+      ansible.builtin.assert:
+        that:
+          - wf_result.stdout is defined
+          - wf_result.stdout | length > 0
+        fail_msg: "Web Filter Profile retrieval failed or returned empty results."
+        success_msg: "Successfully validated Web Filter Profile content."
+
+    - name: Display Web Filter Profile details
+      # Provides immediate visibility for the operator during execution.
+      ansible.builtin.debug:
+        msg: |
+          ======================= WEB FILTER PROFILE =======================
+          {{ wf_result.stdout }}

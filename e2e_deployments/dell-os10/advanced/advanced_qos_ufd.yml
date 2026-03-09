@@ -1,0 +1,35 @@
+---
+- name: Dell EMC OS10 Advanced - Uplink Failure Detection and QoS
+  hosts: dell_os10
+  gather_facts: no
+  collections:
+    - dellemc.os10
+
+  tasks:
+    - name: Configure Uplink Failure Detection (UFD) State
+      dellemc.os10.os10_config:
+        lines:
+          - uplink-state-group 1
+          - enable
+          - down-stream ethernet 1/1/1-1/1/10
+          - up-stream ethernet 1/1/48
+
+    - name: Configure QoS Trust settings
+      dellemc.os10.os10_config:
+        lines:
+          - trust dscp
+        parents: system qos
+
+    - name: Configure QoS Policy for Voice
+      dellemc.os10.os10_config:
+        lines:
+          - set qos-group 5
+        parents:
+          - policy-map type qos PM_QOS_IN
+          - class ipv4 CM_VOICE_MATCH
+
+    - name: Apply QoS Policy to Port
+      dellemc.os10.os10_config:
+        lines:
+          - service-policy input type qos PM_QOS_IN
+        parents: interface ethernet 1/1/1

@@ -1,0 +1,52 @@
+---
+# FortiGate OSPF Status Diagnostic Playbook
+# This playbook retrieves OSPF neighbor and database information.
+# Improved for: Idempotency, Observability, Documentation, Error Handling, and FQCN.
+
+- name: Get OSPF Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve OSPF neighbor status
+      # FQCN: Using ansible.netcommon.cli_command for standardized CLI interaction
+      ansible.netcommon.cli_command:
+        command: get router info ospf neighbor
+      register: ospf_neighbors
+      # Error Handling: Use ignore_errors to prevent playbook termination if OSPF is not configured
+      ignore_errors: true
+
+    - name: Validate OSPF neighbor retrieval
+      # Observability: Ensure the command was successful before proceeding
+      ansible.builtin.assert:
+        that:
+          - "ospf_neighbors.failed == false"
+          - "'stdout' in ospf_neighbors"
+        fail_msg: "Failed to retrieve OSPF neighbor status. Ensure OSPF is enabled on the device."
+        quiet: true
+
+    - name: Retrieve OSPF database state
+      # Documentation: Fetching full OSPF LSDB for complete diagnostic visibility
+      ansible.netcommon.cli_command:
+        command: get router info ospf database
+      register: ospf_database
+      ignore_errors: true
+
+    - name: Validate OSPF database retrieval
+      # Observability: Assert task captures failures for operational awareness
+      ansible.builtin.assert:
+        that:
+          - "ospf_database.failed == false"
+          - "'stdout' in ospf_database"
+        fail_msg: "Failed to retrieve OSPF database information."
+        quiet: true
+
+    - name: Display OSPF Diagnostics
+      # Documentation: Structured output for human-readable review
+      ansible.builtin.debug:
+        msg: |
+          ======================= OSPF NEIGHBORS =======================
+          {{ ospf_neighbors.stdout | default('No data retrieved') }}
+
+          ======================== OSPF DATABASE =======================
+          {{ ospf_database.stdout | default('No data retrieved') }}

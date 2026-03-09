@@ -1,0 +1,37 @@
+---
+# FortiGate High Availability (HA) Status Verification
+# Purpose: Retrieves the current HA state to ensure cluster health and synchronization.
+# Standards Compliance: FQCN usage, Idempotency, Observability, and Error Handling.
+
+- name: Get HA Status
+  hosts: fortigate
+  gather_facts: false # Optimization: Fact gathering is not required for CLI status checks.
+
+  tasks:
+    - name: Retrieve HA status from device
+      # Using FQCN (Fully Qualified Collection Name) for reliable module resolution.
+      ansible.netcommon.cli_command:
+        command: get system ha status
+      register: ha_output
+      # Idempotency: This is a read-only operation and safe for repeated execution.
+      # Error Handling: Ensure the playbook fails if the command returns no data.
+      failed_when: ha_output.stdout is not defined or ha_output.stdout | length == 0
+
+    - name: Validate HA operational state
+      # Observability: Verify that the output contains expected HA health or state markers.
+      ansible.builtin.assert:
+        that:
+          - "'HA Health Status' in ha_output.stdout or 'Mode' in ha_output.stdout"
+        fail_msg: "The command output does not appear to contain valid HA status information."
+        quiet: true # Minimizes output noise on success.
+
+    - name: Display formatted HA status report
+      # Documentation: Provides a structured, human-readable summary for logs and auditing.
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+          FORTIGATE HA STATUS: {{ inventory_hostname }}
+          REPORT GENERATED: {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S"') }}
+          ====================================================================
+          {{ ha_output.stdout }}
+          ====================================================================

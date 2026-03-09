@@ -1,0 +1,39 @@
+---
+# FortiGate SSL VPN Tunnel Status Analysis
+# This playbook retrieves the current SSL VPN tunnel status from FortiGate devices.
+# Designed for idempotency (read-only) and high observability.
+
+- name: Retrieve SSL VPN Tunnel Information
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'get sslvpn tunnel' via CLI
+      # Use Fully Qualified Collection Name (FQCN) for the network command module.
+      ansible.netcommon.cli_command:
+        command: get sslvpn tunnel
+      register: tunnel_result
+      # Idempotency: Task is read-only, so it never changes the system state.
+      changed_when: false
+      # Error Handling: Ensure we catch application-level errors that don't return non-zero exit codes.
+      failed_when:
+        - tunnel_result.failed or "Unknown action" in tunnel_result.stdout or "Command fail" in tunnel_result.stdout
+
+    - name: Verify SSL VPN tunnel output integrity
+      # Observability: Assert that the result contains data to ensure the command executed successfully.
+      ansible.builtin.assert:
+        that:
+          - tunnel_result.stdout is defined
+          - tunnel_result.stdout | length > 0
+        fail_msg: "SSL VPN tunnel data could not be retrieved or the output is empty."
+        quiet: true
+
+    - name: Display SSL VPN Tunnel Details
+      # Documentation: Provide formatted output for operational visibility.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SSL VPN TUNNEL =======================
+          Device: {{ inventory_hostname }}
+          --------------------------------------------------------------
+          {{ tunnel_result.stdout }}
+          ==============================================================

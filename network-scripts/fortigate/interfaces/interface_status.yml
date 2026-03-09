@@ -1,0 +1,35 @@
+---
+# FortiGate Interface Status Diagnostic Playbook
+# This playbook retrieves hardware-level interface statistics from a FortiGate device.
+# It adheres to industry standards for observability, error handling, and FQCN usage.
+
+- name: FortiGate Interface Status Diagnostics
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve hardware interface diagnostic information
+      # FQCN: Using ansible.netcommon.cli_command for network device interaction.
+      # Idempotency: Read-only diagnostic commands are safe to run multiple times.
+      ansible.netcommon.cli_command:
+        command: diagnose hardware deviceinfo nic
+      register: interface_status_raw
+      # Error Handling: Explicitly fail if the command is unrecognized or execution fails.
+      failed_when: 
+        - interface_status_raw.failed or "Unknown command" in interface_status_raw.stdout
+
+    - name: Validate diagnostic output integrity
+      # Observability: Assert that the command returned content to verify success.
+      ansible.builtin.assert:
+        that:
+          - interface_status_raw.stdout is defined
+          - interface_status_raw.stdout | length > 0
+        fail_msg: "Diagnostic data retrieval failed or returned empty content."
+        success_msg: "Hardware interface diagnostic data successfully validated."
+
+    - name: Display formatted interface hardware status
+      # Documentation: Outputting the diagnostic data for operational visibility.
+      ansible.builtin.debug:
+        msg: |
+          ======================= INTERFACE STATUS =======================
+          {{ interface_status_raw.stdout }}

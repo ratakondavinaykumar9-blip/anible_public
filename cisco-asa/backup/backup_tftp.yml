@@ -1,0 +1,42 @@
+---
+# Backup Tftp
+# Improved by: Architect:# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
+- name: Backup Cisco ASA running-config to TFTP Server
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Target TFTP server IP or Hostname
+    tftp_server: "10.0.0.1"
+    # Destination filename on the TFTP server
+    backup_filename: "{{ inventory_hostname }}_running_config.cfg"
+
+  tasks:
+    - name: Copy running-config to TFTP
+      # Best Practice: Use Fully Qualified Collection Name (FQCN)
+      # Using /noconfirm to ensure the command is non-interactive for automation
+      ansible.netcommon.cli_command:
+        command: "copy /noconfirm running-config tftp://{{ tftp_server }}/{{ backup_filename }}"
+      register: tftp_copy_result
+      # Error Handling: Identify failure strings in the device output
+      failed_when: 
+        - "'Error' in tftp_copy_result.stdout"
+        - "'Failed' in tftp_copy_result.stdout"
+        - "'Timeout' in tftp_copy_result.stdout"
+        - "'Invalid' in tftp_copy_result.stdout"
+      # Idempotency/Change Tracking: Define when a change actually occurred
+      changed_when: "'bytes copied' in tftp_copy_result.stdout"
+
+    - name: Verify backup operation success
+      # Observability: Assert that the transfer was completed based on device feedback
+      ansible.builtin.assert:
+        that:
+          - "tftp_copy_result.rc == 0"
+          - "'bytes copied' in tftp_copy_result.stdout"
+        fail_msg: "TFTP backup failed for {{ inventory_hostname }}. Verify connectivity to {{ tftp_server }}."
+        success_msg: "TFTP backup successful for {{ inventory_hostname }}."
+
+    - name: Log backup metadata
+      # Observability: Provide clear feedback on the backup destination
+      ansible.builtin.debug:
+        msg: "Backup initiated and completed to tftp://{{ tftp_server }}/{{ backup_filename }}"

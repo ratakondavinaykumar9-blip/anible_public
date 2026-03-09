@@ -1,0 +1,36 @@
+---
+# Cisco ASA Protocol Object Retrieval and Validation
+# Standard: Documentation - This playbook retrieves protocol objects for auditing and visibility.
+- name: Protocol Objects Retrieval and Verification
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Fetch protocol objects from the Cisco ASA device
+      # Standard: Best Practices - Using Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: show object protocol
+      # Standard: Observability - Capture output for subsequent validation and audit
+      register: proto_output
+      # Standard: Error Handling - Define explicit failure conditions for robustness
+      failed_when: 
+        - proto_output.failed or "Invalid" in proto_output.stdout or proto_output.stdout | length == 0
+
+    - name: Assert protocol object retrieval was successful
+      # Standard: Observability - Verify data integrity and existence of returned data
+      ansible.builtin.assert:
+        that:
+          - proto_output.stdout is defined
+          - proto_output.stdout | length > 0
+        fail_msg: "The protocol object output is empty or undefined. Verify device configuration."
+        success_msg: "Successfully retrieved protocol objects from {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display retrieved protocol objects
+      # Standard: Documentation - Structured output for human-readable auditing
+      ansible.builtin.debug:
+        msg: |
+          ======================= PROTOCOL OBJECTS =======================
+          {{ proto_output.stdout }}
+      # Standard: Idempotency - This is a read-only operation and is inherently idempotent
+      when: proto_output.stdout is defined

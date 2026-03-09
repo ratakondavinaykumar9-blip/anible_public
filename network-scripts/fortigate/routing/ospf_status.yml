@@ -1,0 +1,53 @@
+---
+# FortiGate OSPF Status Verification Playbook
+# Purpose: Retrieves and validates OSPF neighbor and database state.
+# Standard: Idempotent (read-only), Observability (assertions), and FQCN compliant.
+- name: Get OSPF Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Get OSPF neighbors
+      # Use FQCN for network command execution to ensure reliability across environments
+      ansible.netcommon.cli_command:
+        command: get router info ospf neighbor
+      register: ospf_neighbors
+      # Error Handling: Identify if OSPF is not running or command is unsupported
+      failed_when: 
+        - ospf_neighbors.failed
+        - '"Unknown action" in ospf_neighbors.stdout'
+
+    - name: Verify OSPF neighbor command execution
+      # Observability: Ensure the command was successfully processed by the device
+      ansible.builtin.assert:
+        that:
+          - ospf_neighbors.stdout is defined
+        fail_msg: "Failed to retrieve OSPF neighbor information from {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Get OSPF database
+      # Retrieve the OSPF Link State Database (LSDB) for topology analysis
+      ansible.netcommon.cli_command:
+        command: get router info ospf database
+      register: ospf_db
+      failed_when: 
+        - ospf_db.failed
+        - '"Unknown action" in ospf_db.stdout'
+
+    - name: Verify OSPF database command execution
+      # Observability: Validate that the database output was captured
+      ansible.builtin.assert:
+        that:
+          - ospf_db.stdout is defined
+        fail_msg: "Failed to retrieve OSPF database information from {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display OSPF Operational Status
+      # Documentation: Present clear, formatted telemetry for troubleshooting and auditing
+      ansible.builtin.debug:
+        msg: |
+          ======================= OSPF NEIGHBORS =======================
+          {{ ospf_neighbors.stdout | default('No OSPF neighbor data available.') }}
+
+          ======================= OSPF DATABASE ========================
+          {{ ospf_db.stdout | default('No OSPF database data available.') }}

@@ -1,0 +1,37 @@
+---
+# Network Automation Framework Architect: FortiGate Global Configuration Audit
+# Purpose: Safely retrieve and verify the global system state of FortiGate units.
+# This playbook is idempotent as it performs read-only operations.
+- name: Get FortiGate Global Settings
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve global system settings using CLI
+      # Using Fully Qualified Collection Name (FQCN) for consistency and reliability
+      ansible.netcommon.cli_command:
+        command: get system global
+      register: global_output
+      # Ensure the task fails if the output is empty or indicates a command execution error
+      failed_when: 
+        - global_output.stdout | length == 0
+        - "'error' in global_output.stdout.lower()"
+
+    - name: Verify data integrity of the retrieved settings
+      # Observability: Assert that critical configuration markers are present in the output
+      # to ensure the device returned a valid global configuration block.
+      ansible.builtin.assert:
+        that:
+          - "'hostname' in global_output.stdout"
+          - "'admintimeout' in global_output.stdout"
+        fail_msg: "The retrieved configuration from {{ inventory_hostname }} is incomplete or invalid."
+        success_msg: "Global settings successfully retrieved and verified for {{ inventory_hostname }}."
+
+    - name: Log global settings for operator visibility
+      # Debug output formatted for high-signal observability during execution
+      ansible.builtin.debug:
+        msg: |
+          ===============================================================
+          GLOBAL SETTINGS FOR DEVICE: {{ inventory_hostname }}
+          ===============================================================
+          {{ global_output.stdout }}

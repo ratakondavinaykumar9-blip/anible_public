@@ -1,0 +1,58 @@
+---
+# Playbook: Get and Verify ASA Routing Information
+# Purpose: Retrieves the active routing table and the underlying routing database 
+#          from Cisco ASA/Firepower devices for audit and troubleshooting.
+- name: Get Routing Table Information
+  hosts: asa_firepower
+  gather_facts: false # Facts are not required for simple CLI command execution
+
+  tasks:
+    - name: Retrieve active routing table
+      # Using FQCN (Fully Qualified Collection Name) for consistent execution
+      ansible.netcommon.cli_command:
+        command: show route
+      register: routes_output
+      # Error Handling: Detect device-level errors that don't trigger a connection failure
+      failed_when: 
+        - routes_output.failed or "Invalid input" in routes_output.stdout
+
+    - name: Verify routing table retrieval
+      # Observability: Confirm the command returned expected routing table headers
+      ansible.builtin.assert:
+        that:
+          - routes_output.stdout is defined
+          - "'Codes:' in routes_output.stdout"
+        fail_msg: "Routing table output on {{ inventory_hostname }} is empty or invalid."
+        success_msg: "Routing table successfully retrieved from {{ inventory_hostname }}."
+
+    - name: Retrieve underlying routing database
+      # Captures the full RIB to provide visibility into routes not currently in the FIB
+      ansible.netcommon.cli_command:
+        command: show route database
+      register: route_db_output
+      failed_when:
+        - route_db_output.failed or "Invalid input" in route_db_output.stdout
+
+    - name: Verify routing database retrieval
+      # Observability: Ensure the database query returned actual content
+      ansible.builtin.assert:
+        that:
+          - route_db_output.stdout is defined
+          - route_db_output.stdout | length > 0
+        fail_msg: "Routing database output on {{ inventory_hostname }} is missing or empty."
+        success_msg: "Routing database successfully retrieved from {{ inventory_hostname }}."
+
+    - name: Display consolidated routing information
+      # Formatted output to improve visibility during manual playbook execution
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          DEVICE: {{ inventory_hostname }}
+          ============================================================
+          ACTIVE ROUTING TABLE:
+          {{ routes_output.stdout }}
+          
+          ------------------------------------------------------------
+          ROUTING DATABASE (RIB):
+          {{ route_db_output.stdout }}
+          ============================================================

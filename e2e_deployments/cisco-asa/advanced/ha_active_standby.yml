@@ -1,0 +1,30 @@
+---
+- name: Cisco ASA Advanced - Active/Standby Failover
+  hosts: asa_firepower
+  gather_facts: no
+
+  tasks:
+    - name: Configure Failover LAN Interface
+      cisco.asa.asa_config:
+        lines:
+          - failover lan interface fover GigabitEthernet0/3
+          - failover interface ip fover 192.168.254.1 255.255.255.0 standby 192.168.254.2
+
+    - name: Configure Stateful Failover Link
+      cisco.asa.asa_config:
+        lines:
+          - failover link stateful GigabitEthernet0/4
+          - failover interface ip stateful 192.168.253.1 255.255.255.0 standby 192.168.253.2
+
+    - name: Enable Failover
+      cisco.asa.asa_config:
+        lines:
+          - failover
+          - failover lan unit primary
+          - failover key MyFailoverS3cr3t!
+
+    - name: Configure Standby IPs for Data Interfaces
+      cisco.asa.asa_config:
+        lines:
+          - ip address 198.51.100.2 255.255.255.0 standby 198.51.100.3
+        parents: interface GigabitEthernet0/0

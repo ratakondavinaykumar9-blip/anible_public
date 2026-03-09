@@ -1,0 +1,57 @@
+---
+# FortiGate CPU Monitoring and Performance Analysis
+# Improved by Architect:# Standards Compliance: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Monitor FortiGate CPU Performance
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve current CPU performance status
+      # Use FQCN for network commands. Read-only operation ensures idempotency.
+      ansible.netcommon.cli_command:
+        command: "get system performance status | grep CPU"
+      register: cpu_perf
+      # Error Handling: Ensure the command was accepted by the device
+      failed_when: cpu_perf.rc != 0
+      changed_when: false
+
+    - name: Validate CPU status output
+      # Observability: Assert that the output contains expected data patterns
+      ansible.builtin.assert:
+        that:
+          - cpu_perf.stdout is defined
+          - "'CPU' in cpu_perf.stdout"
+        fail_msg: "Failed to retrieve valid CPU performance metrics."
+        quiet: true
+
+    - name: Capture snapshot of system processes (Top)
+      # Improved: Using non-interactive iteration (1 second, 20 lines, 1 iteration)
+      # to prevent the automation from hanging on a persistent process view.
+      ansible.netcommon.cli_command:
+        command: "diagnose system top 1 20 1"
+      register: top_snapshot
+      failed_when: top_snapshot.rc != 0
+      changed_when: false
+
+    - name: Validate process snapshot data
+      # Observability: Verify that the process list was successfully captured
+      ansible.builtin.assert:
+        that:
+          - top_snapshot.stdout is defined
+          - top_snapshot.stdout | length > 0
+        fail_msg: "Process snapshot returned empty or failed."
+        quiet: true
+
+    - name: Display Consolidated CPU Monitoring Report
+      # Documentation: Clear visualization of the gathered performance data
+      ansible.builtin.debug:
+        msg: |
+          ======================= CPU MONITORING REPORT =======================
+          TIMESTAMP: {{ lookup('pipe', 'date +%Y-%m-%d\ %H:%M:%S') }}
+          
+          CURRENT CPU METRICS:
+          {{ cpu_perf.stdout }}
+
+          PROCESS SNAPSHOT (TOP):
+          {{ top_snapshot.stdout }}
+          =====================================================================

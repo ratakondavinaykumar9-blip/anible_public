@@ -1,0 +1,39 @@
+---
+# FortiGate Traffic History Retrieval Playbook
+# This playbook fetches and validates traffic history from FortiGate devices.
+# It is designed to be idempotent (read-only) and provides observability via assertions.
+- name: Get FortiGate Traffic History
+  hosts: fortigate
+  gather_facts: false
+  vars:
+    # Ensuring the correct network OS is defined for the connection
+    ansible_network_os: fortinet.fortios.fortios
+
+  tasks:
+    - name: Retrieve firewall traffic history via CLI
+      # Why: Fetches real-time traffic statistics from the FortiOS kernel.
+      # FQCN: Using ansible.netcommon.cli_command for raw CLI execution.
+      ansible.netcommon.cli_command:
+        command: get firewall traffic-history
+      register: traffic_history_raw
+      # Error Handling: Catch specific FortiOS error strings that might not trigger a non-zero exit code.
+      failed_when: 
+        - "traffic_history_raw.failed"
+        - "'Command fail' in traffic_history_raw.stdout or 'Unknown action' in traffic_history_raw.stdout"
+
+    - name: Validate traffic history data integrity
+      # Why: Observability; ensures the device returned a non-empty response before proceeding.
+      ansible.builtin.assert:
+        that:
+          - traffic_history_raw.stdout is defined
+          - traffic_history_raw.stdout | length > 0
+        fail_msg: "Data retrieval failed: FortiGate returned an empty traffic history buffer."
+        success_msg: "Data retrieval successful: Traffic history buffer contains data."
+
+    - name: Display formatted traffic history
+      # Why: Provides a clear, human-readable summary of the captured traffic metrics.
+      ans()ble.builtin.debug:
+        msg: |
+          ======================= TRAFFIC HISTORY =======================
+          {{ traffic_history_raw.stdout }}
+          ==============================================================

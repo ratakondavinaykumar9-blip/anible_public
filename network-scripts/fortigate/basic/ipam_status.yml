@@ -1,0 +1,35 @@
+---
+# FortiGate IPAM Status Retrieval Playbook
+# This playbook retrieves the IP Address Management (IPAM) status from FortiGate devices.
+# Standardized for idempotency, observability, and robust error handling.
+- name: Get IPAM Status
+  hosts: fortigate
+  gather_facts: false # Fact gathering is disabled to improve performance for this specific task.
+
+  tasks:
+    - name: Execute 'get system ipam' command
+      # Using FQCN (Fully Qualified Collection Name) for consistent behavior across environments.
+      ansible.netcommon.cli_command:
+        command: get system ipam
+      register: ipam_status
+      # Error Handling: Fail the task if the output contains common FortiOS CLI error indicators.
+      failed_when:
+        - ipam_status.failed or "Unknown action" in ipam_status.stdout or "Command fail" in ipam_status.stdout
+
+    - name: Verify IPAM status retrieval
+      # Observability: Assert that the command returned meaningful data.
+      ansible.builtin.assert:
+        that:
+          - ipam_status.stdout is defined
+          - ipam_status.stdout | length > 0
+        fail_msg: "The IPAM status retrieval returned empty or invalid data."
+        success_msg: "IPAM status successfully retrieved."
+        quiet: true
+
+    - name: Display IPAM status details
+      # Using FQCN for the debug module to ensure best practices.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE IPAM STATUS =======================
+          {{ ipam_status.stdout }}
+      # Idempotency note: This is a read-only operation and does not change device state.

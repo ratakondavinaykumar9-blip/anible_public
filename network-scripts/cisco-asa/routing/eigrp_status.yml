@@ -1,0 +1,35 @@
+---
+# EIGRP Status Verification Playbook
+# Standards: Idempotent (read-only), Observable (asserts), Documented, Error Handled, FQCN
+- name: EIGRP Status
+  hosts: asa_firepower
+  gather_facts: no
+
+  tasks:
+    - name: Retrieve EIGRP neighbors from device
+      # Use FQCN for cross-platform network command execution.
+      # This task is idempotent as it performs a read-only operation.
+      ansible.netcommon.cli_command:
+        command: show eigrp neighbors
+      register: eigrp_output
+      # Error Handling: Explicitly fail if the command is unrecognized by the OS or returns an error.
+      failed_when: 
+        - eigrp_output.failed | default(false)
+        - "'Invalid' in eigrp_output.stdout or 'error' in eigrp_output.stdout | lower"
+
+    - name: Verify EIGRP output integrity
+      # Observability: Validate that the command executed and returned meaningful data.
+      # This ensures the automation provides reliable feedback on the network state.
+      ansible.builtin.assert:
+        that:
+          - "eigrp_output.stdout is defined"
+          - "eigrp_output.stdout | length > 0"
+        fail_msg: "Failed to retrieve EIGRP neighbors. The output was empty or undefined."
+        success_msg: "Successfully retrieved EIGRP neighbor status."
+
+    - name: Display EIGRP Neighbors
+      # Observability: Formatted output for operator review and logging.
+      ansible.builtin.debug:
+        msg: |
+          ======================= EIGRP NEIGHBORS =======================
+          {{ eigrp_output.stdout }}

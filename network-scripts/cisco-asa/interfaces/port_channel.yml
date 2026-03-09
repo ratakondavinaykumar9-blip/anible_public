@@ -1,0 +1,33 @@
+---
+# Playbook: Retrieve Port Channel Status for Cisco ASA/Firepower
+# Standards: Idempotency (Read-only), Observability (Assert/Register), FQCN
+- name: Cisco ASA Port Channel Audit
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve port-channel information from the firewall
+      # FQCN: Using ansible.netcommon for standardized CLI interaction
+      ansible.netcommon.cli_command:
+        command: show port-channel
+      register: portch_result
+      # Error Handling: Ensure we fail if the command is unrecognized or returns an error message
+      failed_when:
+        - portch_result.stdout is not defined
+        - "'Invalid' in portch_result.stdout or 'Error' in portch_result.stdout"
+
+    - name: Validate that port-channel data was received
+      # Observability: Verify the output is not empty before proceeding
+      ansible.builtin.assert:
+        that:
+          - "portch_result.stdout | length > 0"
+        fail_msg: "The command 'show port-channel' returned no data. Check device configuration."
+        success_msg: "Port-channel data successfully captured."
+
+    - name: Display formatted Port Channel status
+      # Documentation: Output provided for operator visibility and audit logging
+      ansible.builtin.debug:
+        msg: |
+          ======================= PORT CHANNEL STATUS =======================
+          {{ portch_result.stdout }}
+          ====================================================================

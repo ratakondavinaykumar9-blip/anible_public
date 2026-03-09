@@ -1,0 +1,127 @@
+---
+# Detailed IPSec Tunnel Information Retrieval
+# This playbook gathers VPN session database and crypto state information from Cisco ASA/FTD devices.
+# It supports filtering by peer IP and provides output in both JSON and human-readable formats.
+- name: Get Detailed IPSec Tunnel Info
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Set output_format to 'json' to generate a report file, or 'text' for terminal output
+    output_format: text
+    # Specify a peer IP address to isolate details for a specific tunnel
+    tunnel_peer: ""
+
+  tasks:
+    - name: Gather timestamp information
+      # Why: Provides a temporal context for the audit report. Run locally to minimize device impact.
+      ansible.builtin.setup:
+        gather_subset:
+          - 'date_time'
+      delegate_to: localhost
+      run_once: true
+
+    - name: Get detailed tunnel info for specific peer
+      # Why: Retrieves targeted session information for a single VPN peer.
+      cisco.asa.asa_command:
+        commands:
+          - "show vpn-sessiondb l2l filter-ipaddress {{ tunnel_peer }}"
+      register: tunnel_peer_output
+      when: tunnel_peer | length > 0
+      failed_when: 
+        - tunnel_peer_output.failed
+        - "'Invalid' in tunnel_peer_output.stdout[0]"
+
+    - name: Get all tunnel details
+      # Why: Provides a high-level overview of all active L2L VPN connections.
+      cisco.asa.asa_command:
+        commands:
+          - "show vpn-sessiondb l2l"
+      register: tunnel_all_output
+      when: tunnel_peer | length == 0
+
+    - name: Get crypto stats for specific peer
+      # Why: Retrieves Phase 2 IPsec SA details, including packet counters and SPIs.
+      # ignore_errors used as the peer might be configured but currently disconnected.
+      cisco.asa.asa_command:
+        commands:
+          - "show crypto ipsec sa peer {{ tunnel_peer }}"
+      register: crypto_detail_output
+      when: tunnel_peer | length > 0
+      ignore_errors: true
+
+    - name: Get IKEv1 session details
+      # Why: Captures Phase 1 IKEv1/ISAKMP security association status.
+      cisco.asa.asa_command:
+        commands:
+          - "show crypto isakmp sa detail"
+      register: ikev1_detail_output
+
+    - name: Get IKEv2 session details
+      # Why: Captures Phase 1 IKEv2 security association status.
+      cisco.asa.asa_command:
+        commands:
+          - "show crypto ikev2 sa detail"
+      register: ikev2_detail_output
+
+    - name: Validate data retrieval
+      # Why: Observability. Ensures critical command outputs were successfully captured.
+      ansible.builtin.assert:
+        that:
+          - "ikev1_detail_output is not failed"
+          - "ikev2_detail_output is not failed"
+          - "(tunnel_peer | length > 0 and tunnel_peer_output is not failed) or (tunnel_peer | length == 0 and tunnel_all_output is not failed)"
+        fail_msg: "Mandatory VPN data retrieval failed for {{ inventory_hostname }}."
+
+    - name: Consolidate tunnel data
+      # Why: Simplifies downstream logic for reporting by normalizing the peer vs. all outputs.
+      ansible.builtin.set_fact:
+        vpn_session_data: "{{ tunnel_peer_output.stdout[0] if (tunnel_peer | length > 0) else tunnel_all_output.stdout[0] }}"
+
+    - name: Ensure reporting directory exists
+      # Why: Idempotency. Guarantees the filesystem environment is prepared for output.
+      ansible.builtin.file:
+        path: "/tmp/asa_vpn_reports"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+
+    - name: Generate JSON report
+      # Why: Archives data in a structured format for machine processing or compliance.
+      # Idempotency: Overwrites existing files with updated state.
+      ansible.builtin.copy:
+        content: |
+          {
+            "device": "{{ inventory_hostname }}",
+            "timestamp": "{{ hostvars['localhost']['ansible_date_time']['iso8601'] }}",
+            "tunnel_peer": "{{ tunnel_peer | default('all', true) }}",
+            "tunnel_details": {{ vpn_session_data | to_json }},
+            "crypto_details": {{ crypto_detail_output.stdout[0] | default('') | to_json }},
+            "ikev1_details": {{ ikev1_detail_output.stdout[0] | to_json }},
+            "ikev2_details": {{ ikev2_detail_output.stdout[0] | to_json }}
+          }
+        dest: "/tmp/asa_vpn_reports/asa_ipsec_{{ inventory_hostname }}_{{ tunnel_peer | default('all', true) }}.json"
+        mode: '0644'
+      when: output_format == 'json'
+      delegate_to: localhost
+
+    - name: Display human readable details
+      # Why: Provides real-time visibility for the operator in the terminal.
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          IPSec Tunnel Status: {{ inventory_hostname }}
+          Time: {{ hostvars['localhost']['ansible_date_time']['iso8601'] }}
+          Target: {{ tunnel_peer | default('Global (All Tunnels)', true) }}
+          ============================================================
+          
+          [VPN SESSION DATABASE]
+          {{ vpn_session_data }}
+
+          [IPSEC SA DETAILS]
+          {{ crypto_detail_output.stdout[0] | default('N/A (No peer specified or peer inactive)') }}
+
+          [IKE SUMMARY]
+          IKEv1 Status: {{ 'Data retrieved' if ikev1_detail_output.stdout[0] | length > 0 else 'No active sessions' }}
+          IKEv2 Status: {{ 'Data retrieved' if ikev2_detail_output.stdout[0] | length > 0 else 'No active sessions' }}
+      when: output_format == 'text'

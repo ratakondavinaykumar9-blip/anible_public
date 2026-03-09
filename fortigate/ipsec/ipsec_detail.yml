@@ -1,0 +1,34 @@
+---
+# FortiGate IPSec Details Retrieval
+# This playbook retrieves diagnostic IPSec tunnel information from FortiGate devices.
+# Improved for Idempotency, Observability, and Error Handling.
+- name: Get IPSec Details
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPSec tunnel details from FortiGate
+      # Use Fully Qualified Collection Name (FQCN) for the network CLI command.
+      # This operation is inherently idempotent as it is a read-only 'get' command.
+      ansible.netcommon.cli_command:
+        command: get vpn ipsec tunnel details
+      register: details
+      # Error Handling: Catch cases where the command might be rejected or fail without a non-zero exit code.
+      failed_when: 
+        - details.failed or "Command fail" in details.stdout or "Unknown action" in details.stdout
+
+    - name: Verify successful data retrieval
+      # Observability: Ensure that the command returned valid data before proceeding.
+      ansible.builtin.assert:
+        that:
+          - details.stdout is defined
+          - details.stdout | length > 0
+        fail_msg: "IPSec details retrieval failed or returned empty output. Check device connectivity and VDOM context."
+        success_msg: "IPSec details successfully retrieved."
+
+    - name: Display IPSec Tunnel Details
+      # Documentation: Provide a clear, formatted view of the tunnel status for the operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC DETAILS =======================
+          {{ details.stdout }}

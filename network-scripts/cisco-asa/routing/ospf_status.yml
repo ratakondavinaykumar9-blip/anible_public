@@ -1,0 +1,51 @@
+---
+# Playbook: Get OSPF Status
+# Purpose: Retrieves and validates OSPF neighbor and database status from Cisco ASA/Firepower devices.
+# Standards: Idempotency (read-only), Observability (assertions), Documentation (inline comments), FQCN usage.
+- name: Get OSPF Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get OSPF neighbors
+      # Using FQCN for netcommon.cli_command. This task is naturally idempotent as it is a read-only operation.
+      ansible.netcommon.cli_command:
+        command: show ospf neighbor
+      register: ospf_neighbors
+      # Error Handling: Ensure the playbook fails if the command execution encounters a system error.
+      failed_when: ospf_neighbors.failed
+
+    - name: Verify OSPF neighbor connectivity
+      # Observability: Use assert to confirm that the OSPF process is active by checking for standard headers.
+      ansible.builtin.assert:
+        that:
+          - "'Neighbor ID' in ospf_neighbors.stdout"
+        fail_msg: "OSPF neighbor output is invalid or the protocol is not configured on {{ inventory_hostname }}."
+        success_msg: "OSPF neighbor table retrieved successfully on {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Get OSPF database
+      # Retrieves the Link State Database (LSDB) to provide visibility into the routing topology.
+      ansible.netcommon.cli_command:
+        command: show ospf database
+      register: ospf_db
+      failed_when: ospf_db.failed
+
+    - name: Verify OSPF database content
+      # Observability: Ensure the database contains valid OSPF data before proceeding.
+      ansible.builtin.assert:
+        that:
+          - "'OSPF Router' in ospf_db.stdout"
+        fail_msg: "OSPF database output is empty or contains unexpected data on {{ inventory_hostname }}."
+        success_msg: "OSPF database validated on {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display Formatted OSPF Status
+      # Provides a human-readable summary of the protocol state for monitoring and auditing.
+      ansible.builtin.debug:
+        msg: |
+          ======================= OSPF NEIGHBOR STATUS =======================
+          {{ ospf_neighbors.stdout }}
+
+          ======================= OSPF DATABASE SUMMARY =======================
+          {{ ospf_db.stdout }}

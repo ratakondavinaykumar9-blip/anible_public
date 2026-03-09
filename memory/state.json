@@ -1,0 +1,170 @@
+{
+  "cycle": "learn",
+  "current_focus": "cisco-nexus9k",
+  "last_updated": "2026-03-04T06:00:00Z",
+  "research_completed": true,
+  "research_file": "memory/2026-03-03-learnings.md",
+  "apply_completed": true,
+  "apply_date": "2026-03-04",
+  "platforms": {
+    "cisco-nexus9k": {
+      "status": "improved",
+      "key_modules": [
+        "cisco.nxos.nxos_evpn_global",
+        "cisco.nxos.nxos_evpn_vni",
+        "cisco.nxos.nxos_command"
+      ],
+      "playbooks_needed": [
+        "vxlan_bgp.yml",
+        "vxlan_evpn.yml",
+        "nve.yml",
+        "vni_l2.yml",
+        "vni_l3.yml"
+      ],
+      "playbooks_created": [
+        "vxlan/vxlan_bgp.yml",
+        "vxlan/vxlan_evpn.yml",
+        "vxlan/nve.yml"
+      ],
+      "playbooks_improved": [
+        "basic/hostname.yml",
+        "backup/backup_config.yml"
+      ],
+      "priority": "high"
+    },
+    "cisco-firepower": {
+      "status": "researched",
+      "key_modules": [],
+      "playbooks_needed": [
+        "ftd_health_check.yml",
+        "ftd_policy_audit.yml",
+        "fmc_api_health.yml"
+      ],
+      "priority": "high",
+      "notes": "Documentation access limited - need FMC API research"
+    },
+    "fortigate": {
+      "status": "improved",
+      "key_modules": [
+        "fortinet.fortios.fortios_system_sdwan",
+        "fortinet.fortios.fortios_router_policy",
+        "fortinet.fortios.fortios_vpn_ipsec_phase1interface"
+      ],
+      "playbooks_needed": [
+        "sdwan_health_check.yml",
+        "sdwan_service_rules.yml",
+        "sdwan_steering.yml"
+      ],
+      "playbooks_created": [
+        "sdwan/health_check.yml",
+        "sdwan/service_rules.yml"
+      ],
+      "priority": "high"
+    },
+    "cisco-asa": {
+      "status": "improved",
+      "key_modules": [
+        "ansible.netcommon.cli_command",
+        "cisco.asa.asa_command"
+      ],
+      "playbooks_needed": [
+        "vpn_tunnel_monitor.yml",
+        "acl_optimization.yml"
+      ],
+      "playbooks_improved": [
+        "ipsec/troubleshoot_vpn.yml",
+        "acl/acl_hits.yml",
+        "backup/backup_config.yml"
+      ],
+      "priority": "medium",
+      "notes": "cisco.asa collection removed from Ansible 12 - manual install required"
+    },
+    "juniper-srx": {
+      "status": "improved",
+      "key_modules": [
+        "junipernetworks.junos.junos_config",
+        "junipernetworks.junos.junos_command"
+      ],
+      "playbooks_needed": [
+        "security_policies.yml",
+        "chassis_cluster.yml"
+      ],
+      "playbooks_improved": [
+        "security/zones.yml"
+      ],
+      "priority": "medium"
+    },
+    "dell-emc": {
+      "status": "improved",
+      "key_modules": [
+        "dellemc.os10",
+        "dellemc.os6",
+        "dellemc.os9"
+      ],
+      "playbooks_improved": [
+        "basic/hostname.yml"
+      ],
+      "priority": "medium"
+    }
+  },
+  "improvements_applied": {
+    "2026-03-04": {
+      "total_playbooks_modified": 8,
+      "total_playbooks_created": 5,
+      "focus_areas": [
+        "Idempotency (changed_when/failed_when)",
+        "Error handling (block/rescue)",
+        "Documentation headers",
+        "Production best practices"
+      ],
+      "new_playbooks": [
+        "cisco-nexus9k/vxlan/vxlan_bgp.yml",
+        "cisco-nexus9k/vxlan/vxlan_evpn.yml",
+        "cisco-nexus9k/vxlan/nve.yml",
+        "fortigate/sdwan/health_check.yml",
+        "fortigate/sdwan/service_rules.yml",
+        "network-scripts/cisco-asa/ipsec/troubleshoot_vpn.yml"
+      ],
+      "improved_playbooks": [
+        "cisco-nexus9k/basic/hostname.yml",
+        "cisco-nexus9k/backup/backup_config.yml",
+        "juniper-srx/security/zones.yml",
+        "network-scripts/cisco-asa/acl/acl_hits.yml",
+        "network-scripts/cisco-asa/backup/backup_config.yml"
+      ]
+    }
+  },
+  "queue": [
+    {
+      "platform": "cisco-firepower",
+      "focus": "ftd-fmc-integration",
+      "tasks": ["FTD health checks", "FMC API automation", "Policy deployment"],
+      "priority": "high"
+    },
+    {
+      "platform": "cisco-nexus9k",
+      "focus": "vxlan-evpn-playbooks",
+      "tasks": ["VNI L2 playbook", "VNI L3 playbook", "Anycast gateway"],
+      "priority": "high"
+    },
+    {
+      "platform": "fortigate",
+      "focus": "sdwan-automation",
+      "tasks": ["Steering playbook", "SLA monitoring", "Failover testing"],
+      "priority": "high"
+    }
+  ],
+  "completed_cycles": [
+    {
+      "date": "2026-03-03",
+      "type": "research",
+      "summary": "Deep dive into Ansible collections for network automation"
+    },
+    {
+      "date": "2026-03-04",
+      "type": "apply",
+      "summary": "Created VXLAN/SD-WAN playbooks, improved error handling across platforms"
+    }
+  ],
+  "next_cycle_focus": "Continue VXLAN EVPN for Nexus 9000, SD-WAN for Fortigate, research Firepower API"
+}

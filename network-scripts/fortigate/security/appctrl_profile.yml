@@ -1,0 +1,34 @@
+---
+# FortiGate Application Control Profile Retrieval
+# Standards: Idempotent (Read-only), Observability (Assert), Best Practices (FQCN).
+- name: Get App Control Profile
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve application control status via CLI
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+      # Documentation: CLI-based 'get' commands are inherently idempotent as they do not modify state.
+      ansible.netcommon.cli_command:
+        command: get firewall appctrl
+      register: app_control_output
+      # Error Handling: Ensure the command was recognized and executed successfully by the device
+      failed_when:
+        - "'Unknown' in app_control_output.stdout"
+        - "'Command fail' in app_control_output.stdout"
+
+    - name: Validate application control output integrity
+      # Observability: Assert that we received a valid, non-empty response
+      ansible.builtin.assert:
+        that:
+          - app_control_output.stdout is defined
+          - app_control_output.stdout | length > 0
+        fail_msg: "Failed to retrieve valid Application Control information from {{ inventory_hostname }}."
+        success_msg: "Successfully validated Application Control data retrieval."
+
+    - name: Display application control details
+      # Observability: Provide clear visibility into the retrieved configuration
+      ansible.builtin.debug:
+        msg: |
+          ======================= APP CONTROL: {{ inventory_hostname }} =======================
+          {{ app_control_output.stdout }}

@@ -1,0 +1,40 @@
+---
+# FortiGate Interface Status - Improved Version
+# This playbook retrieves NIC hardware information using standard best practices.
+# Idempotency: Read-only operation with 'changed_when: false'.
+# Observability: Includes validation asserts and registered result checks.
+# Error Handling: Uses 'failed_when' to catch CLI-specific execution errors.
+
+- name: FortiGate Network Interface Status Retrieval
+  hosts: fortigate
+  gather_facts: false
+  connection: ansible.netcommon.network_cli
+
+  tasks:
+    - name: Execute NIC hardware diagnostic command
+      # Using FQCN for network common collection
+      ansible.netcommon.cli_command:
+        command: diagnose hardware deviceinfo nic
+      register: status
+      # Error Handling: Fail if command execution is unsuccessful or output indicates failure
+      failed_when: 
+        - status.failed
+        - "unknown command" in status.stdout | lower
+      # Idempotency: Explicitly state this task does not change device state
+      changed_when: false
+
+    - name: Validate command response integrity
+      # Observability: Ensure the returned data is not empty and valid
+      ansible.builtin.assert:
+        that:
+          - status.stdout is defined
+          - status.stdout | length > 0
+        fail_msg: "Data retrieval failed: The device returned an empty or invalid response."
+        success_msg: "Successfully validated interface status data."
+
+    - name: Display formatted interface status report
+      ansible.builtin.debug:
+        msg: |
+          ======================= INTERFACE STATUS REPORT =======================
+          Host: {{ inventory_hostname }}
+          Timestamp: {{ ansible_date_time.iso8601 if ansible_date

@@ -1,0 +1,38 @@
+---
+# FortiGate HA Configuration Retrieval and Verification
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: FortiGate HA Configuration Audit
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve current High Availability configuration status
+      # Using FQCN for network common CLI operations. 
+      # This task is inherently idempotent as it is a read-only operation.
+      ansible.netcommon.cli_command:
+        command: "get system ha"
+      register: ha_config
+      # Error Handling: Ensure the command executed successfully and returned data.
+      # changed_when: false ensures the task does not report a 'changed' state during repeated runs.
+      failed_when: 
+        - ha_config.stdout is not defined 
+        - "ha_config.stdout | length == 0"
+        - "'Unknown command' in ha_config.stdout"
+      changed_when: false
+
+    - name: Validate HA configuration observability
+      # Observability: Assert that the retrieved configuration contains critical HA parameters.
+      # This confirms that the device is responding with expected FortiOS HA data.
+      ansible.builtin.assert:
+        that:
+          - "'mode' in ha_config.stdout"
+          - "'group-id' in ha_config.stdout"
+        fail_msg: "HA configuration output is missing essential parameters (mode or group-id)."
+        success_msg: "HA configuration successfully retrieved and validated."
+
+    - name: Display formatted HA configuration
+      # Documentation: Providing a clear, human-readable view of the operational state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= HA CONFIGURATION STATUS =======================
+          {{ ha_config.stdout }}

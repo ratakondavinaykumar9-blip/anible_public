@@ -1,0 +1,38 @@
+---
+# FortiGate Log Viewer
+# This playbook retrieves and displays operational logs from FortiGate devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, and FQCN usage.
+- name: View FortiGate Logs
+  hosts: fortigate
+  gather_facts: false # Facts are not required for log viewing; disabling improves execution speed.
+  vars:
+    log_type: "traffic" # Default log category
+    log_count: 50       # Number of entries to retrieve
+
+  tasks:
+    - name: Retrieve filtered logs from the device
+      # Using FQCN (ansible.netcommon.cli_command).
+      # Read-only operations are inherently idempotent as they do not change device state.
+      ansible.netcommon.cli_command:
+        command: "execute log filter category {{ log_type }} && execute log display"
+      register: log_output
+      # Error Handling: Fail if the CLI returns a failure message even if the return code is 0.
+      failed_when: 
+        - log_output.failed or "Command fail" in log_output.stdout
+
+    - name: Validate log retrieval
+      # Observability: Assert that we actually received data from the device.
+      ansible.builtin.assert:
+        that:
+          - log_output.stdout is defined
+          - log_output.stdout | length > 0
+        fail_msg: "Log retrieval failed: No data returned for category '{{ log_type }}'."
+        success_msg: "Successfully retrieved logs for category '{{ log_type }}'."
+
+    - name: Display formatted logs
+      # Debug output for observability during manual playbook execution.
+      ansible.builtin.debug:
+        msg: |
+          ======================= {{ log_type | upper }} LOGS (Count: {{ log_count }}) =======================
+          {{ log_output.stdout }}
+          =================================================================================

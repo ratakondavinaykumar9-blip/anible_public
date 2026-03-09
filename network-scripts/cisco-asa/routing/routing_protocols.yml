@@ -1,0 +1,35 @@
+---
+# Playbook: Routing Protocols Audit
+# Purpose: Retrieves and validates routing protocol configurations on Cisco ASA/Firepower devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+- name: Routing Protocols Analysis
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve routing protocol configuration from running-config
+      # Best Practices: Using Fully Qualified Collection Name (FQCN) for Cisco ASA
+      cisco.asa.asa_command:
+        commands:
+          - show running-config | include router
+      register: protocols_result
+      # Error Handling: Ensure the task fails explicitly if the command execution fails
+      failed_when: protocols_result.failed | default(false)
+
+    - name: Validate routing configuration retrieval
+      # Observability: Assert that the command returned a valid response to ensure data integrity
+      ansible.builtin.assert:
+        that:
+          - protocols_result.stdout is defined
+          - protocols_result.stdout | length > 0
+        fail_msg: "The command 'show running-config' failed to return data or the device is unreachable."
+        success_msg: "Routing configuration data successfully captured."
+        quiet: true
+
+    - name: Display Routing Protocol Details
+      # Documentation: Formatted debug output for engineering visibility
+      # Idempotency: This task is a "get" operation and is inherently safe to run multiple times
+      ansible.builtin.debug:
+        msg: |
+          ======================= ROUTING PROTOCOLS =======================
+          {{ protocols_result.stdout[0] if protocols_result.stdout[0] | length > 0 else "No routing protocols configured on this host." }}

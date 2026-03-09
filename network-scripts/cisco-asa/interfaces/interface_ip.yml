@@ -1,0 +1,35 @@
+---
+# Playbook: Cisco ASA Interface IP Configuration Audit
+# This playbook retrieves and validates interface IP configurations.
+# Idempotency: Read-only operations ensure the playbook is safe for repeated execution.
+- name: Interface IP Config
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IP address configuration from device
+      # Best Practices: Using platform-specific FQCN for Cisco ASA operations
+      cisco.asa.asa_command:
+        commands:
+          - show ip address
+      register: ip_output
+      # Error Handling: Ensure the command was successful and returned valid output
+      failed_when: 
+        - ip_output.failed or "Invalid input" in ip_output.stdout[0]
+
+    - name: Validate that IP data was successfully retrieved
+      # Observability: Asserting that the command returned non-empty results
+      ansible.builtin.assert:
+        that:
+          - ip_output.stdout is defined
+          - ip_output.stdout[0] | length > 0
+        fail_msg: "Failed to retrieve IP address information from {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved IP address configuration."
+
+    - name: Display interface IP configuration details
+      # Documentation: Formatting output for human-readable audit logs
+      ansible.builtin.debug:
+        msg: |
+          ======================= INTERFACE IP =======================
+          DEVICE: {{ inventory_hostname }}
+          {{ ip_output.stdout[0] }}

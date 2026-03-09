@@ -1,0 +1,25 @@
+# FortiGate Inventory - SECURITY NOTICE
+# Never commit this file with real passwords!
+
+[fortigate]
+# Add your FortiGate devices here
+# fgt01 ansible_host=10.1.1.1
+# fgt02 ansible_host=10.1.1.2
+
+[fortigate:vars]
+# DO NOT hardcode passwords!
+ansible_connection=httpapi
+ansible_network_os=fortios
+ansible_httpapi_use_ssl=True
+ansible_httpapi_validate_certs=False
+
+# Credential options:
+# 1. Environment variables:
+#    export ANSIBLE_NET_USERNAME=admin
+#    export ANSIBLE_NET_PASSWORD=your_password
+#
+# 2. Prompt at runtime:
+#    ansible-playbook -i inventory playbook.yml --ask-pass
+#
+# 3. Ansible Vault (recommended for production):
+#    ansible-vault create group_vars/fortigate.yml

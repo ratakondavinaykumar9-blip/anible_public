@@ -1,0 +1,70 @@
+---
+# FortiGate IPSec VPN Troubleshooting Playbook
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Troubleshoot IPSec VPN
+  hosts: fortigate
+  gather_facts: false
+  vars:
+    # Ensure tunnel_name is defined to prevent playbook failure; defaults to empty for validation
+    tunnel_name: "{{ tunnel_name | default('') }}"
+
+  tasks:
+    - name: "Pre-flight: Validate Required Variables"
+      ansible.builtin.assert:
+        that:
+          - tunnel_name | length > 0
+        fail_msg: "The 'tunnel_name' variable is missing. Run with: -e 'tunnel_name=VPN_NAME'"
+        quiet: true
+
+    - name: "Step 1: Get Basic Tunnel Status"
+      # Documentation: Checks if the tunnel exists in the operational status table.
+      # FQCN: Using ansible.netcommon.cli_command for platform-agnostic CLI interaction.
+      # Idempotency: Read-only command, safe for repeated execution.
+      ansible.netcommon.cli_command:
+        command: "get vpn ipsec status | grep {{ tunnel_name }}"
+      register: status
+      # Error Handling: grep returns rc 1 if no match; failed_when: false prevents task failure.
+      failed_when: false
+      changed_when: false
+
+    - name: "Step 2: Get Granular Tunnel Details"
+      # Documentation: Collects specific Phase 2 selectors, SAs, and encryption details.
+      ansible.netcommon.cli_command:
+        command: "get vpn ipsec tunnel details {{ tunnel_name }}"
+      register: details
+      # Error Handling: Fail if FortiOS returns an 'entry not found' message.
+      failed_when: "'entry not found' in details.stdout"
+      changed_when: false
+
+    - name: "Step 3: Collect IKE Diagnostic Context"
+      # Documentation: Retrieves active IKE debug filters to understand current logging state.
+      ansible.netcommon.cli_command:
+        command: "diagnose vpn ike log-filter list"
+      register: ike_log
+      failed_when: false
+      changed_when: false
+
+    - name: "Step 4: Verify Tunnel Observability"
+      # Observability: Ensure the tunnel was actually found in the status output.
+      ansible.builtin.assert:
+        that:
+          - status.stdout | length > 0
+        fail_msg: "Tunnel '{{ tunnel_name }}' was not found in the active IPSec status table."
+        quiet: true
+
+    - name: "Final: Display Troubleshooting Summary"
+      # Documentation: Aggregates all gathered data into a single formatted report.
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC TROUBLESHOOT: {{ tunnel_name }} =======================
+          
+          [VPN STATUS SUMMARY]
+          {{ status.stdout | default('NO ACTIVE STATUS FOUND') }}
+          
+          [TUNNEL PHASE 2 DETAILS]
+          {{ details.stdout }}
+          
+          [IKE LOGGING CONTEXT]
+          {{ ike_log.stdout | default('NO IKE DEBUG FILTERS ACTIVE') }}
+          
+          =====================================================================================

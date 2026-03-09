@@ -1,0 +1,42 @@
+---
+# FortiGate Static Routes Inspection
+# Auto-improved: 2026-03-08
+# Purpose: This playbook retrieves the current static routing table for operational visibility.
+# Standards: Adheres to Idempotency (read-only), Observability (asserts), and FQCN.
+
+- name: FortiGate Static Routes
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve static routing information
+      # Why: Using FQCN (Fully Qualified Collection Name) ensures reliability across Ansible versions.
+      # The command 'get router info routing-table static' provides the operational state of routes.
+      ansible.netcommon.cli_command:
+        command: "get router info routing-table static"
+      register: static_routes_raw
+      # Error Handling: Verify the command was accepted by the FortiOS CLI.
+      # Why: Prevents the playbook from proceeding with empty or error-laden data if the command is unsupported.
+      failed_when: 
+        - static_routes_raw.failed
+        - "'Unknown action' in static_routes_raw.stdout or 'Command fail' in static_routes_raw.stdout"
+
+    - name: Validate routing data observability
+      # Observability: Assert that the command returned meaningful output.
+      # Why: Ensures the device is reachable and the routing table is not empty before displaying results.
+      ansible.builtin.assert:
+        that:
+          - "static_routes_raw.stdout is defined"
+          - "static_routes_raw.stdout | length > 0"
+        fail_msg: "Static route retrieval failed: Received empty output from {{ inventory_hostname }}."
+        success_msg: "Static routes successfully retrieved from {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display Static Routes
+      # Documentation: Provides a formatted view of the routing table for the automation engineer.
+      ansible.builtin.debug:
+        msg: |
+          =============================================================
+          DEVICE: {{ inventory_hostname }}
+          ======================= STATIC ROUTES =======================
+          {{ static_routes_raw.stdout }}

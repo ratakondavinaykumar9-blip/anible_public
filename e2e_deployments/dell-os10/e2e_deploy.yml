@@ -1,0 +1,107 @@
+---
+- name: End-to-End Enterprise Deployment for Dell EMC OS10
+  hosts: dell_os10
+  gather_facts: no
+  collections:
+    - dellemc.os10
+  vars:
+    vlan_id: 200
+    vlan_name: "App_Tier"
+    svi_ip: "10.0.200.1/24"
+    bgp_asn: 65100
+    bgp_router_id: "10.255.1.10"
+
+  tasks:
+    - name: Configure Global System Settings
+      dellemc.os10.os10_system:
+        config:
+          hostname: "E2E-OS10-SW01"
+      tags: [base, system]
+
+    - name: Configure VLANs
+      dellemc.os10.os10_vlan:
+        config:
+          - vlan_id: "{{ vlan_id }}"
+            name: "{{ vlan_name }}"
+            state: present
+      tags: [l2, vlans]
+
+    - name: Configure L2 Switchport (Access)
+      dellemc.os10.os10_l2_interface:
+        config:
+          - name: ethernet 1/1/1
+            mode: access
+            access_vlan: "{{ vlan_id }}"
+            state: present
+      tags: [l2, interfaces]
+
+    - name: Configure L2 Switchport (Trunk)
+      dellemc.os10.os10_l2_interface:
+        config:
+          - name: ethernet 1/1/2
+            mode: trunk
+            trunk_allowed_vlans: "{{ vlan_id }},300,400"
+            state: present
+      tags: [l2, interfaces]
+
+    - name: Configure L3 Interface (SVI)
+      dellemc.os10.os10_l3_interface:
+        config:
+          - name: vlan {{ vlan_id }}
+            ipv4: "10.0.200.1/24"
+            state: present
+      tags: [l3, interfaces]
+
+    - name: Configure VRRP (Gateway Redundancy)
+      dellemc.os10.os10_vrrp:
+        config:
+          - interface: vlan {{ vlan_id }}
+            vrid: 10
+            vip: "10.0.200.254"
+            priority: 150
+            state: present
+      tags: [l3, vrrp]
+
+    - name: Configure BGP Routing
+      dellemc.os10.os10_bgp:
+        config:
+          asn: "{{ bgp_asn }}"
+          router_id: "{{ bgp_router_id }}"
+          neighbors:
+            - ip: 10.255.1.20
+              remote_asn: 65101
+              state: present
+      tags: [routing, bgp]
+
+    - name: Configure VLT (Virtual Link Trunking) Domain
+      dellemc.os10.os10_vlt:
+        config:
+          domain: 1
+          discovery_interface: ethernet 1/1/48
+          peer_routing: true
+          state: present
+      tags: [vlt, ha]
+
+    - name: Configure ACL
+      dellemc.os10.os10_acl:
+        config:
+          - name: INBOUND_FILTER
+            type: ipv4
+            entries:
+              - seq: 10
+                action: permit
+                protocol: tcp
+                source: any
+                destination: any
+                dst_port: eq 80
+              - seq: 20
+                action: deny
+                protocol: ip
+                source: any
+                destination: any
+      tags: [security, acl]
+
+    - name: Save Configuration
+      dellemc.os10.os10_command:
+        commands: ['write memory']
+      tags: [save]

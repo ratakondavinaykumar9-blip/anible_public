@@ -1,0 +1,68 @@
+---
+# ASA Version Information Playbook
+# Improved by Architect:for Idempotency, Observability, and Error Handling.
+# This playbook retrieves system facts from Cisco ASA devices and formats them as requested.
+
+- name: Get ASA Version Information
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Default output format can be 'text' or 'json'
+    output_format: text
+    # Path where JSON reports will be stored if format is json
+    report_dest: "/tmp/asa_version_{{ inventory_hostname }}.json"
+
+  tasks:
+    - name: Retrieve ASA version facts
+      # Use Fully Qualified Collection Name (FQCN) for the Cisco ASA collection.
+      # This task is idempotent as it only retrieves information and does not modify device state.
+      cisco.asa.asa_version:
+      register: version_output
+      # Error Handling: Ensure we fail if the module reports failure or if facts are missing.
+      failed_when: 
+        - version_output.failed | default(false)
+        - "'ansible_facts' not in version_output"
+
+    - name: Validate retrieved data integrity
+      # Observability: Verify that essential fields exist before attempting to use them in downstream tasks.
+      ansible.builtin.assert:
+        that:
+          - version_output.ansible_facts.asa_version is defined
+          - version_output.ansible_facts.asa_version.version is defined
+          - version_output.ansible_facts.asa_version.serial is defined
+        fail_msg: "Data validation failed for {{ inventory_hostname }}: Missing essential version facts."
+        quiet: true
+
+    - name: Export version data to JSON file
+      # Idempotency: ansible.builtin.copy ensures the file is only updated if the content has changed.
+      ansible.builtin.copy:
+        content: "{{ version_output.ansible_facts.asa_version | to_nice_json }}"
+        dest: "{{ report_dest }}"
+        mode: '0644'
+      when: output_format | default('text') == 'json'
+      register: file_export
+
+    - name: Verify file export status
+      # Observability: Confirm the file operation was successful when JSON output is requested.
+      ansible.builtin.assert:
+        that:
+          - not file_export.failed | default(false)
+        fail_msg: "Failed to write JSON report to {{ report_dest }}"
+        quiet: true
+      when: output_format | default('text') == 'json'
+
+    - name: Display formatted system summary
+      # Observability: Provide a structured, human-readable summary for operational visibility.
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          ASA SYSTEM SUMMARY: {{ inventory_hostname }}
+          ============================================================
+          Version      : {{ version_output.ansible_facts.asa_version.version }}
+          Model        : {{ version_output.ansible_facts.asa_version.model }}
+          Serial       : {{ version_output.ansible_facts.asa_version.serial }}
+          Device ID    : {{ version_output.ansible_facts.asa_version.device_id }}
+          Flash        : {{ version_output.ansible_facts.asa_version.flash }}
+          Running Mode : {{ version_output.ansible_facts.asa_version.running_mode }}
+          ============================================================
+      when: output_format | default('text') == 'text'

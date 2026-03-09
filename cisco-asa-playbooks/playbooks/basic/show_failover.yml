@@ -1,0 +1,71 @@
+---
+# Playbook: Show Failover Status
+# Description: This playbook retrieves the failover status of Cisco ASA/Firepower devices,
+# providing robust observability, error handling, and standardized reporting.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+
+- name: Get Failover Status
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Controls the display output format: 'text' or 'json'
+    output_format: "{{ output_format | default('text') }}"
+    # Local directory on the control node for report persistence
+    report_path: "/tmp"
+
+  tasks:
+    - name: Gather ASA failover configuration facts
+      # Documentation: Uses the FQCN to retrieve HA status. 
+      # Idempotency: Gathers current state without modification (read-only).
+      cisco.asa.asa_failover:
+        state: gathered
+      register: failover_data
+      # Error Handling: Allows the playbook to continue if a node is unreachable, 
+      # handling the error gracefully in the subsequent assertion.
+      ignore_errors: true
+
+    - name: Validate failover data retrieval
+      # Observability: Explicitly check that the module succeeded and returned data.
+      ansible.builtin.assert:
+        that:
+          - failover_data is defined
+          - failover_data is not failed
+          - (failover_data.gathered is defined) or (failover_data.ansible_facts is defined and failover_data.ansible_facts.asa_failover is defined)
+        fail_msg: "ERROR: Could not retrieve failover data for {{ inventory_hostname }}. Verify connectivity and credentials."
+        success_msg: "SUCCESS: Failover data successfully retrieved for {{ inventory_hostname }}."
+
+    - name: Persist failover status to JSON report
+      # Documentation: Saves a machine-readable snapshot for audit trails or external analysis.
+      # Idempotency: The copy module ensures the file is only updated if the content has changed.
+      ansible.builtin.copy:
+        content: "{{ failover_data | ansible.builtin.to_nice_json }}"
+        dest: "{{ report_path }}/asa_failover_{{ inventory_hostname }}.json"
+        mode: '0644'
+      delegate_to: localhost
+      when: output_format == 'json'
+      register: json_export
+
+    - name: Assert JSON report creation
+      # Observability: Verify that the local filesystem operation was successful.
+      ansible.builtin.assert:
+        that:
+          - json_export is not failed
+        fail_msg: "ERROR: Failed to write JSON report to {{ report_path }} on localhost."
+      when: output_format == 'json'
+
+    - name: Display formatted failover summary
+      # Documentation: Provides a human-centric view of the high-availability state.
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          FAILOVER SUMMARY: {{ inventory_hostname }}
+          ============================================================
+          {% set fo = failover_data.gathered | default(failover_data.ansible_facts.asa_failover if (failover_data.ansible_facts is defined) else {}) %}
+          {% if fo %}
+          Primary Node   : {{ fo.primary | default('Status Unknown') }}
+          Secondary Node : {{ fo.secondary | default('Status Unknown') }}
+          {% else %}
+          REPORT: Failover is not configured or data is unavailable.
+          {% endif %}
+          ============================================================
+      when: output_format == 'text'

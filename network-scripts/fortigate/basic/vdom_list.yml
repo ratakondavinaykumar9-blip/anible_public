@@ -1,0 +1,36 @@
+---
+# Playbook: FortiGate VDOM List
+# Author: Architect:# Standards: Idempotent, Observable, Documented, and FQCN compliant.
+
+- name: Get VDOM List from FortiGate
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Fetch system VDOM information using CLI
+      # Use Fully Qualified Collection Name (FQCN) for cross-platform compatibility
+      ansible.netcommon.cli_command:
+        command: get system vdom
+      register: vdom_result
+      # Idempotency: Mark as changed: false because this is a read-only operation
+      changed_when: false
+      # Error Handling: Catch specific FortiOS error strings or execution failures
+      failed_when: 
+        - vdom_result.failed or "Unknown action" in vdom_result.stdout
+
+    - name: Validate VDOM output integrity
+      # Observability: Verify that the command returned expected data
+      ansible.builtin.assert:
+        that:
+          - vdom_result.stdout is defined
+          - vdom_result.stdout | length > 0
+          - "'vdom' in vdom_result.stdout"
+        fail_msg: "The VDOM retrieval returned empty or invalid data from the device."
+        success_msg: "VDOM list successfully retrieved and validated."
+
+    - name: Display formatted VDOM information
+      # Documentation: Provide a clear, human-readable view of the retrieved state
+      ansible.builtin.debug:
+        msg: |
+          ======================= VDOMs =======================
+          {{ vdom_result.stdout }}

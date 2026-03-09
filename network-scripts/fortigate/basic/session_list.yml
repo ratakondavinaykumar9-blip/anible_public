@@ -1,0 +1,34 @@
+---
+# Playbook to retrieve and validate the active session list from FortiGate devices.
+# This follows industry standards for observability, idempotency, and best practices.
+- name: FortiGate Session List Retrieval
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Execute CLI command to retrieve sessions
+      # Use FQCN for the network command module.
+      # This is a read-only operation and is inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: "get system session list"
+      register: sessions_result
+      # Ensure the task fails if the connection is dropped or the command is rejected.
+      failed_when:
+        - sessions_result.failed or "Unknown command" in sessions_result.stdout
+
+    - name: Validate session data observability
+      # Observability: Assert that we received a non-empty response from the device.
+      ansible.builtin.assert:
+        that:
+          - sessions_result.stdout is defined
+          - sessions_result.stdout | length > 0
+        fail_msg: "Session list retrieval failed or returned empty output."
+        success_msg: "Session list successfully captured and verified."
+
+    - name: Display formatted session information
+      # Providing clear visibility into the captured operational state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE SESSIONS =======================
+          Capture Time: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          {{ sessions_result.stdout }}

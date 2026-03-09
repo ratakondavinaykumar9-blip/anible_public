@@ -1,0 +1,48 @@
+---
+# Playbook: Collect Cisco ASA/Firepower Tech Support
+# Why: Automates the collection of diagnostic data for troubleshooting and compliance audits.
+- name: Get Tech Support Info
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'show tech-support' on the security appliance
+      # Why: Aggregates multiple diagnostic commands; timeout is increased for large output.
+      # FQCN: Using ansible.netcommon.cli_command for broad compatibility.
+      ansible.netcommon.cli_command:
+        command: show tech-support
+      register: tech_result
+      vars:
+        ansible_command_timeout: 600
+
+    - name: Validate tech support data retrieval
+      # Observability: Ensures the command returned non-empty content before proceeding.
+      ansible.builtin.assert:
+        that:
+          - tech_result.stdout is defined
+          - tech_result.stdout | length > 0
+        fail_msg: "Tech support collection failed or returned empty for {{ inventory_hostname }}."
+        success_msg: "Diagnostic data successfully captured from {{ inventory_hostname }}."
+
+    - name: Persist diagnostic data to the local control node
+      # Why: Saves output locally for offline analysis.
+      # Idempotency: ansible.builtin.copy ensures the file content matches the captured output.
+      ansible.builtin.copy:
+        content: "{{ tech_result.stdout }}"
+        dest: "/tmp/asa_tech_support_{{ inventory_hostname }}.txt"
+        mode: '0644'
+      delegate_to: localhost
+      register: save_status
+
+    - name: Verify file write operation
+      # Observability: Confirm the file was successfully written to the local filesystem.
+      ansible.builtin.assert:
+        that:
+          - save_status.dest is defined
+          - not save_status.failed
+        fail_msg: "Failed to save diagnostic file to {{ save_status.dest | default('destination') }}"
+
+    - name: Display operation summary
+      # Why: Provides immediate feedback on the location of the generated report.
+      ansible.builtin.debug:
+        msg: "Tech support capture for {{ inventory_hostname }} is saved at: {{ save_status.dest }}"

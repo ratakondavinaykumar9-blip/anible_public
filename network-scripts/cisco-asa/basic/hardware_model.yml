@@ -1,0 +1,32 @@
+---
+# Hardware Model Info
+# This playbook retrieves the hardware model from Cisco ASA/Firepower devices.
+# It is designed to be idempotent, observable, and follows Network Automation Framework FQCN standards.
+- name: Get Hardware Model
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve hardware model information via FQCN
+      # FQCN: Using the specialized cisco.asa collection for robust, platform-specific command execution.
+      cisco.asa.asa_command:
+        commands:
+          - "show version | include (Hardware|Model)"
+      register: model_query
+      # Error Handling: Ensure the task fails if the module reports a failure.
+      failed_when: model_query.failed | default(false)
+
+    - name: Validate hardware information retrieval (Observability)
+      # Assert confirms that the device returned expected data before continuing.
+      ansible.builtin.assert:
+        that:
+          - model_query.stdout is defined
+          - model_query.stdout | length > 0
+          - "'Hardware' in model_query.stdout[0] or 'Model' in model_query.stdout[0]"
+        fail_msg: "Failed to retrieve valid hardware information from the device."
+        success_msg: "Hardware model information successfully retrieved."
+
+    - name: Display Hardware Model
+      # Debug: Output the trimmed result from the first command in the list.
+      ansible.builtin.debug:
+        msg: "{{ model_query.stdout[0] | trim }}"

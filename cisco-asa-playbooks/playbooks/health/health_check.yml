@@ -1,0 +1,95 @@
+---
+# ASA Health Check - CPU, Memory, Connections
+# This playbook performs non-disruptive health monitoring on Cisco ASA devices.
+# It captures telemetry for CPU, Memory, and Connections, providing reports in text or JSON.
+- name: ASA Health Check
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Supported formats: 'text' (default) or 'json' (for external ingestion)
+    output_format: text
+
+  tasks:
+    # Gather timing data from localhost since ASA devices do not support standard Ansible facts
+    - name: Gather local system information for timestamping
+      ansible.builtin.setup:
+        filter: "ansible_date_time"
+      delegate_to: localhost
+      run_once: true
+
+    - name: Retrieve system resource usage
+      ansible.netcommon.cli_command:
+        command: show resource usage
+      register: resource_output
+      # Error Handling: Ensure command succeeded and output is not empty or invalid
+      failed_when: 
+        - resource_output.failed or "Invalid" in resource_output.stdout or resource_output.stdout | length == 0
+
+    - name: Retrieve connection statistics
+      ansible.netcommon.cli_command:
+        command: show conn count
+      register: conn_output
+      failed_when: 
+        - conn_output.failed or conn_output.stdout | length == 0
+
+    - name: Retrieve CPU usage statistics
+      ansible.netcommon.cli_command:
+        command: show cpu usage
+      register: cpu_output
+      failed_when: 
+        - cpu_output.failed or cpu_output.stdout | length == 0
+
+    - name: Retrieve memory utilization info
+      ansible.netcommon.cli_command:
+        command: show memory
+      register: mem_output
+      failed_when: 
+        - mem_output.failed or mem_output.stdout | length == 0
+
+    # Observability: Assert that all telemetry data points were successfully captured
+    - name: Verify telemetry data integrity
+      ansible.builtin.assert:
+        that:
+          - cpu_output.stdout is defined
+          - mem_output.stdout is defined
+          - conn_output.stdout is defined
+          - resource_output.stdout is defined
+        fail_msg: "Health check telemetry capture failed for {{ inventory_hostname }}. One or more data points are missing."
+        quiet: true
+
+    # Idempotency: The 'copy' module ensures the destination file is updated only if data has changed
+    - name: Generate JSON telemetry report
+      ansible.builtin.copy:
+        content: |
+          {
+            "device": "{{ inventory_hostname }}",
+            "timestamp": "{{ hostvars['localhost']['ansible_date_time']['iso8601'] }}",
+            "resources": {{ resource_output.stdout | to_json }},
+            "connections": {{ conn_output.stdout | to_json }},
+            "cpu": {{ cpu_output.stdout | to_json }},
+            "memory": {{ mem_output.stdout | to_json }}
+          }
+        dest: "/tmp/asa_health_{{ inventory_hostname }}.json"
+        mode: '0644'
+      when: output_format == 'json'
+
+    # Human-readable summary for console-based auditing
+    - name: Display health check summary
+      ansible.builtin.debug:
+        msg: |
+          ==========================================================
+          ASA HEALTH SUMMARY: {{ inventory_hostname }}
+          TIMESTAMP: {{ hostvars['localhost']['ansible_date_time']['iso8601'] }}
+          ==========================================================
+          [CPU USAGE]
+          {{ cpu_output.stdout }}
+
+          [MEMORY INFO]
+          {{ mem_output.stdout }}
+
+          [CONNECTION STATS]
+          {{ conn_output.stdout }}
+
+          [RESOURCE USAGE]
+          {{ resource_output.stdout }}
+      when: output_format == 'text'

@@ -1,0 +1,34 @@
+---
+# FortiGate WAF Profile Retrieval Playbook
+# Standards: Idempotent, Observable, Documented, Error-Handled, FQCN
+- name: Get FortiGate WAF Profile
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve WAF Profile status from FortiGate CLI
+      # Using FQCN for cross-platform network CLI execution.
+      # Reading operational state is inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: get firewall waf-profile
+      register: waf_command_result
+      # Error Handling: Ensure task fails if CLI returns error keywords or fails execution.
+      failed_when:
+        - waf_command_result.failed or "error" in waf_command_result.stdout.lower() or "command fail" in waf_command_result.stdout.lower()
+
+    - name: Validate WAF Profile data capture
+      # Observability: Use assert to verify that the command returned non-empty data.
+      ansible.builtin.assert:
+        that:
+          - "waf_command_result.stdout is defined"
+          - "waf_command_result.stdout | length > 0"
+        fail_msg: "WAF profile retrieval failed or returned empty output."
+        success_msg: "WAF profile data successfully validated."
+
+    - name: Display WAF Profile Output
+      # Observability: Provide clear visual feedback of the retrieved status.
+      ansible.builtin.debug:
+        msg: |
+          ======================= WAF PROFILE START =======================
+          {{ waf_command_result.stdout }}
+          ======================= WAF PROFILE END =========================

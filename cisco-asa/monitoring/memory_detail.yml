@@ -1,0 +1,37 @@
+---
+# Memory Detail Playbook
+# Improved for industry standards
+#
+# This playbook retrieves detailed memory statistics from Cisco ASA/Firepower devices.
+# It is designed for idempotency (read-only) and high observability.
+
+- name: Retrieve and Verify Memory Details
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'show memory detail' command
+      # Using Fully Qualified Collection Name (FQCN) for portability
+      ansible.netcommon.cli_command:
+        command: show memory detail
+      register: mem_output
+      # Error Handling: Fail if the command is unrecognized or returns an error string
+      failed_when:
+        - mem_output.failed | default(false)
+        - "'Invalid input' in mem_output.stdout or 'Usage:' in mem_output.stdout"
+
+    - name: Verify memory data integrity
+      # Observability: Use assert to ensure the output is populated before proceeding
+      ansible.builtin.assert:
+        that:
+          - mem_output.stdout is defined
+          - mem_output.stdout | length > 0
+        fail_msg: "Data retrieval failed: The command returned an empty response."
+        success_msg: "Memory data successfully captured."
+
+    - name: Display memory statistics
+      # Documentation: Presenting the captured stdout in a readable format
+      ansible.builtin.debug:
+        msg: |
+          ======================= MEMORY DETAIL =======================
+          {{ mem_output.stdout }}

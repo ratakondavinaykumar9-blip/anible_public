@@ -1,0 +1,59 @@
+---
+- name: Get Clock and NTP Synchronization Information
+  # This playbook retrieves and validates time settings on Cisco ASA/Firepower devices.
+  # Accurate time is critical for log correlation, certificate validation, and security events.
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve current system clock
+      # Using FQCN and platform-specific module for best performance and reliability.
+      # Idempotency: Read-only operation that does not modify device state.
+      cisco.asa.asa_command:
+        commands:
+          - show clock
+      register: clock_output
+      # Error Handling: Ensure we received a valid response structure.
+      failed_when: 
+        - clock_output.stdout is not defined
+        - clock_output.stdout | length == 0
+
+    - name: Validate system clock responsiveness
+      # Observability: Confirm the output contains a time-like pattern to ensure data integrity.
+      ansible.builtin.assert:
+        that:
+          - clock_output.stdout[0] | length > 0
+          - clock_output.stdout[0] is search('\d{2}:\d{2}:\d{2}')
+        fail_msg: "The 'show clock' command returned unexpected or empty output."
+        quiet: true
+
+    - name: Retrieve NTP synchronization status
+      # NTP status provides visibility into time source reliability.
+      cisco.asa.asa_command:
+        commands:
+          - show ntp status
+      register: ntp_output
+      # Error Handling: If NTP is not configured, the command may return an error code;
+      # we ignore this to allow the playbook to continue and report the status.
+      ignore_errors: true
+
+    - name: Verify NTP synchronization state
+      # Observability: Assert that the device is synchronized to an authoritative source.
+      ansible.builtin.assert:
+        that:
+          - "'Clock is synchronized' in ntp_output.stdout[0]"
+        fail_msg: "NTP is NOT synchronized. This may impact log timestamps and IKE/IPsec stability."
+        success_msg: "NTP synchronization is healthy."
+        quiet: true
+      when: 
+        - ntp_output is succeeded
+        - ntp_output.stdout is defined
+        - ntp_output.stdout | length > 0
+
+    - name: Display consolidated time synchronization report
+      # Provides a summarized view of the device's temporal health.
+      ansible.builtin.debug:
+        msg: |
+          Device: {{ inventory_hostname }}
+          System Clock: {{ clock_output.stdout[0] }}
+          NTP Status: {{ ntp_output.stdout[0] if (ntp_output is succeeded and ntp_output.stdout | length > 0) else 'NTP Not Configured or Unreachable' }}

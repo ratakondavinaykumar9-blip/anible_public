@@ -1,0 +1,39 @@
+---
+# Routing Table V6 - Improved
+# Updated: 2026-03-08
+# Author: Analyst (OpenClaw) / Architect:#
+# Documentation: This playbook retrieves the IPv6 routing table from ASA/Firepower devices.
+# It implements observability through assertions and ensures robust error handling.
+---
+- name: IPv6 Routes Verification
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPv6 routing table
+      # Idempotency: This is a read-only command, making it safe for repeated execution.
+      # Best Practice: Using FQCN ansible.netcommon.cli_command.
+      ansible.netcommon.cli_command:
+        command: show route ipv6
+      register: v6_output
+      # Error Handling: Ensure we catch cases where the command might be unsupported or fail silently.
+      failed_when: 
+        - v6_output.stdout is not defined
+        - "'invalid' in v6_output.stdout | lower"
+
+    - name: Verify routing table integrity
+      # Observability: Assert that the device returned a valid, non-empty routing table.
+      # This ensures the automation provides feedback on the actual state of the device.
+      ansible.builtin.assert:
+        that:
+          - "v6_output.stdout | length > 0"
+          - "'IPv6 Routing Table' in v6_output.stdout or 'Codes:' in v6_output.stdout"
+        fail_msg: "Failed to retrieve a valid IPv6 routing table from {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved IPv6 routing table from {{ inventory_hostname }}."
+
+    - name: Display IPv6 Routing Table
+      # Observability: Present the data to the operator for manual verification if needed.
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPv6 ROUTES =======================
+          {{ v6_output.stdout }}

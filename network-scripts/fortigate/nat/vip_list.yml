@@ -1,0 +1,34 @@
+---
+# FortiGate VIP (DNAT) List Retrieval
+# This playbook retrieves and validates Virtual IP (DNAT) configurations from FortiGate devices.
+# Standards: Idempotent (Read-only), Observable (Assert), Documented, Error Handled, FQCN.
+- name: Get VIP List
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve Virtual IP configurations via CLI
+      # Use FQCN for cross-platform network CLI execution
+      ansible.netcommon.cli_command:
+        command: "get firewall vip"
+      register: vip_output
+      # Error Handling: Fail if the command is unrecognized or the execution fails
+      failed_when:
+        - vip_output.failed | default(false)
+        - "'unknown command' in vip_output.stdout | lower"
+
+    - name: Validate VIP retrieval success
+      # Observability: Ensure the command returned content to verify operational state
+      ansible.builtin.assert:
+        that:
+          - vip_output.stdout is defined
+          - vip_output.stdout | length > 0
+        fail_msg: "Failed to retrieve VIP list or no VIPs are configured on the device."
+        success_msg: "Successfully retrieved VIP configurations."
+
+    - name: Display VIP (DNAT) Details
+      # Documentation: Provide clear, formatted output for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= VIPs (DNAT) =======================
+          {{ vip_output.stdout }}

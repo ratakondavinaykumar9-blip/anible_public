@@ -1,0 +1,72 @@
+---
+# Show NAT Rules and Statistics for Cisco ASA/Firepower
+# This playbook retrieves NAT configuration, statistics, and translation tables.
+# It is designed to be read-only, ensuring idempotency across multiple runs.
+- name: Get NAT Configuration
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get current NAT rules configuration
+      # Using FQCN for cisco.asa collection. 
+      # 'state: gathered' is the best practice for retrieving current configuration state.
+      cisco.asa.asa_nat:
+        state: gathered
+      register: nat_output
+      ignore_errors: true
+
+    - name: Verify NAT rules retrieval
+      # Observability: Ensure the module execution was successful before proceeding.
+      ansible.builtin.assert:
+        that:
+          - nat_output is defined
+        fail_msg: "The nat_output variable is not defined for {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Get NAT statistics via CLI
+      # Using FQCN for operational command execution.
+      # Useful for verifying real-time hit counts on NAT rules.
+      ansible.netcommon.cli_command:
+        command: show nat
+      register: nat_stats
+      # Error Handling: Ensure we don't fail on devices with different CLI syntax 
+      # unless it's a critical connectivity failure.
+      failed_when: 
+        - nat_stats.failed
+        - "'Invalid input' in nat_stats.stdout"
+
+    - name: Get xlate (Active Translations)
+      # Retrieves the current translation slot table to observe active traffic flow.
+      ansible.netcommon.cli_command:
+        command: show xlate
+      register: xlate
+      failed_when:
+        - xlate.failed
+        - "'Invalid input' in xlate.stdout"
+
+    - name: Display NAT rules and translation table
+      # Formatting output for better observability and human readability.
+      # Includes conditional logic to handle cases where no NAT rules exist.
+      ansible.builtin.debug:
+        msg: |
+          =======================
+          NAT Rules: {{ inventory_hostname }}
+          =======================
+          {% if nat_output.gathered is defined and nat_output.gathered | length > 0 %}
+          {% for rule in nat_output.gathered %}
+          ID: {{ loop.index }} | Source: {{ rule.source_address | default('any') }} -> {{ rule.translated_source | default('any') }}
+          {% endfor %}
+          {% elif nat_output.ansible_facts is defined and nat_output.ansible_facts.asa_nat is defined %}
+          {% for rule in nat_output.ansible_facts.asa_nat %}
+          ID: {{ rule.rule_id | default(loop.index) }} | Source: {{ rule.source_address | default('any') }} -> {{ rule.translated_source | default('any') }}
+          {% endfor %}
+          {% else %}
+          No NAT rules configured or unable to parse rules.
+          {% endif %}
+          
+          NAT Statistics Summary:
+          {{ nat_stats.stdout | default('No statistics available') }}
+
+          Active Translations (xlate) Count:
+          {{ xlate.stdout_lines | length if xlate.stdout_lines is defined else '0' }} entries found.
+          {{ xlate.stdout | default('No active translations') }}

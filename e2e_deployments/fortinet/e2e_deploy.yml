@@ -1,0 +1,143 @@
+---
+- name: End-to-End Enterprise Deployment for Fortinet FortiOS
+  hosts: fortigate
+  gather_facts: no
+  collections:
+    - fortinet.fortios
+  vars:
+    vdom: "root"
+    hostname: "E2E-FGT-01"
+    wan_ip: "198.51.100.2 255.255.255.0"
+    lan_ip: "10.0.0.1 255.255.255.0"
+    dmz_ip: "172.16.0.1 255.255.255.0"
+    gateway: "198.51.100.1"
+
+  tasks:
+    - name: Configure System Global (Hostname)
+      fortios_system_global:
+        vdom: "{{ vdom }}"
+        system_global:
+          hostname: "{{ hostname }}"
+          timezone: "04"
+          admintimeout: 15
+      tags: [base, system]
+
+    - name: Configure WAN Interface
+      fortios_system_interface:
+        vdom: "{{ vdom }}"
+        system_interface:
+          name: "port1"
+          ip: "{{ wan_ip }}"
+          allowaccess: "ping"
+          type: "physical"
+          role: "wan"
+      tags: [interfaces, network]
+
+    - name: Configure LAN Interface
+      fortios_system_interface:
+        vdom: "{{ vdom }}"
+        system_interface:
+          name: "port2"
+          ip: "{{ lan_ip }}"
+          allowaccess: "ping https ssh"
+          type: "physical"
+          role: "lan"
+      tags: [interfaces, network]
+
+    - name: Configure Default Static Route
+      fortios_router_static:
+        vdom: "{{ vdom }}"
+        router_static:
+          seq_num: 1
+          dst: "0.0.0.0 0.0.0.0"
+          gateway: "{{ gateway }}"
+          device: "port1"
+      tags: [routing]
+
+    - name: Create Internal Network Address Object
+      fortios_firewall_address:
+        vdom: "{{ vdom }}"
+        firewall_address:
+          name: "NET_INTERNAL"
+          type: "ipmask"
+          subnet: "10.0.0.0 255.255.255.0"
+      tags: [objects]
+
+    - name: Create Web Server Object
+      fortios_firewall_address:
+        vdom: "{{ vdom }}"
+        firewall_address:
+          name: "SRV_WEB_DMZ"
+          type: "ipmask"
+          subnet: "172.16.0.100 255.255.255.255"
+      tags: [objects]
+
+    - name: Configure Virtual IP (Port Forwarding)
+      fortios_firewall_vip:
+        vdom: "{{ vdom }}"
+        firewall_vip:
+          name: "VIP_WEB_HTTPS"
+          extip: "198.51.100.2"
+          extintf: "port1"
+          mappedip: "172.16.0.100"
+          extport: "443"
+          mappedport: "443"
+          portforward: "enable"
+      tags: [nat, vip]
+
+    - name: Configure Outbound Policy (LAN to WAN with NAT)
+      fortios_firewall_policy:
+        vdom: "{{ vdom }}"
+        firewall_policy:
+          policyid: 1
+          name: "Outbound_Internet"
+          srcintf: [{"name": "port2"}]
+          dstintf: [{"name": "port1"}]
+          srcaddr: [{"name": "NET_INTERNAL"}]
+          dstaddr: [{"name": "all"}]
+          action: "accept"
+          schedule: "always"
+          service: [{"name": "ALL"}]
+          nat: "enable"
+          logtraffic: "utm"
+          utm_status: "enable"
+          # Typically attach webfilter, app-control, ips here
+      tags: [policy, security]
+
+    - name: Configure Inbound VIP Policy (WAN to DMZ)
+      fortios_firewall_policy:
+        vdom: "{{ vdom }}"
+        firewall_policy:
+          policyid: 2
+          name: "Inbound_Web"
+          srcintf: [{"name": "port1"}]
+          dstintf: [{"name": "port3"}] # Assuming DMZ is port3
+          srcaddr: [{"name": "all"}]
+          dstaddr: [{"name": "VIP_WEB_HTTPS"}]
+          action: "accept"
+          schedule: "always"
+          service: [{"name": "HTTPS"}]
+          logtraffic: "all"
+      tags: [policy, security]
+
+    - name: Configure IPSec Phase 1
+      fortios_vpn_ipsec_phase1_interface:
+        vdom: "{{ vdom }}"
+        vpn_ipsec_phase1_interface:
+          name: "VPN_Branch"
+          interface: "port1"
+          remote_gw: "203.0.113.5"
+          psksecret: "MyS3cr3tK3y!"
+          proposal: "aes256-sha256"
+      tags: [vpn, ipsec]
+
+    - name: Configure IPSec Phase 2
+      fortios_vpn_ipsec_phase2_interface:
+        vdom: "{{ vdom }}"
+        vpn_ipsec_phase2_interface:
+          name: "VPN_Branch_Ph2"
+          phase1name: "VPN_Branch"
+          proposal: "aes256-sha256"
+          src_subnet: "10.0.0.0 255.255.255.0"
+          dst_subnet: "10.1.0.0 255.255.255.0"
+      tags: [vpn, ipsec]

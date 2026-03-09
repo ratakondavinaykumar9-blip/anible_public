@@ -1,0 +1,51 @@
+---
+# Improved Ansible Playbook for Cisco ASA Interface Status
+# Standards: Idempotency, Observability, Documentation, Error Handling, Best Practices (FQCN)
+- name: Get ASA Interface Status and Details
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Default output format; can be overridden via --extra-vars "output_format=json"
+    output_format: text
+
+  tasks:
+    - name: Gather current interface configuration from ASA
+      # Best Practice: Use Fully Qualified Collection Name (FQCN).
+      # Idempotency: 'state: gathered' only reads the device configuration without modifying it.
+      cisco.asa.asa_interfaces:
+        state: gathered
+      register: interfaces_output
+      # Error Handling: Ensure the play stops immediately if the module fails.
+      failed_when: interfaces_output.failed | default(false)
+
+    - name: Verify integrity of retrieved interface data
+      # Observability: Validate that the module returned the expected fact structure.
+      ansible.builtin.assert:
+        that:
+          - interfaces_output.ansible_facts.asa_interfaces is defined
+          - interfaces_output.ansible_facts.asa_interfaces | length > 0
+        fail_msg: "Failed to retrieve interface data from {{ inventory_hostname }}. Verify connectivity."
+        success_msg: "Successfully retrieved configuration for {{ interfaces_output.ansible_facts.asa_interfaces | length }} interfaces."
+
+    - name: Export interface state to JSON for external reporting
+      # Documentation: Persist the device state to a file for auditing or post-processing.
+      # Best Practice: Delegate to localhost as network devices do not support the copy module directly.
+      ansible.builtin.copy:
+        content: "{{ interfaces_output.ansible_facts.asa_interfaces | ansible.builtin.to_nice_json }}"
+        dest: "/tmp/asa_interfaces_{{ inventory_hostname }}.json"
+        mode: '0644'
+      when: output_format == 'json'
+      delegate_to: localhost
+
+    - name: Generate human-readable interface summary table
+      # Documentation: Provides immediate visual feedback on the interface status and IP assignments.
+      ansible.builtin.debug:
+        msg: |
+          ===============================================================================
+          ASA INTERFACE STATUS SUMMARY: {{ inventory_hostname }}
+          ===============================================================================
+          {% for iface in interfaces_output.ansible_facts.asa_interfaces %}
+          {{ iface.name | rjust(20) }}: {{ (iface.enabled | default(false) | ternary('ENABLED', 'DISABLED')) | rjust(10) }} | IP: {{ (iface.ipv4[0].address if (iface.ipv4 is defined and iface.ipv4 | length > 0) else 'Unassigned') | rjust(15) }} | Mode: {{ iface.mode | default('N/A') }}
+          {% endfor %}
+          ===============================================================================
+      when: output_format == 'text'

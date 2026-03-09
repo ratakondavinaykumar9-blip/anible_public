@@ -1,0 +1,34 @@
+---
+# FortiGate Process Status
+# Improved: 2026-03-08
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: FortiGate Process Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve system process list from FortiGate
+      # This operation is idempotent as it is a read-only diagnosis command that does not change state.
+      # Fully Qualified Collection Name (FQCN) used for reliability.
+      ansible.netcommon.cli_command:
+        command: diagnose system process list
+      register: proc
+      # Error Handling: Explicitly check for CLI-level failures or unrecognized command patterns.
+      failed_when:
+        - proc.failed or "Unknown action" in proc.stdout or "Command fail" in proc.stdout
+
+    - name: Verify that process information was successfully captured
+      # Observability: Assert that the command returned data to ensure visibility into system health.
+      ansible.builtin.assert:
+        that:
+          - proc.stdout is defined
+          - proc.stdout | length > 0
+        fail_msg: "Failed to capture process information from the device or output was empty."
+        success_msg: "Successfully captured system process information."
+
+    - name: Display formatted process status
+      # Documentation: Providing a structured output for logs and manual troubleshooting.
+      ansible.builtin.debug:
+        msg: |
+          ======================= PROCESSES =======================
+          {{ proc.stdout }}

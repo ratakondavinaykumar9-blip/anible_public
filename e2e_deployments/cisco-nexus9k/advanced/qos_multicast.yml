@@ -1,0 +1,43 @@
+---
+- name: Cisco Nexus 9k Advanced - QoS and Multicast (PIM)
+  hosts: nexus9k
+  gather_facts: no
+
+  tasks:
+    - name: Enable Multicast Routing
+      cisco.nxos.nxos_feature:
+        feature: pim
+        state: enabled
+
+    - name: Configure PIM Sparse-Mode Anycast RP
+      cisco.nxos.nxos_config:
+        lines:
+          - ip pim rp-address 10.255.255.255 group-list 224.0.0.0/4
+          - ip pim anycast-rp 10.255.255.255 10.255.0.1
+          - ip pim anycast-rp 10.255.255.255 10.255.0.2
+
+    - name: Enable PIM on Interface
+      cisco.nxos.nxos_config:
+        lines:
+          - ip pim sparse-mode
+        parents: interface Vlan100
+
+    - name: Configure QoS Class-Map
+      cisco.nxos.nxos_config:
+        lines:
+          - match dscp ef
+        parents: class-map type qos match-any CM_VOICE
+
+    - name: Configure QoS Policy-Map
+      cisco.nxos.nxos_config:
+        lines:
+          - set qos-group 1
+        parents:
+          - policy-map type qos PM_CLASSIFY
+          - class CM_VOICE
+
+    - name: Apply QoS Policy to Inbound Interface
+      cisco.nxos.nxos_config:
+        lines:
+          - service-policy type qos input PM_CLASSIFY
+        parents: interface Ethernet1/1

@@ -1,0 +1,38 @@
+---
+# FortiGate VLAN List Retrieval Playbook
+# This playbook retrieves and displays the VLAN configuration from FortiGate devices.
+# Standards Applied: FQCN, Idempotency (read-only), Observability (asserts), and Error Handling.
+
+- name: Get FortiGate VLAN List
+  hosts: fortigate
+  gather_facts: false  # Optimization: Facts gathering is not required for CLI command execution.
+
+  tasks:
+    - name: Execute 'get system vlan' command on FortiGate
+      # Using Fully Qualified Collection Name (FQCN) for the cli_command module.
+      # This task is idempotent as it performs a read-only operation.
+      ansible.netcommon.cli_command:
+        command: get system vlan
+      register: vlan_raw_output
+      # Ensure Ansible does not report a 'changed' status for a read-only command.
+      changed_when: false
+      # Explicit error handling to catch failures or invalid command responses.
+      failed_when: 
+        - vlan_raw_output.failed
+        - "'Unknown command' in vlan_raw_output.stdout"
+
+    - name: Validate VLAN output integrity
+      # Observability: Assert that the command returned non-empty stdout.
+      ansible.builtin.assert:
+        that:
+          - vlan_raw_output.stdout is defined
+          - vlan_raw_output.stdout | length > 0
+        fail_msg: "VLAN retrieval failed: No output received from device."
+        success_msg: "VLAN data successfully captured."
+
+    - name: Display the retrieved VLAN list
+      # Providing a clean debug output for visibility and observability.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE VLAN LIST =======================
+          {{ vlan_raw_output.stdout }}

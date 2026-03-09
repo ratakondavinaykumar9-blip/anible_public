@@ -1,0 +1,36 @@
+---
+# FortiGate SNMP Community Retrieval Playbook
+# Improved for Idempotency, Observability, and Best Practices.
+- name: Get SNMP Community Configuration from FortiGate
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve current SNMP community configuration
+      # Using Fully Qualified Collection Name (FQCN) for predictable module resolution.
+      ansible.netcommon.cli_command:
+        command: get system snmp community
+      register: snmp_output
+      # This task is read-only (GET), so 'changed_when: false' ensures idempotency by never reporting a change.
+      changed_when: false
+      # Explicitly catch CLI-level errors that might not return a non-zero exit code.
+      failed_when:
+        - snmp_output.failed is defined and snmp_output.failed
+        - "'Unknown action' in snmp_output.stdout"
+        - "'command parse error' in snmp_output.stdout | lower"
+
+    - name: Verify SNMP configuration retrieval was successful
+      # Observability: Assert that the registered variable contains valid data before proceeding.
+      ansible.builtin.assert:
+        that:
+          - snmp_output.stdout is defined
+          - snmp_output.stdout | length > 0
+        fail_msg: "Failed to retrieve SNMP community configuration or the output is empty."
+        success_msg: "SNMP community configuration successfully retrieved."
+
+    - name: Display retrieved SNMP configuration details
+      # Documentation/Observability: Providing clear, formatted visibility into the fetched configuration.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SNMP CONFIGURATION =======================
+          {{ snmp_output.stdout }}

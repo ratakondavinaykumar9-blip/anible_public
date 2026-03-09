@@ -1,0 +1,43 @@
+---
+# Playbook: Get NAT Pool Usage
+# Description: Retrieves and validates NAT pool configuration and statistics for Cisco ASA/Firepower devices.
+# Standards: High-reliability automation with FQCN, observability, and robust error handling.
+- name: Get NAT Pool Usage
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve NAT pool configuration from the device
+      # Using Fully Qualified Collection Name (FQCN) for cross-version compatibility
+      ansible.netcommon.cli_command:
+        command: show ip nat pool
+      register: pool_output
+      # Error Handling: Catch CLI execution failures or unrecognized commands
+      failed_when:
+        - pool_output.failed or 'Invalid' in pool_output.stdout or 'Error' in pool_output.stdout
+
+    - name: Validate NAT pool data integrity
+      # Observability: Ensure the device returned meaningful configuration data
+      ansible.builtin.assert:
+        that:
+          - "pool_output.stdout | length > 0"
+        fail_msg: "NAT pool configuration is empty or could not be retrieved from the device."
+        success_msg: "NAT pool configuration successfully validated."
+
+    - name: Retrieve NAT translation statistics
+      # Captures real-time usage metrics to identify potential pool exhaustion
+      ansible.netcommon.cli_command:
+        command: show nat | include pool
+      register: nat_stats_output
+      # Idempotency: Ignore errors if no statistics are currently generated (e.g., zero traffic)
+      ignore_errors: true
+
+    - name: Display consolidated NAT pool report
+      # Observability: Provide a formatted summary of both configuration and active usage
+      ansible.builtin.debug:
+        msg: |
+          ======================= NAT POOL DEFINITIONS =======================
+          {{ pool_output.stdout }}
+
+          ======================= NAT USAGE STATISTICS =======================
+          {{ nat_stats_output.stdout | default('No active NAT pool statistics available at this time.') }}

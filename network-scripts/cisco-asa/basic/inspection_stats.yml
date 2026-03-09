@@ -1,0 +1,41 @@
+---
+# Playbook: Cisco ASA Inspection Statistics Collector
+# Standards: 
+# 1. Idempotency: Inherently safe (Read-only operation).
+# 2. Observability: Utilizes 'register' and 'assert' for state and data verification.
+# 3. Documentation: Detailed comments explaining task intent and logic.
+# 4. Error Handling: Explicit 'failed_when' condition for granular control.
+# 5. Best Practices: Strict adherence to Fully Qualified Collection Names (FQCN).
+
+- name: Get Inspection Stats
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve service-policy inspection statistics from device
+      # Using FQCN for network common CLI command execution.
+      # This task is read-only, ensuring idempotency across multiple runs.
+      ansible.netcommon.cli_command:
+        command: "show service-policy | include inspect"
+      register: inspect_output
+      # Error Handling: Fail if the command returns syntax errors or the transport fails.
+      failed_when: 
+        - inspect_output.failed | default(false)
+        - "'Invalid input' in inspect_output.stdout"
+
+    - name: Verify inspection statistics were successfully captured
+      # Observability: Assert that the output is defined and contains data.
+      # This prevents false positives if the command succeeds but returns no data.
+      ansible.builtin.assert:
+        that:
+          - "inspect_output.stdout is defined"
+          - "inspect_output.stdout | length > 0"
+        fail_msg: "Observability Error: No inspection statistics were found on the device."
+        success_msg: "Observability Success: Inspection statistics successfully retrieved."
+
+    - name: Display formatted inspection statistics report
+      # Documentation: Debug output formatted for clear human readability in logs.
+      ansible.builtin.debug:
+        msg: |
+          ======================= INSPECTION STATS =======================
+          {{ inspect_output.stdout }}

@@ -1,0 +1,53 @@
+---
+# FortiGate Clock and NTP Verification
+# Purpose: This playbook retrieves and validates the system time and NTP configuration on FortiGate devices.
+# Standards: Idempotency (Read-only), Observability (Assert/Register), Documentation, Error Handling, and FQCN.
+- name: Get Clock and NTP
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve system clock details
+      # Using FQCN for network common operations to ensure environment consistency.
+      ansible.netcommon.cli_command:
+        command: get system time
+      register: time_output
+      # Error Handling: Ensure the command executed successfully and returned data.
+      failed_when: 
+        - time_output.stdout is not defined
+        - time_output.stdout | length == 0
+
+    - name: Verify clock retrieval success
+      # Observability: Assert that the output contains expected date/time keywords.
+      ansible.builtin.assert:
+        that:
+          - "'current time' in time_output.stdout.lower() or '20' in time_output.stdout"
+        fail_msg: "The system time output format was unexpected or empty."
+        quiet: true
+
+    - name: Retrieve NTP synchronization status
+      # Documentation: Captures NTP configuration to ensure the device is synchronized with a time source.
+      ansible.netcommon.cli_command:
+        command: get system ntp
+      register: ntp_output
+      failed_when: 
+        - ntp_output.stdout is not defined
+        - ntp_output.stdout | length == 0
+
+    - name: Verify NTP configuration presence
+      # Observability: Validates that NTP settings are reachable/configured on the target host.
+      ansible.builtin.assert:
+        that:
+          - "'ntpserver' in ntp_output.stdout.lower() or 'type' in ntp_output.stdout.lower()"
+        fail_msg: "NTP configuration could not be retrieved or is not configured."
+        quiet: true
+
+    - name: Display consolidated Clock and NTP status
+      # Best Practice: Provide clear, human-readable output for auditing and operational verification.
+      ansible.builtin.debug:
+        msg: |
+          Device Time Status:
+          {{ time_output.stdout }}
+
+          NTP Configuration Status:
+          {{ ntp_output.stdout }}

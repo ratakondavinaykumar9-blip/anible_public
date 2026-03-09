@@ -1,0 +1,32 @@
+---
+# FortiGate DNS Filter Profile - Optimized for Idempotency and Observability
+- name: Get DNS Filter Profile
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve DNS filter profile configuration via CLI
+      # Why: Using FQCN for cross-platform compatibility and registering output for state validation.
+      # Note: Read-only 'get' operations are inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: get firewall dnsfilter-profile
+      register: dns_output
+      # Error Handling: Fail explicitly if the FortiGate returns a CLI parse error or unknown command message.
+      failed_when: 
+        - dns_output.failed or "Unknown action" in dns_output.stdout or "command parse error" in dns_output.stdout
+
+    - name: Validate DNS filter profile response integrity
+      # Observability: Ensure the device returned actual data before attempting to process or display it.
+      ansible.builtin.assert:
+        that:
+          - dns_output.stdout is defined
+          - dns_output.stdout | length > 0
+        fail_msg: "The DNS filter profile query returned empty results or failed to execute."
+        success_msg: "DNS filter profile data successfully captured and verified."
+
+    - name: Display DNS Filter Profile Details
+      # Documentation: Providing a clear, formatted view of the profile for operational auditing.
+      ansible.builtin.debug:
+        msg: |
+          ======================= DNS FILTER PROFILE =======================
+          {{ dns_output.stdout }}

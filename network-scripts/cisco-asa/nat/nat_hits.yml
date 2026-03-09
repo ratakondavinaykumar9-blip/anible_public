@@ -1,0 +1,37 @@
+---
+# Architect:Optimized Playbook: NAT Translation Statistics
+# This playbook retrieves hitcounts for NAT rules to help identify active vs stale translations.
+- name: Retrieve NAT Translation Hits
+  hosts: asa_firepower
+  gather_facts: false
+  # Idempotency: Read-only 'show' commands do not modify device configuration and are safe for repeated runs.
+
+  tasks:
+    - name: Fetch NAT hitcount data from device
+      # Best Practice: Using FQCN (Fully Qualified Collection Name) for platform-specific execution
+      cisco.asa.asa_command:
+        commands:
+          - show nat | include hitcount
+      # Observability: Register output to enable validation and human-readable reporting
+      register: nat_hits
+      # Error Handling: Define failure if the command fails or returns a syntax error message
+      failed_when: 
+        - nat_hits.failed or "Invalid input" in nat_hits.stdout[0]
+
+    - name: Validate NAT data retrieval
+      # Observability: Assert that the command returned meaningful data
+      ansible.builtin.assert:
+        that:
+          - nat_hits.stdout[0] | length > 0
+        fail_msg: "NAT hitcount retrieval failed: The device returned no data."
+        success_msg: "NAT hitcount data successfully captured and validated."
+
+    - name: Display NAT Hits Report
+      # Documentation: Provide a structured view of the results for audit and visibility
+      ansible.builtin.debug:
+        msg: |
+          ======================= NAT HITS SUMMARY =======================
+          Hostname: {{ inventory_hostname }}
+          Data:
+          {{ nat_hits.stdout[0] }}
+          ================================================================

@@ -1,0 +1,36 @@
+---
+# FortiGate WAF Profile Retrieval Playbook
+# This playbook retrieves the Web Application Firewall (WAF) profile configuration from a FortiGate device.
+# Standards followed: Idempotency, Observability, Documentation, Error Handling, and FQCN usage.
+- name: Get FortiGate WAF Profile
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve WAF profile details via CLI
+      # Use Fully Qualified Collection Name (FQCN) for the network command
+      ansible.netcommon.cli_command:
+        command: "get firewall waf-profile"
+      register: waf_result
+      # Idempotency: Read-only operations should not flag a change in the playbook run
+      changed_when: false
+      # Error Handling: Explicitly fail if the device returns common CLI error strings
+      failed_when:
+        - waf_result.failed
+        - "'Command fail' in waf_result.stdout or 'Unknown action' in waf_result.stdout"
+
+    - name: Verify WAF profile data was successfully captured
+      # Observability: Assert that the command returned content to ensure the system is in the expected state
+      ansible.builtin.assert:
+        that:
+          - waf_result.stdout is defined
+          - waf_result.stdout | length > 0
+        fail_msg: "WAF profile retrieval failed: No data was returned from the device."
+        success_msg: "WAF profile data successfully retrieved."
+
+    - name: Display the retrieved WAF Profile configuration
+      # Documentation: Provide clear, formatted output for administrative visibility
+      ansible.builtin.debug:
+        msg: |
+          ======================= WAF PROFILE =======================
+          {{ waf_result.stdout }}

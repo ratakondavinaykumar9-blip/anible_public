@@ -1,0 +1,38 @@
+---
+# Routing Protocols Configuration Audit
+# Purpose: This playbook retrieves and verifies the configured routing protocols on Cisco ASA/Firepower devices.
+# Standards: Idempotency (read-only), Observability (assertions), Documentation (in-line comments),
+# Error Handling (validation), Best Practices (FQCN).
+
+- name: Audit Routing Protocols
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve routing protocol configuration from device
+      # Why: Fetches the 'router' section of the running-config to identify active protocols (OSPF, EIGRP, BGP, etc.)
+      # Idempotency: Read-only command; safe for repeated execution as it does not modify device state.
+      ansible.netcommon.cli_command:
+        command: "show running-config | include router"
+      register: protocols_result
+      # Error Handling: Ensure the task fails if the connection is dropped or the command execution fails.
+      # changed_when is false because 'show' commands never change the target system.
+      failed_when: protocols_result.failed == true
+      changed_when: false
+
+    - name: Verify protocol data integrity
+      # Observability: Validates that the command returned a valid response object.
+      # This ensures downstream tasks or reports are based on actual retrieved data.
+      ansible.builtin.assert:
+        that:
+          - protocols_result.stdout is defined
+        fail_msg: "Critical: Failed to retrieve configuration data from {{ inventory_hostname }}."
+        success_msg: "Data successfully retrieved from {{ inventory_hostname }}."
+
+    - name: Log Routing Protocols configuration
+      # Observability: Provides immediate visibility into the configuration state for the operator.
+      # Documentation: The header clearly identifies the source host for the output.
+      ansible.builtin.debug:
+        msg: |
+          ======================= ROUTING PROTOCOLS [{{ inventory_hostname }}] =======================
+          {{ protocols_result.stdout | default('INFO: No routing protocols are currently configured on this device.') }}

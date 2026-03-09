@@ -1,0 +1,32 @@
+---
+# FortiGate HA Status Verification
+# This playbook retrieves the High Availability status to ensure cluster health.
+# It adheres to Standard:s for idempotency and observability.
+- name: Get HA Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Execute HA status command
+      # Using FQCN for reliability. This is idempotent as it is a read-only operation.
+      ansible.netcommon.cli_command:
+        command: get system ha status
+      register: ha_result
+      # Error Handling: Explicitly fail if the command returns no data.
+      failed_when: ha_result.stdout | length == 0
+
+    - name: Validate HA status output
+      # Observability: Use assert to verify that the response contains expected HA keywords.
+      ansible.builtin.assert:
+        that:
+          - "'HA Health Status' in ha_result.stdout or 'Mode' in ha_result.stdout"
+        fail_msg: "The HA status output is invalid or the device is not configured for HA."
+        success_msg: "HA status successfully retrieved and validated."
+
+    - name: Display HA Status Report
+      # Documentation: Provide a clean, formatted view of the status for the operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= HA STATUS =======================
+          Host: {{ inventory_hostname }}
+          {{ ha_result.stdout }}

@@ -1,0 +1,98 @@
+---
+# IPSec Tunnel Troubleshooting Playbook
+# Purpose: Automates diagnostic data collection for VPN tunnels on Cisco ASA/Firepower.
+# This playbook is idempotent as it only executes read-only 'show' commands.
+- name: Troubleshoot IPSec Tunnel
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # The remote peer IP is required to filter results and avoid impact on other tunnels.
+    tunnel_peer: ""
+
+  tasks:
+    - name: Validate peer variable input
+      # Observability: Ensure required variables are present before execution.
+      ansible.builtin.assert:
+        that:
+          - tunnel_peer | length > 0
+        fail_msg: "The 'tunnel_peer' variable is required. Example: -e 'tunnel_peer=1.2.3.4'"
+        quiet: true
+
+    - name: Check IKEv1 Security Associations (SA)
+      # Collecting Phase 1 state. ignore_errors is used as one IKE version might be disabled.
+      # Best Practice: Using FQCN for platform-specific command execution.
+      cisco.asa.asa_command:
+        commands:
+          - "show crypto isakmp sa {{ tunnel_peer }}"
+      register: ikev1
+      ignore_errors: true
+
+    - name: Check IKEv2 Security Associations (SA)
+      # modern VPNs primarily use IKEv2; collecting status for Phase 1 negotiation.
+      cisco.asa.asa_command:
+        commands:
+          - "show crypto ikev2 sa {{ tunnel_peer }}"
+      register: ikev2
+      ignore_errors: true
+
+    - name: Check IPsec (Phase 2) Security Associations
+      # Verifying encap/decap counters to ensure data plane traffic flow.
+      cisco.asa.asa_command:
+        commands:
+          - "show crypto ipsec sa peer {{ tunnel_peer }}"
+      register: ipsec
+      ignore_errors: true
+
+    - name: Check VPN Tunnel Session Database
+      # Checking the session entry to verify uptime and connection type.
+      cisco.asa.asa_command:
+        commands:
+          - "show vpn-sessiondb l2l filter-ipaddress {{ tunnel_peer }}"
+      register: session
+      ignore_errors: true
+
+    - name: Check recent syslog error messages
+      # Error Handling: Identifying negotiation failures via the device's own logs.
+      cisco.asa.asa_command:
+        commands:
+          - "show logging | include error | last 50"
+      register: logs
+      ignore_errors: true
+
+    - name: Verify data collection completeness
+      # Observability: Asserting that critical diagnostic variables were registered.
+      ansible.builtin.assert:
+        that:
+          - ikev1 is defined
+          - ikev2 is defined
+          - ipsec is defined
+        fail_msg: "Critical troubleshooting data could not be collected."
+        quiet: true
+
+    - name: Display Tunnel Status Summary
+      # Documentation: Consolidating data into a human-readable format for quick analysis.
+      ansible.builtin.debug:
+        msg: |
+          ======================= TUNNEL STATUS: {{ tunnel_peer }} =======================
+          {% set ike1_out = ikev1.stdout[0] | default('') %}
+          {% set ike2_out = ikev2.stdout[0] | default('') %}
+          {% set ipsec_out = ipsec.stdout[0] | default('') %}
+          
+          Phase 1 (IKE): {{ '✅ UP' if ('AM_ACTIVE' in ike1_out or 'UP-ACTIVE' in ike2_out) else '❌ DOWN' }}
+          Phase 2 (IPSec): {{ '✅ UP' if 'crypto map' in ipsec_out.lower() else '❌ DOWN' }}
+          
+          --- IKEv1 Detail ---
+          {{ ike1_out if ike1_out else 'No IKEv1 SA found.' }}
+          
+          --- IKEv2 Detail ---
+          {{ ike2_out if ike2_out else 'No IKEv2 SA found.' }}
+          
+          --- IPsec Data Plane ---
+          {{ ipsec_out if ipsec_out else 'No IPsec SA found.' }}
+          
+          --- Session Database ---
+          {{ session.stdout[0] | default('No active session entries.') }}
+          
+          --- Relevant Log Entries ---
+          {{ logs.stdout[0] | default('No recent VPN errors found.') }}
+          ==============================================================================

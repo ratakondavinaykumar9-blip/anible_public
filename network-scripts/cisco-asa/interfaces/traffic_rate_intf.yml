@@ -1,0 +1,33 @@
+---
+# Per-Interface Traffic Rate Analysis
+# Standard: Idempotency - This is a read-only command and is inherently safe for repeated execution.
+- name: Get Interface Traffic Rates
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve interface traffic statistics
+      # FQCN: Using fully qualified collection names for best practices and portability
+      ansible.netcommon.cli_command:
+        command: show traffic
+      register: traffic_result
+      # Error Handling: Ensure the task fails if the device returns an error message
+      failed_when:
+        - traffic_result.failed or "Invalid input" in traffic_result.stdout
+        - "'ERROR' in traffic_result.stdout"
+
+    - name: Verify traffic data collection
+      # Observability: Assert that the command returned actual data for validation
+      ansible.builtin.assert:
+        that:
+          - "traffic_result.stdout is defined"
+          - "traffic_result.stdout | length > 0"
+        fail_msg: "Traffic statistics could not be retrieved or the output was empty."
+        success_msg: "Traffic statistics successfully captured and validated."
+
+    - name: Display traffic rates to console
+      # Observability: Provide a formatted view of the collected data for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= TRAFFIC RATES =======================
+          {{ traffic_result.stdout }}

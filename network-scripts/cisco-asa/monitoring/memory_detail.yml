@@ -1,0 +1,32 @@
+---
+- name: Collect and Validate Cisco ASA/Firepower Memory Statistics
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve memory details via CLI
+      # Use FQCN to ensure the correct plugin is used across different environments
+      ansible.netcommon.cli_command:
+        command: show memory detail
+      register: memory_result
+      # IDEMPOTENCY: Read-only 'show' commands should never report a 'changed' state
+      changed_when: false
+      # ERROR HANDLING: Explicitly fail if the command returns no data
+      failed_when: 
+        - memory_result.stdout is not defined or memory_result.stdout | length == 0
+
+    - name: Validate memory output structure
+      # OBSERVABILITY: Ensure the retrieved data contains expected keywords to confirm command success
+      ansible.builtin.assert:
+        that:
+          - "'Free memory' in memory_result.stdout"
+          - "'Used memory' in memory_result.stdout"
+        fail_msg: "The 'show memory detail' command returned unexpected or incomplete data."
+        success_msg: "Memory details successfully retrieved and validated."
+
+    - name: Display formatted memory details
+      # DOCUMENTATION: Provide a clean, readable view of the memory state for operational audits
+      ansle.builtin.debug:
+        msg: |
+          ======================= MEMORY DETAIL =======================
+          {{ memory_result.stdout }}

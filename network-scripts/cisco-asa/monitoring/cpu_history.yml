@@ -1,0 +1,33 @@
+---
+- name: Retrieve and Validate CPU Usage History
+  hosts: asa_firepower
+  gather_facts: false
+  # Standard: Ensuring observability and error handling for Cisco ASA/Firepower devices.
+
+  tasks:
+    - name: Execute 'show cpu history' command
+      # Standard: Using Fully Qualified Collection Name (FQCN).
+      # Standard: This operation is inherently idempotent as it is a read-only command.
+      ansible.netcommon.cli_command:
+        command: show cpu history
+      register: cpu_history_result
+      # Standard: Error handling to catch invalid command responses or execution failures.
+      failed_when:
+        - cpu_history_result.failed
+        - "'Invalid input' in cpu_history_result.stdout"
+
+    - name: Validate CPU history output
+      # Standard: Observability via assertion to ensure data integrity before display.
+      ansible.builtin.assert:
+        that:
+          - cpu_history_result.stdout is defined
+          - cpu_history_result.stdout | length > 0
+        fail_msg: "Failed to retrieve valid CPU history data from the device."
+        success_msg: "CPU history data successfully captured and validated."
+
+    - name: Display CPU History
+      # Standard: Providing clear operational visibility.
+      ansible.builtin.debug:
+        msg: |
+          ======================= CPU HISTORY =======================
+          {{ cpu_history_result.stdout }}

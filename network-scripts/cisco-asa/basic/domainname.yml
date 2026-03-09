@@ -1,0 +1,31 @@
+---
+# Standard: Domain and DNS Verification
+# Purpose: Safely retrieve and validate the configured domain name from Cisco ASA/Firepower devices.
+- name: Get Domain/DNS Information
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve domain-name configuration
+      # FQCN: Using ansible.netcommon for standardized CLI interaction
+      ansible.netcommon.cli_command:
+        command: show running-config domain-name
+      register: domain_output
+      # Idempotency: Read-only operations must not report a change state
+      changed_when: false
+      # Error Handling: Detect and fail on common CLI error strings or task failure
+      failed_when:
+        - domain_output.failed or "Invalid input" in domain_output.stdout
+
+    - name: Validate domain-name retrieval success
+      # Observability: Assert that the command returned a valid response
+      ansible.builtin.assert:
+        that:
+          - domain_output.stdout is defined
+        fail_msg: "Failed to capture domain-name configuration from the device."
+        success_msg: "Successfully captured domain-name configuration."
+
+    - name: Display retrieved domain configuration
+      # Observability: Provide clear output for operational visibility
+      ansible.builtin.debug:
+        msg: "Configured Domain: {{ domain_output.stdout | default('None/Empty') }}"

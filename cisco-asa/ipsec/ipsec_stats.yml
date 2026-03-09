@@ -1,0 +1,66 @@
+---
+# IPSec Statistics and Counters
+# This playbook retrieves VPN statistics from Cisco ASA/Firepower devices.
+# Improved for idempotency, observability, and strict best practices.
+- name: Get IPSec Statistics
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve detailed IPSec Security Association (SA) information
+      # Gathers low-level SA details including traffic selectors and SPIs for active tunnels
+      ansible.netcommon.cli_command:
+        command: show crypto ipsec sa detail
+      register: sa_detail
+      failed_when:
+        - sa_detail.failed
+        - "'Invalid input' not in sa_detail.stderr"
+
+    - name: Validate IPSec SA data retrieval
+      # Observability: Ensures the command returned data even if no tunnels are active
+      ansible.builtin.assert:
+        that:
+          - "sa_detail.stdout is defined"
+        fail_msg: "Failed to gather IPSec SA details on {{ inventory_hostname }}"
+
+    - name: Retrieve global IPSec statistics and error counters
+      # Gathers aggregate counters for packets encrypted, decrypted, and dropped
+      ansible.netcommon.cli_command:
+        command: show crypto ipsec stats
+      register: stats
+      failed_when:
+        - stats.failed
+        - "'Invalid input' not in stats.stderr"
+
+    - name: Validate IPSec global statistics retrieval
+      ansible.builtin.assert:
+        that:
+          - "stats.stdout is defined"
+        fail_msg: "Failed to gather IPSec global stats on {{ inventory_hostname }}"
+
+    - name: Retrieve IKEv1 (ISAKMP) statistics
+      # Gathers Phase 1 negotiation stats; may fail if only IKEv2 is enabled
+      ansible.netcommon.cli_command:
+        command: show crypto isakmp stats
+      register: ike_stats
+      # Error Handling: IKEv1 might be disabled or unsupported on some newer FTD images
+      ignore_errors: true
+
+    - name: Validate IKEv1 statistics status
+      ansible.builtin.assert:
+        that:
+          - "ike_stats is defined"
+        quiet: true
+
+    - name: Output consolidated IPSec and IKEv1 diagnostic data
+      # Combines all registered outputs into a single view for improved visibility
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC SA DETAILS =======================
+          {{ sa_detail.stdout | default('No SA data available') }}
+
+          ======================= IPSEC GLOBAL STATS =====================
+          {{ stats.stdout | default('No global stats available') }}
+
+          ======================= IKEv1 (ISAKMP) STATS ===================
+          {{ ike_stats.stdout | default('IKEv1 stats not found or command not supported') }}

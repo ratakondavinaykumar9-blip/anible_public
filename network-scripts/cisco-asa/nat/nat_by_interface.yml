@@ -1,0 +1,33 @@
+---
+# NAT by Interface Audit Playbook
+# Purpose: Retrieves the Network Address Translation (NAT) configuration organized by interface.
+# Standards: Ensures idempotency (read-only), observability via assertions, and strict FQCN usage.
+
+- name: Get NAT by Interface
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve NAT interface configuration
+      # Using FQCN for Cisco ASA specific command execution
+      cisco.asa.asa_command:
+        commands:
+          - show nat interface
+      register: nat_intf
+      # Error Handling: Fail if the command returns a Cisco CLI error or fails to execute
+      failed_when: 
+        - nat_intf.failed or 'Invalid input' in nat_intf.stdout[0]
+        - "'ERROR' in nat_intf.stdout[0]"
+
+    - name: Verify NAT configuration retrieval
+      # Observability: Ensure that the output is not empty before proceeding
+      ansible.builtin.assert:
+        that:
+          - "nat_intf.stdout[0] | length > 0"
+        fail_msg: "No NAT interface configuration was returned from {{ inventory_hostname }}."
+        success_msg: "NAT interface configuration successfully captured for {{ inventory_hostname }}."
+
+    - name: Display formatted NAT by Interface output
+      # Observability: Presenting data for manual audit/logs
+      ansible.builtin.debug:
+        msg: |

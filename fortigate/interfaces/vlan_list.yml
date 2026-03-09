@@ -1,0 +1,35 @@
+---
+# FortiGate VLAN List - Production Grade
+# Purpose: Safely retrieves and validates VLAN configuration from FortiGate devices.
+# Improved for idempotency, observability, and strict error handling.
+- name: Get VLAN List
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve VLAN configuration via CLI
+      # Using Fully Qualified Collection Name (FQCN) for reliability
+      ansible.netcommon.cli_command:
+        command: get system vlan
+      register: vlan_result
+      # Idempotency: Read-only commands must not indicate a 'changed' state
+      changed_when: false
+      # Error Handling: Catch specific FortiOS error strings that might not trigger a non-zero exit code
+      failed_when: 
+        - vlan_result.failed or "Command fail" in vlan_result.stdout or "Unknown action" in vlan_result.stdout
+
+    - name: Validate VLAN data integrity
+      # Observability: Ensure the device returned meaningful data to prevent silent processing failures
+      ansible.builtin.assert:
+        that:
+          - vlan_result.stdout is defined
+          - vlan_result.stdout | length > 0
+        fail_msg: "VLAN retrieval returned empty or invalid data."
+        success_msg: "VLAN configuration successfully captured."
+
+    - name: Display captured VLAN details
+      # Documentation/Observability: Provides clear formatted output for operators
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE VLANs =======================
+          {{ vlan_result.stdout }}

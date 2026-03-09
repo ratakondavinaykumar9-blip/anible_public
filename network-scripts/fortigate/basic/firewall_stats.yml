@@ -1,0 +1,36 @@
+---
+# FortiGate Firewall Statistics Collection
+# This playbook retrieves operational statistics from FortiGate firewalls.
+# Standards: Idempotent (read-only), Observable (assert), Documented, FQCN.
+
+- name: Get FortiGate Firewall Statistics
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve firewall statistics via CLI command
+      # FQCN: Using ansible.netcommon for cross-platform network CLI support
+      ansible.netcommon.cli_command:
+        command: get firewall stats
+      register: stats_output
+      # Idempotency: Read-only operations must always report 'ok', never 'changed'
+      changed_when: false
+      # Error Handling: Fail if the device returns an internal command error string
+      failed_when: 
+        - stats_output.failed or "Command fail" in stats_output.stdout
+
+    - name: Validate statistics data integrity
+      # Observability: Verify that the command returned meaningful content
+      ansible.builtin.assert:
+        that:
+          - stats_output.stdout is defined
+          - stats_output.stdout | length > 0
+        fail_msg: "The firewall returned empty or invalid statistics data."
+        success_msg: "Firewall statistics successfully captured and verified."
+
+    - name: Display formatted firewall statistics
+      # FQCN: Using ansible.builtin for core debug output
+      ansible.builtin.debug:
+        msg: |
+          ======================= FIREWALL STATS =======================
+          {{ stats_output.stdout }}

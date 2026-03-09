@@ -1,0 +1,32 @@
+---
+- name: IPv6 Routing Table Audit
+  hosts: asa_firepower
+  gather_facts: false
+  # WHY: This playbook performs a non-intrusive audit of the IPv6 routing table to verify network state.
+  # IDEMPOTENCY: Inherently idempotent as it uses read-only commands that do not modify the device configuration.
+
+  tasks:
+    - name: Retrieve current IPv6 routing table
+      # FQCN: Using the dedicated Cisco ASA collection for improved platform-specific handling
+      cisco.asa.asa_command:
+        commands:
+          - show route ipv6
+      register: v6_routes
+      # ERROR HANDLING: Ensure the playbook fails if the command returns no output or is undefined
+      failed_when: 
+        - v6_routes.stdout is not defined or v6_routes.stdout | length == 0
+
+    - name: Validate routing table integrity
+      # OBSERVABILITY: Verifies that the device returned a valid IPv6 routing table header
+      ansible.builtin.assert:
+        that:
+          - "'IPv6 Routing Table' in v6_routes.stdout[0]"
+        fail_msg: "The device did not return a valid IPv6 routing table. Verify IPv6 is configured and enabled."
+        success_msg: "IPv6 routing table successfully retrieved and validated."
+
+    - name: Display IPv6 Routing Information
+      # OBSERVABILITY: Provides clear, formatted visibility for the operator in the automation logs
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPv6 ROUTES =======================
+          {{ v6_routes.stdout[0] }}

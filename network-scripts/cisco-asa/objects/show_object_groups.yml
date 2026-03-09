@@ -1,0 +1,33 @@
+---
+# Architect:Improved Playbook
+# Goal: Retrieve and verify ASA/Firepower Object Groups with high observability and robust error handling
+- name: Get Object Groups
+  hosts: asa_firepower
+  gather_facts: false # Optimization: Skip fact gathering for CLI-based command execution
+
+  tasks:
+    - name: Execute show command to retrieve object-group configuration
+      # Idempotency: Read-only operations are inherently safe for repeated execution
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: show running-config object-group
+      register: groups_result
+      # Error Handling: Catch explicit command failures and common Cisco error strings
+      failed_when:
+        - groups_result.failed or "'Invalid input' in groups_result.stdout"
+
+    - name: Validate command output
+      # Observability: Use assert to verify that configuration data was actually returned
+      ansible.builtin.assert:
+        that:
+          - groups_result.stdout is defined
+          - groups_result.stdout | length > 0
+        fail_msg: "No object-group configuration was found or the command failed to return data."
+        success_msg: "Successfully retrieved object-group configuration."
+
+    - name: Display formatted object group results
+      # Observability: Provide clear, human-readable output for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= OBJECT GROUPS =======================
+          {{ groups_result.stdout }}

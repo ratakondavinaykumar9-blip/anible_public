@@ -1,0 +1,40 @@
+---
+# FortiGate Memory Monitoring - Standard:
+# Purpose: This playbook performs a non-intrusive status check of the system memory utilization.
+# It ensures the device is responsive and returns valid performance metrics for observability.
+- name: Monitor FortiGate Memory Utilization
+  hosts: fortigate
+  gather_facts: false # Gathering facts is disabled to optimize performance for monitoring tasks
+
+  tasks:
+    - name: Retrieve memory performance status from FortiGate CLI
+      # Using Fully Qualified Collection Name (FQCN) for network command execution
+      # This operation is inherently idempotent as it only retrieves state without modifying configuration
+      ansible.netcommon.cli_command:
+        command: "get system performance status | grep memory"
+      register: mem_output
+      # Idempotency: Explicitly marking as unchanged since 'get' commands are read-only
+      changed_when: false
+      # Error Handling: Ensure the task fails if the command results in an error or connection issue
+      failed_when: 
+        - mem_output.failed
+        - "'error' in mem_output.stdout | lower"
+
+    - name: Validate memory output integrity
+      # Observability: Verify that the command returned data and contains the expected metrics
+      ansible.builtin.assert:
+        that:
+          - mem_output.stdout | length > 0
+          - "'memory' in mem_output.stdout | lower"
+        fail_msg: "The memory status command returned invalid or empty data for {{ inventory_hostname }}."
+        success_msg: "Memory metrics successfully validated for {{ inventory_hostname }}."
+
+    - name: Display formatted memory utilization report
+      # Observability: Providing human-readable output for logging and audit trails
+      ansible.builtin.debug:
+        msg: |
+          ======================= MEMORY MONITORING =======================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ lookup('pipe', 'date +%Y-%m-%d\ %H:%M:%S') }}
+          Details:
+          {{ mem_output.stdout }}

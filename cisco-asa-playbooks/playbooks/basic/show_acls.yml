@@ -1,0 +1,50 @@
+---
+# Playbook: Get Cisco ASA Access Control Lists (ACLs)
+# Purpose: This playbook retrieves the current ACL configuration from Cisco ASA devices.
+#          It ensures data is captured reliably and provides formatted output for review.
+# Standards: Idempotency, Observability, Documentation, Error Handling, Best Practices.
+
+- name: Retrieve and Verify Cisco ASA Access Lists
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Default format is 'text'. Can be overridden via command line: -e "output_format=json"
+    output_format: "{{ output_format | default('text') }}"
+
+  tasks:
+    - name: Gather current ACL configuration from ASA
+      # Use Fully Qualified Collection Name (FQCN) for reliability.
+      # 'state: gathered' ensures we are only reading the configuration (Idempotency).
+      cisco.asa.asa_acl:
+        state: gathered
+      register: acl_output
+      # Error Handling: Stop execution if the module fails or returns no facts.
+      failed_when: 
+        - acl_output.failed | default(false)
+        - "'ansible_facts' not in acl_output"
+
+    - name: Verify ACL data integrity
+      # Observability: Assert that the expected data structure exists before processing.
+      ansible.builtin.assert:
+        that:
+          - acl_output.ansible_facts.asa_acls is defined
+        fail_msg: "The 'asa_acls' facts were not found for {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved ACL facts for {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Debug ACL data structure
+      # Observability: Show raw data when running with -v for troubleshooting.
+      ansible.builtin.debug:
+        var: acl_output.ansible_facts.asa_acls
+        verbosity: 1
+
+    - name: Save ACL configuration to JSON file
+      # Idempotency: Overwrites file only if content changes; explicit mode prevents permission drift.
+      # Documentation: JSON output is useful for programmatic analysis and long-term auditing.
+      ansible.builtin.copy:
+        content: "{{ acl_output.ansible_facts.asa_acls | to_nice_json }}"
+        dest: "/tmp/asa_acls_{{ inventory_hostname }}.json"
+        mode: '0644'
+      when: output_format == 'json'
+
+    - name: Display human

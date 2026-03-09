@@ -1,0 +1,35 @@
+---
+# Playbook: Get MAC Address Table
+# Purpose: Retrieves and validates the Layer 2 MAC address table from Cisco ASA/Firepower devices.
+# Standards: Implements idempotency (read-only), observability via assertions, and follows FQCN best practices.
+- name: Get MAC Table
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'show mac-address-table' on target device
+      # Using Fully Qualified Collection Name (FQCN) for reliability.
+      # This operation is inherently idempotent as it is a read-only 'show' command.
+      ansible.netcommon.cli_command:
+        command: show mac-address-table
+      register: mac_output
+      # Error Handling: Explicitly fail if the device returns common error strings despite a 0 return code.
+      failed_when: 
+        - mac_output.failed or "Invalid input" in mac_output.stdout or "ERROR" in mac_output.stdout
+
+    - name: Validate MAC address table data integrity
+      # Observability: Ensure the command returned actual data rather than an empty string.
+      ansible.builtin.assert:
+        that:
+          - mac_output.stdout is defined
+          - mac_output.stdout | length > 0
+        fail_msg: "The MAC address table retrieval failed or the table is currently empty."
+        success_msg: "MAC address table successfully captured and verified."
+
+    - name: Display formatted MAC table output
+      # Provides human-readable observability for the network operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= MAC ADDRESS TABLE =======================
+          {{ mac_output.stdout }}
+          =================================================================

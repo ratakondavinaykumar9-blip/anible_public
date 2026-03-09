@@ -1,0 +1,71 @@
+---
+# Playbook: Get ASA Failover Status and Statistics
+# Description: This playbook retrieves operational failover data for ASA devices.
+# It implements industry standards for Observability, FQCN, and Error Handling.
+
+- name: Get Failover Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get operational failover status
+      # FQCN: cisco.asa.asa_command is used to retrieve the base failover state.
+      # This is more appropriate for status gathering than the configuration module.
+      cisco.asa.asa_command:
+        commands:
+          - show failover
+      register: failover_output
+      # Error Handling: failed_when: false allows the playbook to report status 
+      # even if failover is disabled (which would otherwise return a non-zero exit code).
+      failed_when: false
+
+    - name: Verify failover command execution
+      # Observability: Ensure the device responded and the output is captured.
+      ansible.builtin.assert:
+        that:
+          - failover_output.stdout is defined
+        fail_msg: "Failed to retrieve 'show failover' output from {{ inventory_hostname }}"
+        quiet: true
+
+    - name: Get failover statistics
+      # FQCN: Using ansible.netcommon.cli_command for standardized CLI interaction.
+      ansible.netcommon.cli_command:
+        command: show failover statistics
+      register: failover_stats
+      # Condition: Only execute if failover is enabled to prevent unnecessary error logs.
+      when: 
+        - failover_output.stdout is defined
+        - "'failover off' not in failover_output.stdout[0]|lower"
+      ignore_errors: true
+
+    - name: Get failover history
+      ansible.netcommon.cli_command:
+        command: show failover history
+      register: failover_history
+      when: 
+        - failover_output.stdout is defined
+        - "'failover off' not in failover_output.stdout[0]|lower"
+      ignore_errors: true
+
+    - name: Finalize data collection check
+      # Observability: Confirm that the primary communication task was successful.
+      ansible.builtin.assert:
+        that:
+          - failover_output.rc | default(0) == 0
+        fail_msg: "Communication error occurred while querying {{ inventory_hostname }}"
+        quiet: true
+
+    - name: Summary
+      # Documentation: Provide a consolidated and formatted view of the collected data.
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          Failover Status: {{ inventory_hostname }}
+          ============================================================
+          {{ failover_output.stdout[0] if failover_output.stdout is defined else 'Data Unavailable' }}
+          
+          Statistics:
+          {{ failover_stats.stdout | default('N/A - Statistics not gathered (Check if failover is enabled)') }}
+          
+          History:
+          {{ failover_history.stdout | default('N/A - History not gathered (Check if failover is enabled)') }}

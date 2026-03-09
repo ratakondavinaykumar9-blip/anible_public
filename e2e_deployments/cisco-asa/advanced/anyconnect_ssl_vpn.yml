@@ -1,0 +1,52 @@
+---
+- name: Cisco ASA Advanced - AnyConnect SSL VPN with DAP
+  hosts: asa_firepower
+  gather_facts: no
+
+  tasks:
+    - name: Create IP Pool for VPN Users
+      cisco.asa.asa_config:
+        lines:
+          - ip local pool VPN_POOL 10.100.1.1-10.100.1.254 mask 255.255.255.0
+
+    - name: Configure Split Tunneling ACL
+      cisco.asa.asa_config:
+        lines:
+          - access-list SPLIT_TUNNEL standard permit 10.0.0.0 255.0.0.0
+          - access-list SPLIT_TUNNEL standard permit 172.16.0.0 255.240.0.0
+
+    - name: Configure WebVPN (AnyConnect)
+      cisco.asa.asa_config:
+        lines:
+          - webvpn
+          - enable outside
+          - anyconnect image disk0:/anyconnect-win-4.10.05111-core-vpn-webdeploy-k9.pkg 1
+          - anyconnect enable
+          - tunnel-group-list enable
+
+    - name: Configure Group Policy
+      cisco.asa.asa_config:
+        lines:
+          - group-policy DFLT_VPN_GRP internal
+          - group-policy DFLT_VPN_GRP attributes
+          - vpn-tunnel-protocol ssl-client
+          - split-tunnel-policy tunnelspecified
+          - split-tunnel-network-list value SPLIT_TUNNEL
+          - dns-server value 10.1.1.53 10.1.1.54
+          - default-domain value enterprise.local
+
+    - name: Configure Tunnel Group (Connection Profile)
+      cisco.asa.asa_config:
+        lines:
+          - tunnel-group REMOTE_ACCESS type remote-access
+          - tunnel-group REMOTE_ACCESS general-attributes
+          - address-pool VPN_POOL
+          - default-group-policy DFLT_VPN_GRP
+          - tunnel-group REMOTE_ACCESS webvpn-attributes
+          - group-alias EMPLOYEES enable
+
+    - name: Configure Dynamic Access Policy (DAP)
+      cisco.asa.asa_config:
+        lines:
+          - dynamic-access-policy-record DAP_RESTRICT_CONTRACTORS
+          - network-acl value DENY_SENSITIVE_SERVERS

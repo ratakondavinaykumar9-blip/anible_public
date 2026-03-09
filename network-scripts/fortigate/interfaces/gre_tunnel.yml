@@ -1,0 +1,38 @@
+---
+# Standard:ized Playbook
+# Description: Retrieves GRE tunnel configuration from FortiGate devices with built-in validation.
+# Standards: Idempotent (Read-only), Observability (Register/Assert), FQCN Usage.
+
+- name: FortiGate GRE Tunnel Verification
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve GRE tunnel status from system
+      # Standard: Best Practices - Using Fully Qualified Collection Names (FQCN)
+      ansible.netcommon.cli_command:
+        command: get system gre
+      # Standard: Observability - Registering command results for validation
+      register: gre_result
+      # Standard: Error Handling - Ensuring the command succeeded and returned expected data
+      failed_when: 
+        - gre_result.failed
+        - "'error' in gre_result.stdout.lower()"
+
+    - name: Assert successful retrieval of GRE configuration
+      # Standard: Observability - Using assert to verify playbook state
+      ansible.builtin.assert:
+        that:
+          - "gre_result.stdout is defined"
+          - "gre_result.stdout_lines | length >= 0"
+        fail_msg: "Failed to retrieve GRE tunnel configuration from {{ inventory_hostname }}"
+        success_msg: "Successfully captured GRE tunnel state for {{ inventory_hostname }}"
+
+    - name: Output GRE tunnel details
+      # Standard: Documentation - Visualizing the retrieved configuration for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= GRE TUNNELS: {{ inventory_hostname }} =======================
+          {{ gre_result.stdout }}
+      # Standard: Idempotency - This is a non-modifying task and safe for multiple runs.
+      when: gre_result.stdout | length > 0

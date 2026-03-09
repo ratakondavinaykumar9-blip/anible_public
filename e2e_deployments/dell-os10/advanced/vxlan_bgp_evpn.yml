@@ -1,0 +1,48 @@
+---
+- name: Dell EMC OS10 Advanced - VLT and BGP EVPN
+  hosts: dell_os10
+  gather_facts: no
+  collections:
+    - dellemc.os10
+
+  tasks:
+    - name: Configure VLT Domain (Advanced Parameters)
+      dellemc.os10.os10_vlt:
+        config:
+          domain: 100
+          discovery_interface: ethernet 1/1/48
+          peer_routing: true
+          mac_routing: true
+          backup_destination: 10.1.1.2
+          delay_restore: 150
+
+    - name: Configure Anycast Gateway
+      dellemc.os10.os10_config:
+        lines:
+          - ip virtual-router mac-address 00:01:01:01:01:01
+
+    - name: Enable VXLAN and Configure VTEP
+      dellemc.os10.os10_config:
+        lines:
+          - feature vn-fabric
+          - interface virtual-network 10000
+          - no shutdown
+          - nve
+          - source-interface loopback0
+
+    - name: Configure BGP EVPN
+      dellemc.os10.os10_bgp:
+        config:
+          asn: 65100
+          router_id: 10.1.1.1
+          address_family:
+            - type: l2vpn
+              safi: evpn
+          neighbors:
+            - ip: 10.1.1.2
+              remote_asn: 65100
+              address_family:
+                - type: l2vpn
+                  safi: evpn
+                  activate: true
+                  send_community: extended

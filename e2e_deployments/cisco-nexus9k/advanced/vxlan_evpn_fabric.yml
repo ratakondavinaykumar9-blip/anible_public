@@ -1,0 +1,55 @@
+---
+- name: Cisco Nexus 9k Advanced - VXLAN BGP EVPN Fabric
+  hosts: nexus9k
+  gather_facts: no
+
+  tasks:
+    - name: Enable VXLAN and EVPN Features
+      cisco.nxos.nxos_feature:
+        feature: "{{ item }}"
+        state: enabled
+      loop:
+        - nv overlay
+        - vn-segment-vlan-based
+        - bgp
+        - ospf
+        - pim
+
+    - name: Configure Anycast Gateway MAC
+      cisco.nxos.nxos_config:
+        lines:
+          - fabric forwarding anycast-mac 0000.1111.2222
+
+    - name: Configure EVPN RD and RT for VLAN
+      cisco.nxos.nxos_config:
+        lines:
+          - vlan 101
+          - vn-segment 10101
+          - evpn
+          - vni 10101 l2
+          - rd auto
+          - route-target import auto
+          - route-target export auto
+
+    - name: Configure NVE Interface (VTEP)
+      cisco.nxos.nxos_config:
+        lines:
+          - interface nve1
+          - no shutdown
+          - source-interface loopback1
+          - host-reachability protocol bgp
+          - member vni 10101
+          - suppress-arp
+          - mcast-group 239.1.1.1
+
+    - name: Configure BGP EVPN Address Family
+      cisco.nxos.nxos_config:
+        lines:
+          - router bgp 65000
+          - address-family l2vpn evpn
+          - retain route-target all
+          - neighbor 10.0.0.1
+          - remote-as 65000
+          - update-source loopback0
+          - address-family l2vpn evpn
+          - send-community extended

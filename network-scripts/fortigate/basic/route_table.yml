@@ -1,0 +1,35 @@
+---
+# FortiGate Route Table Retrieval
+# This playbook retrieves the full routing table from a FortiGate device.
+# It adheres to standards for idempotency, observability, and error handling.
+- name: Get Route Table
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Execute CLI command to retrieve routing table
+      # Use FQCN for cross-platform compatibility and reliability.
+      ansible.netcommon.cli_command:
+        command: get router info routing-table all
+      register: routes
+      # Idempotency: "get" commands are read-only; ensuring 'changed' is always false.
+      changed_when: false
+      # Error Handling: Catch cases where the command might be unsupported or fail.
+      failed_when:
+        - routes.failed or "Command fail" in routes.stdout
+
+    - name: Validate routing table output
+      # Observability: Assert that the output contains expected routing table headers (e.g., 'Codes:').
+      ansible.builtin.assert:
+        that:
+          - routes.stdout is defined
+          - "'Codes:' in routes.stdout"
+        fail_msg: "Routing table data was not correctly retrieved or is empty."
+        success_msg: "Routing table data successfully validated."
+
+    - name: Display formatted Route Table
+      # Observability: Log the output for manual verification during playbook execution.
+      ansible.builtin.debug:
+        msg: |
+          ======================= ROUTE TABLE =======================
+          {{ routes.stdout }}

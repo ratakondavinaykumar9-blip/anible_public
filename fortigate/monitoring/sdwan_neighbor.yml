@@ -1,0 +1,35 @@
+---
+# Sdwan Neighbor
+# Auto-improved: 2026-03-08
+# Improved by: Architect:# Purpose: Retrieve and verify FortiGate BGP neighbor status for SD-WAN health monitoring.
+---
+- name: FortiGate SD-WAN Neighbors Verification
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve BGP neighbor information from FortiGate
+      # Idempotency: This is a read-only operational command and is inherently safe to run multiple times.
+      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction.
+      ansible.netcommon.cli_command:
+        command: get router info bgp neighbors
+      register: bgp_neighbors_result
+      # Error Handling: Fail if the output is undefined or contains known FortiOS error strings.
+      failed_when:
+        - bgp_neighbors_result.stdout is not defined
+        - "'Command fail' in bgp_neighbors_result.stdout"
+
+    - name: Validate BGP neighbor output integrity
+      # Observability: Ensure the command returned actual data before proceeding.
+      ansible.builtin.assert:
+        that:
+          - bgp_neighbors_result.stdout | length > 0
+        fail_msg: "The command returned empty output. Verify BGP configuration or connectivity."
+        success_msg: "BGP neighbor data successfully captured."
+
+    - name: Display SD-WAN BGP Neighbors status
+      # Documentation: Formatted output for enhanced observability in automation logs.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SD-WAN BGP NEIGHBORS =======================
+          {{ bgp_neighbors_result.stdout }}

@@ -1,0 +1,38 @@
+---
+# Architect: ASA Inspection Statistics Analysis
+# Purpose: Retrieves and analyzes deep packet inspection (DPI) statistics from Cisco ASA.
+# This playbook is idempotent as it performs read-only "show" operations.
+
+- name: Get Inspection Stats
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get inspect stats from Cisco ASA
+      # Best Practice: Using Fully Qualified Collection Name (FQCN) for ASA-specific commands
+      cisco.asa.asa_command:
+        commands:
+          - show service-policy | include inspect
+      register: inspect_output
+      # Error Handling: Capture execution failures while identifying empty returns
+      failed_when: 
+        - inspect_output.failed is defined and inspect_output.failed
+
+    - name: Validate command execution and data integrity
+      # Observability: Assert that the stdout list contains expected data structures
+      ansible.builtin.assert:
+        that:
+          - "inspect_output.stdout is defined"
+          - "inspect_output.stdout | length > 0"
+        fail_msg: "Data retrieval failed for {{ inventory_hostname }}. Please check connectivity and credentials."
+
+    - name: Display Inspection Statistics
+      # Observability: Structured and formatted output for operational monitoring
+      ansible.builtin.debug:
+        msg: |
+          ======================= INSPECTION STATS =======================
+          DEVICE: {{ inventory_hostname }}
+          TIMESTAMP: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
+          ----------------------------------------------------------------
+          {{ inspect_output.stdout[0] if inspect_output.stdout[0] | trim != '' else 'No active service-policy inspections found.' }}
+          ================================================================

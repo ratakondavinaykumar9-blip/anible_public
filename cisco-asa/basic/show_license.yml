@@ -1,0 +1,40 @@
+---
+# Architect:Improved Playbook
+# Purpose: Securely retrieve and validate Cisco ASA license information.
+# Standards: Idempotency, Observability, FQCN, Error Handling, Documentation
+# Author: Architect: name: Get License Details
+  hosts: asa_firepower
+  gather_facts: false
+  # Ensuring the correct connection plugin is specified for network devices
+  connection: ansible.netcommon.network_cli
+
+  tasks:
+    - name: Retrieve license information via show version
+      # Using Fully Qualified Collection Name (FQCN) for platform specificity
+      cisco.asa.asa_command:
+        commands:
+          - show version
+      register: version_output
+      # Error Handling: Catch cases where the command fails or returns unexpected results
+      failed_when: 
+        - version_output.stdout is not defined
+        - "'Invalid input' in version_output.stdout[0]"
+      ignore_errors: false
+
+    - name: Verify license data integrity
+      # Observability: Validating that the output contains expected license patterns
+      ansible.builtin.assert:
+        that:
+          - version_output.stdout[0] is search('Licensed features')
+        fail_msg: "Failed to find 'Licensed features' section in show version for {{ inventory_hostname }}"
+        success_msg: "License data successfully validated for {{ inventory_hostname }}"
+
+    - name: Display license details
+      # Providing a clear, formatted summary for human observability
+      ansible.builtin.debug:
+        msg: |
+          ======================= LICENSE INFORMATION =======================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          ======================= RAW OUTPUT =======================
+          {{ version_output.stdout[0] }}

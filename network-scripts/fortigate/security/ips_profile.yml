@@ -1,0 +1,34 @@
+---
+# FortiGate IPS Profile Retrieval
+# This playbook retrieves and validates the IPS profile configuration from FortiGate devices.
+# Standards: Idempotency (Read-only), Observability (Assert), FQCN usage, and Error Handling.
+
+- name: Get FortiGate IPS Profile
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Execute command to get IPS profile configuration
+      # Best Practice: Use Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: get firewall ipsprofile
+      register: ips_profile
+      # Error Handling: Fail if the command explicitly returns an error or fails execution
+      failed_when: 
+        - ips_profile.failed or "Unknown action" in ips_profile.stdout
+
+    - name: Validate IPS profile output integrity
+      # Observability: Assert that the command returned data
+      ansible.builtin.assert:
+        that:
+          - ips_profile.stdout is defined
+          - ips_profile.stdout | length > 0
+        fail_msg: "IPS Profile retrieval failed or returned empty data."
+        success_msg: "IPS Profile data successfully retrieved."
+
+    - name: Display IPS Profile Information
+      # Observability: Clear output formatting for operators
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPS PROFILE =======================
+          {{ ips_profile.stdout }}

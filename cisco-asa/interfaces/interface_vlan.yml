@@ -1,0 +1,37 @@
+---
+# Playbook: Retrieve and Validate VLAN Interfaces
+# Description: This playbook securely collects VLAN interface status from Cisco ASA/Firepower devices.
+# Idempotency: This operation is read-only and inherently safe to execute multiple times.
+# Standards: FQCN, Observability (register/assert), Documentation, and Error Handling.
+
+- name: Get VLAN Interfaces
+  hosts: asa_firepower
+  gather_facts: false
+  # connection: ansible.netcommon.network_cli
+
+  tasks:
+    - name: "Execute 'show interface VLAN' on target device"
+      # Best Practices: Using Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: "show interface VLAN"
+      register: vlan_output
+      # Error Handling: Define failure conditions based on typical network device error responses
+      failed_when: 
+        - vlan_output.failed or "'Invalid input' in vlan_output.stdout"
+      ignore_errors: false
+
+    - name: "Verify VLAN data collection success"
+      # Observability: Ensure the command returned data before proceeding
+      ansible.builtin.assert:
+        that:
+          - "vlan_output.stdout is defined"
+          - "vlan_output.stdout | length > 0"
+        fail_msg: "Data collection failed: The VLAN interface output is empty or undefined."
+        success_msg: "Data collection successful: VLAN interface information retrieved."
+
+    - name: "Display retrieved VLAN interface information"
+      # Documentation: Outputting the results for operator visibility
+      ansible.builtin.debug:
+        msg: |
+          ======================= VLAN INTERFACES =======================
+          {{ vlan_output.stdout }}

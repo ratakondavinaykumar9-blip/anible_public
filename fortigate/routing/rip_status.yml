@@ -1,0 +1,34 @@
+---
+# FortiGate RIP Routing Information Protocol Status Analysis
+# This playbook retrieves and validates the RIP status on FortiGate firewalls.
+# Adheres to Standard:s: Idempotency, Observability, Documentation, Error Handling, FQCN.
+
+- name: Get RIP Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve RIP routing table information
+      # FQCN: ansible.netcommon.cli_command
+      # Idempotency: This is a non-modifying 'get' command, safe for repeated execution.
+      ansible.netcommon.cli_command:
+        command: get router info rip
+      register: rip_result
+      # Error Handling: Explicitly fail if the command execution returns a non-zero exit code
+      failed_when: rip_result.rc != 0
+
+    - name: Verify RIP status response integrity
+      # Observability: Validate that the command returned actual data and is defined
+      ansible.builtin.assert:
+        that:
+          - rip_result.stdout is defined
+          - rip_result.stdout | length > 0
+        fail_msg: "RIP status retrieval failed: No output received from the device."
+        success_msg: "RIP status successfully captured and verified."
+
+    - name: Display RIP Status
+      # Observability: Provide formatted output for human-readable operator visibility
+      ansible.builtin.debug:
+        msg: |
+          ======================= RIP STATUS =======================
+          {{ rip_result.stdout }}

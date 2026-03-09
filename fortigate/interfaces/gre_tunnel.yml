@@ -1,0 +1,37 @@
+---
+# FortiGate GRE Tunnel Status Audit
+# Auto-improved: 2026-03-08
+# Author: Analyst (OpenClaw) / Architect:#
+# This playbook retrieves the operational status of GRE tunnels on FortiGate devices.
+# It adheres to idempotency by performing a read-only 'get' operation and provides
+# observability via task registration and assertions.
+
+- name: Get GRE Tunnels Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve GRE tunnel configuration from system
+      # FQCN: Utilizing the network-common collection for CLI execution
+      ansible.netcommon.cli_command:
+        command: get system gre
+      register: gre_output
+      # Error Handling: Identify failure if the command is unrecognized or returns an error
+      failed_when:
+        - gre_output.rc != 0
+        - "'Unknown action' in gre_output.stdout or 'Command fail' in gre_output.stdout"
+
+    - name: Verify GRE status retrieval
+      # Observability: Assert that the command returned valid data for subsequent tasks
+      ansible.builtin.assert:
+        that:
+          - gre_output.stdout is defined
+        fail_msg: "Failed to retrieve GRE tunnel information. The command returned no output."
+        success_msg: "GRE tunnel information successfully captured."
+
+    - name: Display GRE Tunnel Operational State
+      # Documentation: Outputting results for human audit and log traceability
+      ansible.builtin.debug:
+        msg: |
+          ======================= GRE TUNNELS =======================
+          {{ gre_output.stdout }}

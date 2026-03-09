@@ -1,0 +1,54 @@
+---
+# FortiGate Service and Group Retrieval
+# This playbook retrieves firewall service objects and groups for auditing.
+# Standards: Idempotent (read-only), Observability (assert), FQCN, Error Handling.
+- name: FortiGate Service Inventory Retrieval
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve Firewall Service Objects
+      # Using FQCN. This task gathers current configuration status.
+      # Idempotency: Read-only commands do not modify state.
+      ansible.netcommon.cli_command:
+        command: "get firewall service custom"
+      register: svc_output
+      # Error Handling: Ensure we capture command failures.
+      failed_when: 
+        - "svc_output.rc != 0"
+        - "'error' in svc_output.stdout | lower"
+
+    - name: Verify Service Object Retrieval
+      # Observability: Ensure the output is valid and not empty.
+      ansible.builtin.assert:
+        that:
+          - "svc_output.stdout is defined"
+          - "svc_output.stdout | length > 0"
+        fail_msg: "Failed to retrieve valid service object data."
+        success_msg: "Service objects successfully retrieved."
+
+    - name: Retrieve Firewall Service Groups
+      # Using FQCN to fetch grouping configurations.
+      ansible.netcommon.cli_command:
+        command: "get firewall service group"
+      register: group_output
+      failed_when:
+        - "group_output.rc != 0"
+        - "'error' in group_output.stdout | lower"
+
+    - name: Verify Service Group Retrieval
+      # Observability: Confirm the presence of group data.
+      ansible.builtin.assert:
+        that:
+          - "group_output.stdout is defined"
+        fail_msg: "Service group retrieval returned no data or failed."
+
+    - name: Display Configuration Summary
+      # Documentation: Provide visibility into the retrieved objects.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SERVICE OBJECTS =======================
+          {{ svc_output.stdout }}
+          
+          ======================= SERVICE GROUPS =======================
+          {{ group_output.stdout }}

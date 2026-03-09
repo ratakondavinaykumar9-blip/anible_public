@@ -1,0 +1,36 @@
+---
+# Improved Show Expanded ACL Playbook
+# Standard: Idempotency - This is a read-only operation and does not modify device state.
+# Standard: Documentation - Expanded ACLs are required to see the resolved object-groups for policy analysis.
+
+- name: Get Expanded ACL
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Providing a default empty string allows the playbook to fetch all ACLs if a specific one isn't targeted.
+    acl_name: ""
+
+  tasks:
+    - name: Fetch expanded access-list data from device
+      # Use FQCN (Fully Qualified Collection Name) for the network common CLI module.
+      # The conditional command ensures we only target a specific ACL if provided, otherwise fetching all.
+      ansible.netcommon.cli_command:
+        command: "{{ 'show access-list ' + acl_name + ' expanded' if acl_name | length > 0 else 'show access-list expanded' }}"
+      register: expanded_acl
+      # Error Handling: Explicitly fail if the ASA returns an error message or if the transport fails.
+      failed_when:
+        - expanded_acl.failed or "Invalid input" in expanded_acl.stdout or "not found" in expanded_acl.stdout
+
+    - name: Validate that ACL output was successfully captured
+      # Observability: Assert that the command returned content to ensure downstream tasks have data to process.
+      ansible.builtin.assert:
+        that:
+          - expanded_acl.stdout is defined
+          - expanded_acl.stdout | length > 0
+        fail_msg: "Failed to retrieve any ACL data. Please check if the ACL exists or if the device is responsive."
+        quiet: true
+
+    - name: Display the expanded ACL details
+      # Providing visibility into the command result using stdout_lines for better readability.
+      ansible.builtin.debug:
+        var: expanded_acl.stdout_lines

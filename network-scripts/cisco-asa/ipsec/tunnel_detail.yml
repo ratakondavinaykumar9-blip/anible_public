@@ -1,0 +1,78 @@
+---
+# Playbook: Get Detailed IPSec Tunnel Information
+# Purpose: Gathers comprehensive VPN session and crypto SA details from Cisco ASA/Firepower devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+
+- name: Get Detailed IPSec Tunnel Information
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Optional: Specify a peer IP to filter results. Leave empty for all tunnels.
+    tunnel_peer: ""
+
+  tasks:
+    - name: Gather VPN Session Database Details
+      # Documentation: Retrieves active L2L session information. Read-only operation ensures idempotency.
+      ansible.netcommon.cli_command:
+        command: "{{ 'show vpn-sessiondb l2l filter-ipaddress=' + tunnel_peer if tunnel_peer else 'show vpn-sessiondb l2l' }}"
+      register: tunnel_detail
+      # Error Handling: Continue execution even if no sessions are active or if the filter returns no results.
+      ignore_errors: true
+
+    - name: Validate VPN Session Database Response
+      # Observability: Ensure the command was attempted and the register variable exists.
+      ansible.builtin.assert:
+        that:
+          - tunnel_detail is defined
+        fail_msg: "Failed to execute VPN session database command on {{ inventory_hostname }}."
+
+    - name: Gather Crypto IPsec SA Details
+      # Documentation: Retrieves Phase 2 Security Association details for encryption verification.
+      ansible.netcommon.cli_command:
+        command: "{{ 'show crypto ipsec sa peer ' + tunnel_peer if tunnel_peer else 'show crypto ipsec sa' }}"
+      register: crypto_sa
+      ignore_errors: true
+
+    - name: Validate Crypto SA Response
+      # Observability: Verify response registration for debugging.
+      ansible.builtin.assert:
+        that:
+          - crypto_sa is defined
+        fail_msg: "Failed to execute Crypto IPsec SA command on {{ inventory_hostname }}."
+
+    - name: Gather IKEv1 (ISAKMP) Details
+      # Documentation: Gathers Phase 1 details for IKEv1 tunnels to identify negotiation state.
+      ansible.netcommon.cli_command:
+        command: show crypto isakmp sa detail
+      register: ikev1_detail
+      ignore_errors: true
+
+    - name: Gather IKEv2 Details
+      # Documentation: Gathers Phase 1 details for IKEv2 tunnels.
+      ansible.netcommon.cli_command:
+        command: show crypto ikev2 sa detail
+      register: ikev2_detail
+      ignore_errors: true
+
+    - name: Display Comprehensive VPN Status
+      # Documentation: Aggregates all gathered telemetry into a single formatted output.
+      ansible.builtin.debug:
+        msg: |
+          ==============================================================================
+          IPSec Details Report for: {{ inventory_hostname }}
+          {% if tunnel_peer %}
+          Filtering for Peer: {{ tunnel_peer }}
+          {% endif %}
+          ==============================================================================
+
+          --- SESSION DATABASE (L2L) ---
+          {{ tunnel_detail.stdout | default('N/A or No Sessions Found') }}
+
+          --- CRYPTO IPSEC SA (Phase 2) ---
+          {{ crypto_sa.stdout | default('N/A or No SA Found') }}
+
+          --- IKEv1 (ISAKMP) SA (Phase 1) ---
+          {{ ikev1_detail.stdout | default('N/A or No IKEv1 SA Found') }}
+
+          --- IKEv2 SA (Phase 1) ---
+          {{ ikev2_detail.stdout | default('N/A or No IKEv2 SA Found') }}

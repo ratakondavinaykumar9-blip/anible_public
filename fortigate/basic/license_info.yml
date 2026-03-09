@@ -1,0 +1,33 @@
+---
+# FortiGate License Status Verification
+# Improved: 2026-03-08
+# Author: Architect:# This playbook retrieves and validates the FortiGate license status following best practices.
+- name: FortiGate License Info
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve license status from FortiGate
+      # This task executes a diagnose command which is read-only, ensuring idempotency.
+      # Fully Qualified Collection Name (FQCN) used for the network command.
+      ansible.netcommon.cli_command:
+        command: "diagnose system license status"
+      register: license_result
+      # Error Handling: Fail the task if the output is empty or indicates an invalid command.
+      failed_when: 
+        - license_result.stdout == "" or "Unknown" in license_result.stdout
+
+    - name: Validate license operational state
+      # Observability: Verify the license status is 'OK' or 'Valid' to ensure system integrity.
+      ansible.builtin.assert:
+        that:
+          - "'Status: OK' in license_result.stdout or 'Status: Valid' in license_result.stdout"
+        fail_msg: "CRITICAL: The FortiGate license is not in a valid status. Check 'diagnose system license status' manually."
+        success_msg: "SUCCESS: FortiGate license is verified and active."
+
+    - name: Display license details for observability
+      # Documentation: Provide the raw output for audit trails and troubleshooting.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE LICENSE STATUS =======================
+          {{ license_result.stdout }}

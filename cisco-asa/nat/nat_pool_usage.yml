@@ -1,0 +1,47 @@
+---
+# NAT Pool Usage Monitoring
+# Improved: 2026-03-08
+# Author: Architect:# Purpose: Monitor Cisco ASA/Firepower NAT pool status and statistics with robust validation.
+---
+- name: Get NAT Pool Usage
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve NAT pool configuration
+      # Use FQCN for network command execution. 
+      # This task is idempotent as it performs a read-only operation.
+      ansible.netcommon.cli_command:
+        command: show ip nat pool
+      register: pool_output
+      # Error Handling: Fail if the command is unrecognized or rejected by the device firmware.
+      failed_when:
+        - "'Invalid input' in pool_output.stdout"
+        - "'% Invalid' in pool_output.stdout"
+        - "'ERROR' in pool_output.stdout"
+
+    - name: Validate NAT pool data retrieval
+      # Observability: Assert that the output is not empty to ensure operational visibility.
+      ansible.builtin.assert:
+        that:
+          - "pool_output.stdout | length > 0"
+        fail_msg: "NAT pool configuration could not be retrieved or the pool is undefined."
+        quiet: true
+
+    - name: Retrieve NAT translation statistics
+      # Gathers real-time hits and usage for NAT rules specifically filtering for 'pool'.
+      ansible.netcommon.cli_command:
+        command: show nat | include pool
+      register: nat_stats_output
+      # Error Handling: ignore_errors is used as the absence of matching NAT rules is a valid state.
+      ignore_errors: true
+
+    - name: Display NAT Pool and Usage Statistics
+      # Observability: Formatted output for human-readable audit and troubleshooting logs.
+      ansible.builtin.debug:
+        msg: |
+          ======================= NAT POOL DEFINITIONS =======================
+          {{ pool_output.stdout }}
+
+          ======================= ACTIVE NAT STATISTICS ======================
+          {{ nat_stats_output.stdout if (nat_stats_output.stdout is defined and nat_stats_output.stdout != '') else 'No active pool-based NAT statistics found.' }}

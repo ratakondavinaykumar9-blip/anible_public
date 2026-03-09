@@ -1,0 +1,36 @@
+---
+# Playbook: Get ASA/Firepower Environmental Information
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling
+- name: Get Environmental Info
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Capture hardware environment status
+      # Use FQCN for network command execution. 
+      # This is inherently idempotent as it is a read-only operational command.
+      ansible.netcommon.cli_command:
+        command: show environment
+      register: env_result
+      # Error Handling: Fail explicitly if the command is not supported or returns an error string
+      failed_when:
+        - env_result.failed
+        - "'Invalid input' in env_result.stdout or 'Usage' in env_result.stdout"
+
+    - name: Validate environmental data capture
+      # Observability: Ensure the command returned data before proceeding
+      ansible.builtin.assert:
+        that:
+          - env_result.stdout is defined
+          - env_result.stdout | length > 0
+        fail_msg: "Environmental data capture failed or returned empty output on {{ inventory_hostname }}"
+        success_msg: "Successfully retrieved environmental data from {{ inventory_hostname }}"
+
+    - name: Display formatted environment report
+      # Provide clear visibility into the captured state for auditing purposes
+      ansible.builtin.debug:
+        msg: |
+          ======================= ENVIRONMENT =======================
+          Device: {{ inventory_hostname }}
+          Output:
+          {{ env_result.stdout }}

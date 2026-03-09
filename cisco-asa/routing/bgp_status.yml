@@ -1,0 +1,45 @@
+---
+# BGP Status Verification
+# Purpose: Retrieves BGP summary and validates neighbor state for operational health monitoring.
+# Standards: Idempotency (read-only), Observability (asserts), FQCN, and specific Error Handling.
+
+- name: Get BGP Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute BGP summary command on device
+      # Use FQCN (Fully Qualified Collection Name) for consistent cross-environment behavior.
+      ansible.netcommon.cli_command:
+        command: show bgp summary
+      register: bgp_summary
+      # Error Handling: Ensure the task fails if the command returns an error string typical for Cisco ASA.
+      failed_when: 
+        - bgp_summary.failed or "Invalid input" in bgp_summary.stdout
+      ignore_errors: false
+
+    - name: Assert BGP summary response validity
+      # Observability: Verify that the command returned content to prevent silent failures.
+      ansible.builtin.assert:
+        that:
+          - bgp_summary.stdout is defined
+          - bgp_summary.stdout | length > 0
+        fail_msg: "The 'show bgp summary' command returned no data."
+        success_msg: "BGP summary data retrieved successfully."
+
+    - name: Display BGP Status Report
+      # Observability: Provides human-readable output for audit during manual or automated runs.
+      ansible.builtin.debug:
+        msg: |
+          ======================= BGP STATUS =======================
+          {{ bgp_summary.stdout }}
+
+    - name: Check for BGP Neighbor connectivity issues
+      # Observability: Conditional check to flag neighbors not in an 'Established' state.
+      # This provides immediate feedback if BGP peering is down (Idle/Active/Connect).
+      ansible.builtin.debug:
+        msg: "WARNING: One or more BGP neighbors are not in the 'Established' state."
+      when: >
+        'Idle' in bgp_summary.stdout or 
+        'Active' in bgp_summary.stdout or 
+        'Connect' in bgp_summary.stdout

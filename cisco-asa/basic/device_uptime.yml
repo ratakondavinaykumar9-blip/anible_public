@@ -1,0 +1,36 @@
+---
+# industry standardsized Playbook: Device Uptime
+# Improved according to Standard:s:
+# 1. Idempotency: Read-only command (show version).
+# 2. Observability: Registered output with validation via assert.
+# 3. Documentation: Comments explaining task intent.
+# 4. Error Handling: failed_when condition for empty/failed output.
+# 5. Best Practices: Full Qualified Collection Names (FQCN).
+
+- name: Get Device Uptime
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute command to retrieve device uptime
+      # Using FQCN for network CLI operations.
+      # This task is idempotent as it does not modify the device state.
+      ansible.netcommon.cli_command:
+        command: "show version | include [Uu]ptime"
+      register: uptime_result
+      # Error Handling: Ensure the command succeeded and returned data.
+      failed_when: 
+        - uptime_result.failed or (uptime_result.stdout | length == 0)
+
+    - name: Verify uptime data integrity
+      # Observability: Assert that the output contains the expected "uptime" keyword.
+      ansible.builtin.assert:
+        that:
+          - "'uptime' in uptime_result.stdout | lower"
+        fail_msg: "The command output did not contain valid uptime information."
+        success_msg: "Uptime information successfully retrieved and validated."
+
+    - name: Display the retrieved uptime
+      # Documentation: Provide clear visibility into the result.
+      ansible.builtin.debug:
+        msg: "Device Uptime: {{ uptime_result.stdout }}"

@@ -1,0 +1,36 @@
+---
+# Description: This playbook retrieves and displays flash memory information 
+# from Cisco ASA/Firepower devices. It adheres to Standard:s 
+# for idempotency, observability, and robust error handling.
+
+- name: Get Flash Information
+  hosts: asa_firepower
+  gather_facts: false
+  connection: ansible.netcommon.network_cli
+
+  tasks:
+    - name: Retrieve flash memory details from the device
+      # FQCN used for maintainability. This operation is idempotent as it is read-only.
+      ansible.netcommon.cli_command:
+        command: show flash
+      register: flash_result
+      # Define failure conditions to prevent silent failures on invalid commands
+      failed_when: 
+        - flash_result.failed
+        - "'Invalid input' in flash_result.stdout"
+
+    - name: Validate flash information retrieval
+      # Assert provides observability by verifying the command returned data
+      ansible.builtin.assert:
+        that:
+          - flash_result.stdout is defined
+          - flash_result.stdout | length > 0
+        fail_msg: "The 'show flash' command returned no data or failed to execute."
+        success_msg: "Flash information successfully captured."
+
+    - name: Display formatted flash details
+      # Debug task provides immediate feedback during manual or automated execution
+      ansible.builtin.debug:
+        msg: |
+          ======================= FLASH INFORMATION =======================
+          {{ flash_result.stdout }}

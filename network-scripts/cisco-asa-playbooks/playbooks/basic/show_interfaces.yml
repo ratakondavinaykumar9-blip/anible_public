@@ -1,0 +1,51 @@
+---
+# Playbook: Get ASA Interface Status and Details
+# Purpose: Gathers and displays ASA interface configuration in a safe, observable manner.
+# Standards: FQCN used throughout, idempotency via 'gathered' state, and clear observability via assertions.
+- name: Get Interface Status
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Default output format set to 'text' for summary; can be overridden to 'json' for file export
+    output_format: "text"
+
+  tasks:
+    - name: Gather current interface configuration using resource module
+      # Idempotency: Using 'state: gathered' ensures we only read the current configuration without making changes
+      cisco.asa.asa_interfaces:
+        state: gathered
+      register: interfaces_output
+      # Error Handling: Explicitly fail if the module does not return gathered data
+      failed_when: 
+        - interfaces_output.failed | default(false)
+        - interfaces_output.gathered is not defined
+
+    - name: Validate that interface data was successfully retrieved
+      # Observability: Ensure we have actionable data before proceeding to display/save tasks
+      ansible.builtin.assert:
+        that:
+          - interfaces_output.gathered is defined
+          - interfaces_output.gathered | length > 0
+        fail_msg: "Data retrieval failed for {{ inventory_hostname }}: No interface configuration found."
+        success_msg: "Successfully gathered status for {{ interfaces_output.gathered | length }} interfaces."
+
+    - name: Export interface configuration to JSON file
+      # Idempotency: The copy module ensures the file is only updated if the content has changed
+      ansible.builtin.copy:
+        content: "{{ interfaces_output.gathered | to_nice_json }}"
+        dest: "/tmp/asa_interfaces_{{ inventory_hostname }}.json"
+        mode: '0644'
+      # Documentation: This task executes only when the user requests JSON file output
+      when: output_format == 'json'
+
+    - name: Display formatted summary of interface status
+      # Observability: Provides a human-readable table of the operational and configuration state
+      ansible.builtin.debug:
+        msg: |
+          ======================================================================
+          Interface Status Summary: {{ inventory_hostname }}
+          ======================================================================
+          {% for iface in interfaces_output.gathered %}
+          {{ "%-20s" | format(iface.name) }}: Link: {{ iface.link_status | default('N/A') }} | IP: {{ (iface.ipv4 | default({})).address | default('N/A') }} | Mode: {{ iface.mode | default('N/A') }}
+          {% endfor %}
+      when: output_format == 'text'

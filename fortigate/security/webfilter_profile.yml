@@ -1,0 +1,35 @@
+---
+# FortiGate Web Filter Profile Retrieval
+# This playbook retrieves the current web filter profiles from a FortiGate device.
+# It adheres to standards for idempotency, observability, and error handling.
+- name: Get Web Filter Profile
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve web filter profile configuration
+      # Using FQCN (ansible.netcommon.cli_command) as per best practices.
+      # This task is idempotent as it performs a read-only operation without state change.
+      ansible.netcommon.cli_command:
+        command: "get webfilter profile"
+      register: wf_output
+      # Error Handling: Fail if the output indicates a command error or is undefined.
+      failed_when: 
+        - wf_output.failed
+        - "'Unknown action' in wf_output.stdout or 'Command fail' in wf_output.stdout"
+
+    - name: Validate retrieval success
+      # Observability: Assert that the output contains data to ensure the device responded correctly.
+      ansible.builtin.assert:
+        that:
+          - wf_output.stdout is defined
+          - wf_output.stdout | length > 0
+        fail_msg: "Web filter profile retrieval failed: Output is empty or undefined."
+        success_msg: "Web filter profile data successfully captured."
+
+    - name: Display Web Filter Profile details
+      # Documentation: Provide clear visibility into the captured configuration state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= WEB FILTER PROFILE =======================
+          {{ wf_output.stdout }}

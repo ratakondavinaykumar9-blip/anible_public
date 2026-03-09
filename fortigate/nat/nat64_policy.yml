@@ -1,0 +1,36 @@
+---
+# FortiGate NAT64 Policies Retrieval
+# This playbook fetches the NAT64 policy configuration from FortiGate devices.
+# Improved for: Idempotency, Observability, Documentation, Error Handling, and FQCN usage.
+
+- name: Get NAT64 Policies
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve NAT64 configuration via CLI
+      # Use FQCN (ansible.netcommon.cli_command) for best practices.
+      # Idempotency: Set changed_when to false because this is a read-only operation.
+      ansible.netcommon.cli_command:
+        command: get firewall nat64
+      register: nat64_raw
+      changed_when: false
+      # Error Handling: Ensure the task fails if the command is not recognized or returns an error.
+      failed_when: 
+        - nat64_raw.stdout is not defined or nat64_raw.stdout == ""
+        - "'Command fail' in nat64_raw.stdout or 'Unknown action' in nat64_raw.stdout"
+
+    - name: Validate NAT64 output content
+      # Observability: Assert that the command returned data to verify successful execution.
+      ansible.builtin.assert:
+        that:
+          - nat64_raw.stdout | length > 0
+        fail_msg: "NAT64 configuration retrieval returned no data. Check device connectivity or feature status."
+        success_msg: "NAT64 configuration successfully captured."
+
+    - name: Display NAT64 Policies
+      # Documentation: Provide clear visibility into the retrieved state for audit logs.
+      ansible.builtin.debug:
+        msg: |
+          ======================= NAT64 STATUS =======================
+          {{ nat64_raw.stdout }}

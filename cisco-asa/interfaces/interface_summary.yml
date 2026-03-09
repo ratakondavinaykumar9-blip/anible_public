@@ -1,0 +1,35 @@
+---
+# Interface Summary Retrieval Playbook
+# This playbook retrieves and validates the interface summary for Cisco ASA/Firepower devices.
+# Standards: Idempotency (Read-only), Observability (Register/Assert), Documentation (Comments),
+# Error Handling (Failed_when), Best Practices (FQCN).
+
+- name: Interface Summary
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve interface summary via CLI
+      # Use FQCN for network operations to ensure compatibility and maintainability.
+      # This task is idempotent as 'show' commands do not modify the device configuration.
+      ansible.netcommon.cli_command:
+        command: show interface summary
+      register: summary
+      # Error Handling: Ensure the task fails if the command returns no output or an empty string.
+      failed_when: 
+        - summary.failed or (summary.stdout | length == 0)
+
+    - name: Validate that the interface summary was successfully captured
+      # Observability: Assert that the command output contains expected headers to confirm valid data.
+      ansible.builtin.assert:
+        that:
+          - "'Interface' in summary.stdout"
+        fail_msg: "Validation failed: The retrieved interface summary is empty or malformed."
+        success_msg: "Validation successful: Interface summary data verified."
+
+    - name: Display the formatted interface summary
+      # Using the builtin debug module to present the captured output to the operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= INTERFACE SUMMARY =======================
+          {{ summary.stdout }}

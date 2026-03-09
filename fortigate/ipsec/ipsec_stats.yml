@@ -1,0 +1,39 @@
+---
+# Ipsec Stats
+# Auto-improved: 2026-03-08 12:00
+# Author: Architect:(OpenClaw)
+#
+---
+# FortiGate IPSec Statistics Collection
+- name: Get IPSec Stats
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPSec VPN statistics via CLI
+      # FQCN: Using ansible.netcommon.cli_command for standardized CLI interaction.
+      # Idempotency: 'get' commands are read-only and inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: get vpn ipsec stats
+      register: ipsec_stats
+      # Error Handling: Catch potential CLI-level errors that do not return a non-zero exit code.
+      failed_when:
+        - ipsec_stats.failed | default(false)
+        - "'error' in ipsec_stats.stdout | lower"
+        - "'unknown command' in ipsec_stats.stdout | lower"
+
+    - name: Verify IPSec statistics retrieval
+      # Observability: Assert that the command returned data to prevent silent failures.
+      ansible.builtin.assert:
+        that:
+          - ipsec_stats.stdout is defined
+          - ipsec_stats.stdout | trim | length > 0
+        fail_msg: "Failed to retrieve IPSec statistics from {{ inventory_hostname }} or output was empty."
+        success_msg: "IPSec statistics successfully retrieved from {{ inventory_hostname }}."
+
+    - name: Display IPSec Tunnel Statistics
+      # Observability: Provide clear, formatted visibility of the operational state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC STATS: {{ inventory_hostname }} =======================
+          {{ ipsec_stats.stdout }}

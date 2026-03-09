@@ -1,0 +1,31 @@
+---
+# Environmentals - Improved for Standard:s
+# Purpose: Retrieves hardware health metrics (temperature, voltage, fans) from ASA/Firepower devices.
+- name: Get Environmental Info
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve environmental status via cli_command
+      # Why: Direct execution of operational command to gather current hardware state.
+      # Idempotency: show commands are read-only and inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: show environment
+      register: env_output
+      # Error Handling: Fail if no data is returned to prevent silent failures in automation pipelines.
+      failed_when: 
+        - env_output.stdout is not defined or env_output.stdout == ""
+
+    - name: Validate environmental output content
+      # Observability: Ensures the returned data is not just empty but contains expected information.
+      ansible.builtin.assert:
+        that:
+          - env_output.stdout | length > 0
+        fail_msg: "The 'show environment' command returned empty or invalid data."
+
+    - name: Display environmental summary
+      # Observability: Formatted output for operator visibility during playbook execution.
+      ansible.builtin.debug:
+        msg: |
+          ======================= ENVIRONMENT DATA =======================
+          {{ env_output.stdout }}

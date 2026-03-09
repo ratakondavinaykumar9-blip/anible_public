@@ -1,0 +1,80 @@
+---
+# VLAN Configuration for Cisco Nexus 9000
+# This playbook ensures that the specified VLANs are present and correctly named.
+# It adheres to idempotency, observability, and network automation best practices.
+
+- name: Configure VLANs on Nexus 9000
+  hosts: nexus9k
+  gather_facts: false
+  connection: network_cli
+
+  vars:
+    # Defining VLANs in a structured list to serve as the Source of Truth
+    vlans:
+      - { id: 10, name: 'WEB_SERVERS', state: 'present' }
+      - { id: 20, name: 'APP_SERVERS', state: 'present' }
+      - { id: 30, name: 'DB_SERVERS', state: 'present' }
+      - { id: 40, name: 'MGMT', state: 'present' }
+      - { id: 50, name: 'STORAGE', state: 'present' }
+      - { id: 60, name: 'DMZ', state: 'present' }
+      - { id: 99, name: 'QUARANTINE', state: 'present' }
+
+  tasks:
+    - name: "Audit: Retrieve current VLAN state"
+      # Gathering state first ensures we can compare intent vs. actual state
+      cisco.nxos.nxos_vlan:
+        state: gathered
+      register: current_vlans
+      changed_when: false
+
+    - name: "Execution: Configure VLANs"
+      # nxos_vlan is idempotent; it only sends commands if the device state differs from intent.
+      # async/poll used to handle large batches and prevent session timeouts.
+      cisco.nxos.nxos_vlan:
+        vlan_id: "{{ item.id }}"
+        name: "{{ item.name }}"
+        state: "{{ item.state | default('present') }}"
+      loop: "{{ vlans }}"
+      register: vlan_config
+      async: 60
+      poll: 5
+
+    - name: "Verification: Get operational VLAN status"
+      # Directly querying the device to verify the control plane reflects changes
+      cisco.nxos.nxos_command:
+        commands: show vlan brief
+      register: vlan_verify
+      changed_when: false
+
+    - name: "Observability: Validate VLAN presence and naming"
+      # Assertions provide clear failure messages if the configuration was not applied correctly.
+      ansible.builtin.assert:
+        that:
+          - "item.id | string in vlan_verify.stdout[0]"
+          - "item.name in vlan_verify.stdout[0]"
+        fail_msg: "Validation failed: VLAN {{ item.id }} ({{ item.name }}) is missing or misnamed!"
+        success_msg: "Validation passed: VLAN {{ item.id }} ({{ item.name }}) is present."
+      loop: "{{ vlans | selectattr('state', 'equalto', 'present') | list }}"
+      # ignore_errors allows us to check all VLANs before failing the play
+      ignore_errors: true
+      register: vlan_validation
+
+    - name: "Error Handling: Fail play if validation failed"
+      # Explicit failure task to stop execution if any assertions in the previous loop failed
+      ansible.builtin.fail:
+        msg: "One or more VLANs failed validation. Please check the logs above."
+      when: vlan_validation.results | selectattr('failed', 'sameas', true) | list | length > 0
+
+    - name: "Persistence: Save configuration to startup-config"
+      # Only trigger a write to NVRAM if actual changes were made to the running-config
+      cisco.nxos.nxos_config:
+        save: true
+      when: vlan_config.changed
+
+    - name: "Reporting: Display summary"
+      # Providing a final summary for operator feedback
+      ansible.builtin.debug:
+        msg:
+          - "VLAN Configuration Complete."
+          - "Total VLANs processed: {{ vlans | length }}"
+          - "Hardware configuration modified: {{ vlan_config.changed }}"

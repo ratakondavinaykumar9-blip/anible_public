@@ -1,0 +1,29 @@
+[dell_os10]
+dell-sw-01 ansible_host=192.168.1.30
+dell-sw-02 ansible_host=192.168.1.31
+
+[dell_os9]
+dell-s4048-01 ansible_host=192.168.1.32
+
+[dell_os6]
+dell-n-series-01 ansible_host=192.168.1.33
+
+[dell:children]
+dell_os10
+dell_os9
+dell_os6
+
+[dell:vars]
+ansible_connection=network_cli
+ansible_user=admin
+ansible_ssh_port=22
+ansible_timeout=60
+
+[dell_os10:vars]
+ansible_network_os=dellemc.os10.os10
+
+[dell_os9:vars]
+ansible_network_os=dellemc.os9.os9
+
+[dell_os6:vars]
+ansible_network_os=dellemc.os6.os6

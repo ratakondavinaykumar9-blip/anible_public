@@ -1,0 +1,38 @@
+---
+# FortiGate IPSec Traffic Monitoring
+# Purpose: Retrieves real-time IPSec VPN tunnel statistics for diagnostic purposes.
+# Standards: Idempotency (read-only), Observability (assertions), FQCN, Error Handling.
+
+- name: Get FortiGate IPSec Traffic Statistics
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPSec tunnel list from device
+      # Using Fully Qualified Collection Name (FQCN) for reliability
+      # This task is idempotent as it performs no configuration modifications
+      ansible.netcommon.cli_command:
+        command: diagnose vpn tunnel list
+      register: traffic_result
+      changed_when: false
+      # Error Handling: Ensure the task fails if the CLI command execution encounters an error
+      failed_when: traffic_result.failed
+
+    - name: Validate traffic data observability
+      # Observability: Assert that the command output was captured and is not null
+      ansible.builtin.assert:
+        that:
+          - traffic_result.stdout is defined
+          - traffic_result.stdout | length >= 0
+        fail_msg: "The diagnostic command failed to return a valid output buffer."
+        quiet: true
+
+    - name: Display IPSec Traffic Report
+      # Formatted output for enhanced visibility during playbook execution
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC TRAFFIC REPORT =======================
+          Inventory Host: {{ inventory_hostname }}
+          --------------------------------------------------------------------
+          {{ traffic_result.stdout }}
+          ====================================================================

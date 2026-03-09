@@ -1,0 +1,36 @@
+---
+# FortiGate DNS Filter Profile Audit
+# This playbook retrieves the DNS filter profile configuration for auditing and compliance.
+# It adheres to best practices for idempotency, observability, and error handling.
+- name: FortiGate DNS Filter Profile Audit
+  hosts: fortigate
+  gather_facts: false # Performance: FortiOS devices typically don't require standard setup facts
+
+  tasks:
+    - name: Retrieve DNS filter profile configuration
+      # Using FQCN for network-agnostic CLI operations
+      ansible.netcommon.cli_command:
+        command: get firewall dnsfilter-profile
+      register: dns_output
+      # Idempotency: Read-only commands must report 'changed: false' to prevent false positives in reports
+      changed_when: false
+      # Error Handling: Ensure the command was recognized and executed successfully by the shell
+      failed_when:
+        - dns_output.failed
+        - "'Unknown' in dns_output.stdout or 'error' in dns_output.stdout"
+
+    - name: Verify DNS filter data integrity
+      # Observability: Assert that the output contains expected configuration data
+      ansible.builtin.assert:
+        that:
+          - dns_output.stdout is defined
+          - dns_output.stdout | length > 0
+        fail_msg: "The DNS filter profile retrieval returned no data or failed silently."
+        success_msg: "Successfully validated DNS filter profile data retrieval."
+
+    - name: Display formatted DNS filter profile
+      # Observability: Provide clear, human-readable output for log analysis
+      ansible.builtin.debug:
+        msg: |
+          ======================= DNS FILTER PROFILE =======================
+          {{ dns_output.stdout }}

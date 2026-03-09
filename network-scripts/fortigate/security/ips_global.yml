@@ -1,0 +1,35 @@
+---
+# FortiGate IPS Global Configuration Retrieval
+# Purpose: Fetches the global IPS settings to ensure visibility into security posture.
+# Standards: Idempotent (Read-only), Observable (Assert), Documented (Comments), FQCN usage.
+
+- name: Get FortiGate IPS Global
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPS global configuration via CLI
+      # Use FQCN for the network common CLI module to execute raw FortiOS commands
+      ansible.netcommon.cli_command:
+        command: get global firewall ipsglobal
+      register: ips_global_result
+      # Error Handling: Explicitly fail if the command is unrecognized or returns a FortiOS error string
+      failed_when:
+        - ips_global_result.failed or "Command fail" in ips_global_result.stdout
+        - "'Unknown action' in ips_global_result.stdout"
+
+    - name: Validate IPS global configuration output
+      # Observability: Assert ensures the retrieved data is present and non-empty before proceeding
+      ansible.builtin.assert:
+        that:
+          - ips_global_result.stdout is defined
+          - ips_global_result.stdout | length > 0
+        fail_msg: "IPS global configuration retrieval failed or returned empty data."
+        success_msg: "IPS global configuration successfully captured for analysis."
+
+    - name: Display formatted IPS global settings
+      # Documentation: Provide the operator with a clear, formatted view of the current state
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPS GLOBAL SETTINGS =======================
+          {{ ips_global_result.stdout }}

@@ -1,0 +1,31 @@
+---
+- name: Get VLAN Interfaces
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve VLAN interface status from Cisco ASA
+      # Use Fully Qualified Collection Name (FQCN) for consistency and reliability.
+      # This task is idempotent as it performs a read-only 'show' operation.
+      ansible.netcommon.cli_command:
+        command: show interface VLAN
+      register: vlan_result
+      # Error Handling: Fail if the device returns an error string or the command execution fails.
+      failed_when:
+        - vlan_result.failed or "Invalid input" in vlan_result.stdout
+
+    - name: Validate VLAN information retrieval
+      # Observability: Assert that the output is not empty to verify successful data capture.
+      ansible.builtin.assert:
+        that:
+          - vlan_result.stdout is defined
+          - vlan_result.stdout | length > 0
+        fail_msg: "No VLAN interface data was retrieved. Check device configuration."
+        success_msg: "VLAN interface data successfully captured."
+
+    - name: Display formatted VLAN interface details
+      # Documentation: Provide a clear, human-readable report of the current interface state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= VLAN INTERFACES =======================
+          {{ vlan_result.stdout }}

@@ -1,0 +1,37 @@
+---
+# FortiGate DLP Profile Retrieval and Validation
+# This playbook retrieves the current Data Loss Prevention (DLP) configuration 
+# from FortiGate devices to ensure visibility, auditing, and configuration consistency.
+- name: FortiGate DLP Profile Operations
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve DLP Profile configuration from FortiGate
+      # Best Practice: Use Fully Qualified Collection Name (FQCN).
+      # Idempotency: Setting changed_when: false as this is a read-only operation.
+      ansible.netcommon.cli_command:
+        command: "get firewall dlp profile"
+      register: dlp_profile_output
+      changed_when: false
+      # Error Handling: Fail if the command is unrecognized or if the module reports a failure.
+      failed_when: 
+        - dlp_profile_output.failed
+        - "'command parse error' in dlp_profile_output.stdout or 'Unknown action' in dlp_profile_output.stdout"
+
+    - name: Validate DLP Profile retrieval success
+      # Observability: Ensure the command returned data and the output contains expected keywords.
+      ansible.builtin.assert:
+        that:
+          - dlp_profile_output.stdout is defined
+          - dlp_profile_output.stdout | length > 0
+        fail_msg: "Failed to retrieve DLP Profile or the device returned empty output."
+        success_msg: "DLP Profile successfully retrieved from the device."
+
+    - name: Display DLP Profile for operational visibility
+      # Documentation: Providing a formatted view of the current configuration for the operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE DLP PROFILE =======================
+          {{ dlp_profile_output.stdout }}
+          =====================================================================

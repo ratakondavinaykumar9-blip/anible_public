@@ -1,0 +1,67 @@
+---
+# Playbook: Show NAT Configuration and Statistics
+# Purpose: Retrieves and displays NAT rules, operational statistics, and active translation tables (xlate).
+# Standards: Idempotency (read-only), Observability (assertions), Documentation, and FQCN usage.
+- name: Get NAT Configuration and Operational State
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve structured NAT configuration
+      # FQCN: cisco.asa.asa_nat is used to fetch the NAT policy in a structured format.
+      # This task is idempotent as it only gathers state information.
+      cisco.asa.asa_nat:
+      register: nat_output
+      check_mode: false # Ensure data is gathered even when running in check mode
+
+    - name: Verify NAT configuration retrieval success
+      # Observability: Ensure the NAT configuration was successfully retrieved before proceeding.
+      ansible.builtin.assert:
+        that:
+          - nat_output is not failed
+        fail_msg: "Failed to retrieve structured NAT configuration from {{ inventory_hostname }}"
+        quiet: true
+
+    - name: Get operational NAT statistics
+      # FQCN: ansible.netcommon.cli_command retrieves raw 'show' command output for operational visibility.
+      ansible.netcommon.cli_command:
+        command: show nat
+      register: nat_stats
+      check_mode: false
+      # Error Handling: Check for platform-specific error strings in the command output.
+      failed_when:
+        - nat_stats.failed or "'Invalid input' in nat_stats.stdout"
+
+    - name: Get active translation table (xlate)
+      # Retrieves real-time session translation information from the device's memory.
+      ansible.netcommon.cli_command:
+        command: show xlate
+      register: xlate
+      check_mode: false
+      failed_when:
+        - xlate.failed or "'Invalid input' in xlate.stdout"
+
+    - name: Display Comprehensive NAT Report
+      # Formatted output combining configuration facts and operational command results.
+      ansible.builtin.debug:
+        msg: |
+          ==============================================================================
+          NAT REPORT FOR: {{ inventory_hostname }}
+          ==============================================================================
+          
+          STRUCTURED NAT RULES:
+          {% set rules = nat_output.ansible_facts.asa_nat if (nat_output.ansible_facts is defined and nat_output.ansible_facts.asa_nat is defined) else [] %}
+          {% if rules %}
+          {% for rule in rules %}
+          - ID: {{ rule.rule_id | default('N/A') }} | Source: {{ rule.source_address }} -> {{ rule.translated_source }}
+          {% endfor %}
+          {% else %}
+          No structured NAT rules configured or facts not returned.
+          {% endif %}
+          
+          NAT STATISTICS SUMMARY:
+          {{ nat_stats.stdout | default('No operational statistics available.') }}
+          
+          ACTIVE TRANSLATIONS (XLATE):
+          {{ xlate.stdout | default('No active translations found in xlate table.') }}
+          ==============================================================================

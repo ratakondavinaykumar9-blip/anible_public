@@ -1,0 +1,33 @@
+---
+# DHCP Lease Retrieval and Validation
+# This playbook connects to Cisco ASA/Firepower hosts to fetch current DHCP leases.
+# It ensures observability and follows best practices for network automation.
+
+- name: DHCP Leases
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve DHCP leases from device
+      # FQCN: Utilizing the netcommon collection for command execution
+      ansible.netcommon.cli_command:
+        command: show dhcpd lease
+      register: lease_output
+      # Error Handling: Fail if the command is unrecognized or the task fails
+      failed_when: 
+        - lease_output.failed or "Invalid input" in lease_output.stdout
+
+    - name: Verify DHCP lease data capture
+      # Observability: Assert that the command returned a valid response
+      ansible.builtin.assert:
+        that:
+          - lease_output.stdout is defined
+        fail_msg: "Failed to capture DHCP lease output from {{ inventory_hostname }}"
+        success_msg: "Successfully captured DHCP lease output from {{ inventory_hostname }}"
+
+    - name: Display DHCP Lease Information
+      # Documentation: Providing a clear view of the current state for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= DHCP LEASES: {{ inventory_hostname }} =======================
+          {{ lease_output.stdout if lease_output.stdout | length > 0 else 'No active leases found.' }}

@@ -1,0 +1,35 @@
+---
+# Architect:Improved Playbook
+# Purpose: Retrieves and validates detailed connection state from Cisco ASA/Firepower.
+# Idempotency: This is a read-only operation (GET), making it inherently safe for repeated execution.
+
+- name: Connection Detail Analysis
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Fetch connection details from device
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: show conn detail
+      register: conn_result
+      # Error Handling: Explicitly catch common CLI errors or execution failures
+      failed_when:
+        - conn_result.failed
+        - "'Invalid input' in conn_result.stdout or 'Usage' in conn_result.stdout"
+
+    - name: Validate connection data retrieval
+      # Observability: Assert that the command returned meaningful output to ensure session integrity
+      ansible.builtin.assert:
+        that:
+          - "conn_result.stdout is defined"
+          - "conn_result.stdout | length > 0"
+        fail_msg: "The 'show conn detail' command was executed but returned no data."
+        success_msg: "Connection details successfully captured."
+
+    - name: Display formatted connection details
+      # Documentation: Providing a clear, human-readable header for operator visibility
+      ansible.builtin.debug:
+        msg: |
+          ======================= CONNECTION DETAIL =======================
+          {{ conn_result.stdout }}

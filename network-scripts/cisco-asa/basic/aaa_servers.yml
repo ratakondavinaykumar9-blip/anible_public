@@ -1,0 +1,33 @@
+---
+- name: Audit and Display AAA Server Configuration
+  hosts: asa_firepower
+  gather_facts: false
+  # Optimization: gather_facts is disabled to reduce execution time for CLI-based audits.
+
+  tasks:
+    - name: Retrieve AAA server running configuration
+      # Best Practice: Use Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: show running-config aaa-server
+      # Observability: Register output to evaluate command execution state and content
+      register: aaa_config_output
+      # Error Handling: Explicitly fail if the command execution encountered an error
+      failed_when: 
+        - aaa_config_output.failed or "invalid input" in aaa_config_output.stdout.lower()
+
+    - name: Validate AAA configuration data integrity
+      # Observability: Assert that the configuration was successfully captured and is not empty
+      ansible.builtin.assert:
+        that:
+          - aaa_config_output.stdout is defined
+          - aaa_config_output.stdout | length > 0
+        fail_msg: "AAA configuration retrieval failed or returned no data. Check connectivity and permissions."
+        success_msg: "AAA configuration successfully retrieved."
+
+    - name: Display formatted AAA server configuration
+      # Documentation: Provide a clear visual output for operational visibility
+      ansible.builtin.debug:
+        msg: |
+          ======================= AAA SERVERS AUDIT =======================
+          {{ aaa_config_output.stdout }}
+      # Idempotency: This task is a read-only operation (getter) and is inherently safe for multiple runs.

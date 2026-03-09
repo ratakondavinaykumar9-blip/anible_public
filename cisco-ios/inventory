@@ -1,0 +1,24 @@
+[cisco_ios]
+cat-9300-01 ansible_host=192.168.1.40
+cat-9300-02 ansible_host=192.168.1.41
+cat-3850-01 ansible_host=192.168.1.42
+isr-4331-01 ansible_host=192.168.1.43
+
+[distribution]
+cat-9300-01
+cat-9300-02
+
+[access]
+cat-3850-01
+
+[routers]
+isr-4331-01
+
+[cisco_ios:vars]
+ansible_connection=network_cli
+ansible_network_os=cisco.ios.ios
+ansible_user=admin
+ansible_ssh_port=22
+ansible_timeout=60
+ansible_become=yes
+ansible_become_method=enable

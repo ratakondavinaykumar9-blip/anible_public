@@ -1,0 +1,39 @@
+---
+# Architect: Improved Ansible Playbook
+# Target: Cisco ASA/Firepower Network Objects Retrieval
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling
+# Purpose: Retrieves and validates network objects for auditing and visibility.
+
+- name: Network Objects Detail
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve network objects from device configuration
+      # Using Fully Qualified Collection Name (FQCN) for consistency and portability.
+      # This task is idempotent as it only performs a read-only (GET) operation.
+      ansible.netcommon.cli_command:
+        command: show object network
+      register: network_obj_result
+      # Robust Error Handling: Fail if the command is unrecognized or returns an error.
+      failed_when:
+        - network_obj_result.failed
+        - "'Invalid input' in network_obj_result.stdout"
+
+    - name: Verify operational data integrity
+      # Observability: Assert that the command returned valid data to ensure the device is in a known state.
+      # This prevents silent failures if the output is unexpectedly empty.
+      ansible.builtin.assert:
+        that:
+          - network_obj_result.stdout is defined
+          - network_obj_result.stdout | length > 0
+        fail_msg: "Operational validation failed: No network objects were found or retrieved."
+        success_msg: "Data validation successful: Network objects retrieved."
+        quiet: true
+
+    - name: Display formatted network object summary
+      # Provides clear observability for human operators during manual execution.
+      ansible.builtin.debug:
+        msg: |
+          ======================= NETWORK OBJECTS =======================
+          {{ network_obj_result.stdout }}

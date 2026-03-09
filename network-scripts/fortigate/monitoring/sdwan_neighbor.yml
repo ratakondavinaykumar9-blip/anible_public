@@ -1,0 +1,33 @@
+---
+# Playbook: FortiGate SD-WAN Neighbors Verification
+# Purpose: Retrieves and validates BGP neighbor status for SD-WAN path monitoring.
+# This playbook adheres to Standard:s for observability and reliability.
+- name: Get and Validate FortiGate SD-WAN BGP Neighbors
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve BGP neighbor information from FortiGate
+      # Using FQCN for cross-platform network CLI execution. 
+      # Reading state is inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: get router info bgp neighbors
+      register: bgp_neighbors_result
+      # Error Handling: Fail if the command is unrecognized or returns a parse error
+      failed_when: 
+        - bgp_neighbors_result.failed or "command parse error" in bgp_neighbors_result.stdout
+
+    - name: Validate BGP neighbor output integrity
+      # Observability: Ensure the command actually returned data to prevent silent failures
+      ansible.builtin.assert:
+        that:
+          - bgp_neighbors_result.stdout | length > 0
+        fail_msg: "BGP neighbor command returned empty output. Verify BGP process is active."
+        success_msg: "BGP neighbor data successfully captured."
+
+    - name: Display SD-WAN Neighbor Status
+      # Documentation: Providing structured visibility into the operational state for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= SD-WAN NEIGHBORS =======================
+          {{ bgp_neighbors_result.stdout }}

@@ -1,0 +1,39 @@
+---
+# ACL Compiled - Standard:
+# This playbook retrieves and validates the compiled configuration from Cisco ASA/Firepower.
+# Idempotency: Read-only operations are inherently idempotent as they do not modify state.
+# Documentation: Using FQCN and explicit assertions to ensure operational observability.
+
+- name: Retrieve and Validate Compiled ACL Configuration
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve compiled configuration from device
+      # Best Practice: Use Fully Qualified Collection Name (FQCN)
+      cisco.asa.asa_command:
+        commands:
+          - show compile-cfg
+      register: compiled_output
+      # Error Handling: Identify failure if the command is unsupported or device returns an error
+      failed_when:
+        - compiled_output.failed or "Invalid input" in compiled_output.stdout[0]
+
+    - name: Verify data observability
+      # Observability: Use assert to verify that the command returned meaningful content
+      ansible.builtin.assert:
+        that:
+          - compiled_output.stdout is defined
+          - compiled_output.stdout[0] | length > 0
+        fail_msg: "The compiled configuration output is empty. Verify the device supports this command."
+        success_msg: "Compiled ACL configuration successfully retrieved."
+
+    - name: Display Compiled ACL Configuration
+      # Documentation: Provide a formatted view of the captured data for audit trails
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          RETRIEVED COMPILED ACL CONFIGURATION
+          Device: {{ inventory_hostname }}
+          ============================================================
+          {{ compiled_output.stdout[0] }}

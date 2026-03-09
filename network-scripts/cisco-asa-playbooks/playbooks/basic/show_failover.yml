@@ -1,0 +1,47 @@
+---
+# Architect: Improved ASA Failover Status Playbook
+# This playbook retrieves, validates, and reports the failover status for Cisco ASA/Firepower devices.
+- name: Get Failover Status
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    output_format: text
+
+  tasks:
+    - name: Gather failover configuration facts
+      # Idempotency: 'state: gathered' is a read-only operation, ensuring safe repeated runs.
+      # Best Practice: Use Fully Qualified Collection Name (FQCN).
+      cisco.asa.asa_failover:
+        state: gathered
+      register: failover_output
+      # Error Handling: Ensure the task fails if the device is unreachable or the module fails.
+      failed_when: failover_output is failed
+
+    - name: Retrieve live operational state
+      # Observability: Supplementing configuration data with real-time operational status (Active/Standby).
+      cisco.asa.asa_command:
+        commands:
+          - show failover | include host
+      register: failover_state
+      # Error Handling: Ignore errors here to allow the playbook to continue if failover is disabled.
+      ignore_errors: true
+
+    - name: Validate failover data integrity
+      # Observability: Verify that we have a valid response structure before proceeding.
+      ansible.builtin.assert:
+        that:
+          - "failover_output.gathered is defined"
+        fail_msg: "Failed to retrieve failover facts from {{ inventory_hostname }}. Check credentials/connectivity."
+        quiet: true
+
+    - name: Output status as JSON
+      # Documentation: Persistent JSON output for auditing and downstream automation.
+      ansible.builtin.copy:
+        content: "{{ {'config': failover_output.gathered, 'runtime': failover_state.stdout | default([])} | to_nice_json }}"
+        dest: "/tmp/asa_failover_{{ inventory_hostname }}.json"
+        mode: '0644'
+      when: output_format | default('text') == 'json'
+
+    - name: Display human-readable summary
+      # Documentation: Clear, descriptive output for manual verification by an operator.
+      ansible.builtin.debug:

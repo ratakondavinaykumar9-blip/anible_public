@@ -1,0 +1,64 @@
+---
+# ==============================================================================
+# Playbook: Get IPSec Statistics
+# Description: Gathers and validates IPSec and ISAKMP statistics from Cisco ASA/FTD.
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
+# ==============================================================================
+- name: "Cisco ASA: Retrieve and Validate IPSec VPN Statistics"
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: "Gather IPsec Security Association Details"
+      # Best Practice: Using platform-specific FQCN for Cisco ASA
+      cisco.asa.asa_command:
+        commands:
+          - show crypto ipsec sa detail
+      register: sa_detail
+      # Error Handling: Ensure the command was understood by the device
+      failed_when: 
+        - sa_detail.failed or "Invalid input" in sa_detail.stdout[0]
+
+    - name: "Verify IPsec SA Data Retrieval"
+      # Observability: Assert that we received a valid response from the device
+      ansible.builtin.assert:
+        that:
+          - sa_detail.stdout[0] is defined
+          - "interface:" in sa_detail.stdout[0] or "Total SAs" in sa_detail.stdout[0]
+        fail_msg: "Unexpected output format for IPsec SA details."
+        quiet: true
+
+    - name: "Gather Global IPsec Statistics"
+      cisco.asa.asa_command:
+        commands:
+          - show crypto ipsec stats
+      register: ipsec_stats
+      failed_when: ipsec_stats.failed
+
+    - name: "Verify IPsec Stats Data Retrieval"
+      ansible.builtin.assert:
+        that:
+          - ipsec_stats.stdout[0] is defined
+        fail_msg: "Failed to retrieve global IPsec statistics."
+        quiet: true
+
+    - name: "Gather IKEv1 (ISAKMP) Statistics"
+      cisco.asa.asa_command:
+        commands:
+          - show crypto isakmp stats
+      register: ike_stats
+      # Error Handling: Treat missing feature as a failure unless expected
+      failed_when: 
+        - ike_stats.failed
+        - "'not enabled' not in ike_stats.stdout[0]"
+
+    - name: "Display Aggregated IPSec VPN Health Metrics"
+      # Observability: Structured output for easier human/log analysis
+      ansible.builtin.debug:
+        msg:
+          - "======================= IPSEC SA DETAIL ======================="
+          - "{{ sa_detail.stdout[0] }}"
+          - "======================= IPSEC GLOBAL STATS ======================="
+          - "{{ ipsec_stats.stdout[0] }}"
+          - "======================= IKEv1/ISAKMP STATS ======================="
+          - "{{ ike_stats.stdout[0] }}"

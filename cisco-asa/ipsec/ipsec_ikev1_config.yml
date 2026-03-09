@@ -1,0 +1,75 @@
+---
+# IKEv1 Tunnel Configuration Audit
+# Improved for Production Standards: Idempotency, Observability, and FQCN.
+# This playbook retrieves and validates IKEv1 VPN configuration from Cisco ASA devices.
+
+- name: Get and Verify IKEv1 Configuration
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IKEv1 ISAKMP Policy
+      # Why: Phase 1 policies define the cryptographic parameters for control plane negotiation.
+      # Idempotency: Safe read-only operation; does not modify device state.
+      ansible.netcommon.cli_command:
+        command: show running-config crypto isakmp policy
+      register: isakmp_output
+      # Error Handling: Catch cases where the device returns an error string instead of config data.
+      failed_when: 
+        - "'Invalid' in isakmp_output.stdout or 'error' in isakmp_output.stdout | lower"
+
+    - name: Validate ISAKMP Policy Retrieval
+      # Observability: Ensure that at least one policy is configured to prevent silent failures.
+      ansible.builtin.assert:
+        that:
+          - isakmp_output.stdout | length > 0
+        fail_msg: "IKEv1 ISAKMP policies are missing on {{ inventory_hostname }}."
+        success_msg: "IKEv1 ISAKMP policies retrieved successfully."
+
+    - name: Retrieve IKEv1 Transform-Sets
+      # Why: Phase 2 transform-sets define the encryption and hashing algorithms for data traffic.
+      ansible.netcommon.cli_command:
+        command: show crypto ipsec transform-set
+      register: transform_output
+      failed_when: 
+        - "'Invalid' in transform_output.stdout or 'error' in transform_output.stdout | lower"
+
+    - name: Validate Transform-Set Retrieval
+      # Observability: Check that data-plane security parameters are present.
+      ansible.builtin.assert:
+        that:
+          - transform_output.stdout | length > 0
+        fail_msg: "No IPsec transform-sets found on {{ inventory_hostname }}."
+
+    - name: Retrieve Crypto Map Configuration
+      # Why: Crypto maps bind the ISAKMP policies and transform-sets to specific peers and interfaces.
+      ansible.netcommon.cli_command:
+        command: show running-config crypto map
+      register: crypto_map_output
+      failed_when: 
+        - "'Invalid' in crypto_map_output.stdout or 'error' in crypto_map_output.stdout | lower"
+
+    - name: Validate Crypto Map Retrieval
+      # Observability: Confirm that the active tunnel bindings are configured.
+      ansible.builtin.assert:
+        that:
+          - crypto_map_output.stdout | length > 0
+        fail_msg: "No Crypto Map configuration found on {{ inventory_hostname }}."
+
+    - name: Display Consolidated IKEv1 Configuration
+      # Why: Summarizes all relevant configuration points in a single view for the operator.
+      # Best Practice: Using Fully Qualified Collection Name (FQCN).
+      ansible.builtin.debug:
+        msg: |
+          ======================= IKEv1 CONFIG SUMMARY: {{ inventory_hostname }} =======================
+          
+          [ ISAKMP POLICY (PHASE 1) ]
+          {{ isakmp_output.stdout }}
+          
+          [ TRANSFORM SETS (PHASE 2) ]
+          {{ transform_output.stdout }}
+          
+          [ CRYPTO MAPS (BINDINGS) ]
+          {{ crypto_map_output.stdout }}
+          
+          =============================================================================================

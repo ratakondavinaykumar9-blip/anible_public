@@ -1,0 +1,67 @@
+---
+- name: Fortinet Advanced - ZTNA, WAF, and Deep SSL Inspection
+  hosts: fortigate
+  gather_facts: no
+  collections:
+    - fortinet.fortios
+  vars:
+    vdom: "root"
+
+  tasks:
+    - name: Configure SSL/SSH Deep Inspection Profile
+      fortios_firewall_ssl_ssh_profile:
+        vdom: "{{ vdom }}"
+        firewall_ssl_ssh_profile:
+          name: "Enterprise_Deep_Inspection"
+          server_cert: "Fortinet_CA_SSL"
+          use_signature_block: "enable"
+          https:
+            status: "deep-inspection"
+            allow_invalid_server_cert: "block"
+
+    - name: Configure Web Application Firewall (WAF) Profile
+      fortios_waf_profile:
+        vdom: "{{ vdom }}"
+        waf_profile:
+          name: "Corporate_WAF"
+          signature:
+            custom_signature:
+              - name: "Block_SQL_Injection"
+                action: "block"
+                log: "enable"
+
+    - name: Configure ZTNA Server
+      fortios_firewall_access_proxy:
+        vdom: "{{ vdom }}"
+        firewall_access_proxy:
+          name: "ZTNA_Web_Portal"
+          vip: "VIP_ZTNA_Access"
+          client_cert: "enable"
+          api_gateway_64:
+            - id: 1
+              url_map: "/internal_app"
+              service: "http"
+
+    - name: Configure ZTNA Rule (Proxy Policy)
+      fortios_firewall_proxy_policy:
+        vdom: "{{ vdom }}"
+        firewall_proxy_policy:
+          policyid: 10
+          name: "ZTNA_App_Access"
+          proxy: "access-proxy"
+          access_proxy:
+            - name: "ZTNA_Web_Portal"
+          srcintf:
+            - name: "any"
+          dstintf:
+            - name: "port3"
+          srcaddr:
+            - name: "all"
+          dstaddr:
+            - name: "all"
+          action: "accept"
+          schedule: "always"
+          ztna_ems_tag:
+            - name: "Compliant_Device"
+          ssl_ssh_profile: "Enterprise_Deep_Inspection"
+          waf_profile: "Corporate_WAF"

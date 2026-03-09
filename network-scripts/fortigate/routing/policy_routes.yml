@@ -1,0 +1,33 @@
+---
+- name: FortiGate Policy Route Audit
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve policy routes via CLI
+      # Why: Using FQCN for consistency and cli_command to capture raw routing table state.
+      # Idempotency: Set changed_when to false as this is a read-only operation.
+      ansible.netcommon.cli_command:
+        command: get router policy
+      register: policy_routes
+      changed_when: false
+      check_mode: false
+
+    - name: Verify policy route data integrity
+      # Observability: Ensure the command was successful and returned expected content.
+      # Error Handling: Fail explicitly if the command is unrecognized or returns no data.
+      ansible.builtin.assert:
+        that:
+          - policy_routes.stdout is defined
+          - "policy_routes.stdout | length > 0"
+          - "'command parse error' not in policy_routes.stdout | lower"
+          - "'Unknown action' not in policy_routes.stdout"
+        fail_msg: "Failed to retrieve policy routes. The command may be unsupported or the device is unreachable."
+        success_msg: "Policy routes successfully retrieved and validated."
+
+    - name: Display policy route table
+      # Documentation: Formatted output for operator visibility and audit logging.
+      ansible.builtin.debug:
+        msg: |
+          ======================= POLICY ROUTES =======================
+          {{ policy_routes.stdout }}

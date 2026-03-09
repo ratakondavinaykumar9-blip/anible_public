@@ -1,0 +1,39 @@
+---
+# FortiGate VXLAN Status Retrieval
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Retrieve and Validate FortiGate VXLAN Configuration
+  hosts: fortigate
+  gather_facts: false
+  connection: ansible.netcommon.network_cli
+
+  tasks:
+    - name: Get VXLAN configuration from system
+      # Using FQCN for cross-platform network command execution
+      # This operation is inherently idempotent as it is a read-only 'get' command
+      ansible.netcommon.cli_command:
+        command: get system vxlan
+      register: vxlan_output
+      # Ensure task fails if the output contains common FortiOS error strings
+      failed_when: 
+        - vxlan_output.failed or "Unknown action" in vxlan_output.stdout
+        - "'Command fail' in vxlan_output.stdout"
+
+    - name: Validate VXLAN command execution success
+      # Observability: Asserting that we received a valid response structure
+      ansible.builtin.assert:
+        that:
+          - "vxlan_output.stdout is defined"
+          - "vxlan_output.rc == 0"
+        fail_msg: "Failed to retrieve VXLAN configuration or command returned non-zero exit code."
+        success_msg: "VXLAN configuration successfully retrieved."
+
+    - name: Display VXLAN configuration details
+      # Documentation: Providing clear visibility into the current state for audit trails
+      ansible.builtin.debug:
+        msg: |
+          ======================= VXLAN STATUS =======================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          
+          Output:
+          {{ vxlan_output.stdout }}

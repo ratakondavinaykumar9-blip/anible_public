@@ -1,0 +1,39 @@
+---
+# Architect:Improved Playbook: FortiGate SSL VPN Configuration Retrieval
+# Purpose: Safely retrieves and validates SSL VPN settings from FortiGate devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+
+- name: Get SSL VPN Config
+  hosts: fortigate
+  gather_facts: false # Performance: Gathering facts is not required for this task
+
+  tasks:
+    - name: Execute CLI command to retrieve SSL VPN settings
+      # Using Fully Qualified Collection Name (FQCN) for reliability
+      # Idempotency: This is a read-only operation and is safe to run multiple times
+      ansible.netcommon.cli_command:
+        command: get sslvpn settings
+      register: config_output
+      # Error Handling: Explicitly fail if the device returns common error strings
+      failed_when:
+        - config_output.failed or 
+          "command fail" in config_output.stdout | lower or 
+          "unknown command" in config_output.stdout | lower
+
+    - name: Validate configuration retrieval (Observability)
+      # Assert ensures the output is populated and contains relevant data
+      ansible.builtin.assert:
+        that:
+          - config_output.stdout is defined
+          - config_output.stdout | length > 0
+        fail_msg: "Observability Error: Failed to retrieve SSL VPN settings from {{ inventory_hostname }}."
+        success_msg: "Observability Success: SSL VPN settings successfully captured."
+
+    - name: Display SSL VPN Configuration (Observability)
+      ansible.builtin.debug:
+        msg: |
+          ======================= SSL VPN CONFIG =======================
+          Device: {{ inventory_hostname }}
+          Status: Successfully Retrieved
+          --------------------------------------------------------------
+          {{ config_output.stdout }}

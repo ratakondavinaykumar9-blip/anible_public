@@ -1,0 +1,46 @@
+I will now analyze the existing playbooks and project structure to ensure the improved Ansible playbook aligns with established local conventions and collection usage.
+
+I will now read the `policy_status.yml` and `log_viewer.yml` files to identify the specific observability and error handling patterns used in this project.
+
+```yaml
+---
+# Standard:ized Playbook
+# Objective: Retrieve and verify VPN tunnel status on FortiGate devices.
+# Idempotency: This playbook is read-only and safe for repeated execution as it does not modify device state.
+# Auto-improved: 2026-03-08
+# Author: Architect:(Gemini CLI)
+
+- name: FortiGate - VPN Status Summary
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: "FortiGate | Retrieve VPN status summary"
+      # Best Practice: Use FQCN (ansible.netcommon) to ensure the correct module is invoked.
+      # Idempotency: Read-only command; 'changed_when: false' ensures the task reports as 'ok' instead of 'changed'.
+      ansible.netcommon.cli_command:
+        command: "get vpn status"
+      register: vpn_status_result
+      changed_when: false
+      # Error Handling: Catch CLI-specific error strings to prevent silent failures.
+      failed_when: 
+        - "vpn_status_result.rc != 0"
+        - "'Command fail' in vpn_status_result.stdout or 'Unknown action' in vpn_status_result.stdout"
+
+    - name: "FortiGate | Validate VPN status output for observability"
+      # Observability: The 'assert' task ensures the playbook fails if the device returns an empty response,
+      # providing high-confidence monitoring and diagnostic clarity.
+      ansible.builtin.assert:
+        that:
+          - "vpn_status_result.stdout is defined"
+          - "vpn_status_result.stdout | length > 0"
+        fail_msg: "Data integrity check failed: No VPN status output returned from {{ inventory_hostname }}."
+        success_msg: "Data integrity check passed: VPN status captured successfully."
+
+    - name: "FortiGate | Display formatted VPN status"
+      # Observability: Formats the output for clear visibility in operational logs and management consoles.
+      ansible.builtin.debug:
+        msg: |
+          ======================= [{{ inventory_hostname }}] VPN SUMMARY =======================
+          {{ vpn_status_result.stdout }}
+```

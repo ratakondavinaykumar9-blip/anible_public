@@ -1,0 +1,35 @@
+---
+# FortiGate Fabric Status - High-Availability & Security Fabric Audit
+# This playbook retrieves and validates the Security Fabric status from FortiGate devices.
+# Standard: Idempotency is maintained as this is a read-only operational command.
+- name: Get Fabric Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve Security Fabric status via CLI
+      # Use FQCN (Fully Qualified Collection Name) for predictable execution
+      ansible.netcommon.cli_command:
+        command: get fabric status
+      # Register output for observability and automated validation
+      register: fabric_result
+      # Error Handling: Ensure we catch application-level errors not caught by the shell return code
+      failed_when: 
+        - fabric_result.failed or "Command fail" in fabric_result.stdout
+        - "'Unknown' in fabric_result.stdout and 'Status' not in fabric_result.stdout"
+
+    - name: Verify Fabric Status integrity
+      # Observability: Assert that the output contains expected operational headers
+      ansible.builtin.assert:
+        that:
+          - "fabric_result.stdout is defined"
+          - "'Status' in fabric_result.stdout"
+        fail_msg: "The fabric status output is malformed or the command failed to execute correctly."
+        success_msg: "Fabric status successfully retrieved and validated."
+
+    - name: Display Security Fabric Status
+      # Documentation: Providing clear, human-readable visibility into the device state
+      ansible.builtin.debug:
+        msg: |
+          ======================= SECURITY FABRIC STATUS =======================
+          {{ fabric_result.stdout }}

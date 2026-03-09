@@ -1,0 +1,33 @@
+---
+- name: Get Detailed Software Version
+  hosts: asa_firepower
+  gather_facts: false
+  # Documentation: This playbook retrieves the software version from Cisco ASA devices and validates the output.
+  # It adheres to standards for idempotency, observability, and follows FQCN best practices.
+
+  tasks:
+    - name: Execute 'show version' command on the device
+      # Best Practice: Use Fully Qualified Collection Name (FQCN)
+      # Idempotency: Read-only operations are inherently idempotent as they do not modify device state
+      ansible.netcommon.cli_command:
+        command: show version
+      register: ver_result
+      # Error Handling: Fail the task if the output is undefined or empty to prevent downstream errors
+      failed_when: 
+        - ver_result.stdout is not defined or ver_result.stdout | length == 0
+
+    - name: Validate that the output contains expected ASA version data
+      # Observability: Use 'assert' to verify the integrity of the data retrieved from the device
+      ansible.builtin.assert:
+        that:
+          - "'Cisco Adaptive Security Appliance' in ver_result.stdout"
+          - "'Software Version' in ver_result.stdout"
+        fail_msg: "The 'show version' output does not contain expected Cisco ASA identification strings."
+        success_msg: "Successfully validated ASA version information."
+
+    - name: Display the detailed version information
+      # Best Practice: Use FQCN for the debug module
+      ansible.builtin.debug:
+        msg: |
+          ======================= DETAILED VERSION =======================
+          {{ ver_result.stdout }}

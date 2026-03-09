@@ -1,0 +1,40 @@
+---
+# DHCP Pool Configuration Audit
+# Purpose: This playbook retrieves and validates the DHCP pool configuration on Cisco ASA/Firepower devices.
+# Standards: Implements FQCN, error handling, observability via assertions, and clear documentation.
+
+- name: DHCP Pool Config
+  hosts: asa_firepower
+  gather_facts: false # Performance optimization: Device facts are not required for specific CLI command execution
+
+  tasks:
+    - name: Retrieve current DHCP pool configuration
+      # FQCN: Using the specialized cisco.asa collection for robust, platform-specific command execution
+      cisco.asa.asa_command:
+        commands:
+          - show running-config dhcpd pool
+      register: dhcp_pools_output
+      # Error Handling: Fail explicitly if the ASA returns common error signatures or if the command fails
+      failed_when: >
+        dhcp_pools_output.failed or 
+        'Invalid input' in dhcp_pools_output.stdout[0] or 
+        'ERROR' in dhcp_pools_output.stdout[0]
+      # Idempotency: Read-only audit tasks are inherently idempotent as they do not modify device state
+
+    - name: Verify configuration retrieval success
+      # Observability: Use assertions to confirm the response structure is valid and the data was captured
+      ansible.builtin.assert:
+        that:
+          - dhcp_pools_output.stdout is defined
+          - dhcp_pools_output.stdout | length >= 1
+        fail_msg: "Failed to retrieve a valid DHCP configuration from {{ inventory_hostname }}."
+        success_msg: "DHCP pool configuration successfully retrieved for {{ inventory_hostname }}."
+
+    - name: Display DHCP Pool Configuration
+      # Documentation: Provide a clear, formatted view of the results for administrative review and logging
+      ansible.builtin.debug:
+        msg: |
+          ==========================================================
+          DHCP POOL CONFIGURATION FOR: {{ inventory_hostname }}
+          ==========================================================
+          {{ dhcp_pools_output.stdout[0] if dhcp_pools_output.stdout[0] | length > 0 else 'No DHCP pools currently configured.' }}

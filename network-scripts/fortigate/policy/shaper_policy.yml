@@ -1,0 +1,36 @@
+---
+# FortiGate Traffic Shaper Configuration Audit
+# This playbook retrieves the traffic shaper status to ensure visibility into bandwidth management.
+- name: Retrieve and Validate FortiGate Traffic Shaper
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve traffic shaper configuration from device
+      # Using FQCN (Fully Qualified Collection Name) for consistency and portability.
+      # This operation is idempotent as it is a read-only 'get' command that does not modify state.
+      ansible.netcommon.cli_command:
+        command: get firewall shaper
+      register: shaper_result
+      # Error Handling: Define failure conditions based on return code and output content.
+      failed_when:
+        - shaper_result.rc != 0
+        - "'unknown command' in shaper_result.stdout | lower"
+
+    - name: Validate retrieval of shaper data
+      # Observability: Use assert to verify that the registered variable contains the expected data.
+      ansible.builtin.assert:
+        that:
+          - shaper_result.stdout is defined
+          - shaper_result.stdout | length > 0
+        fail_msg: "The 'get firewall shaper' command returned no data or failed to execute."
+        success_msg: "Traffic shaper configuration successfully retrieved from {{ inventory_hostname }}."
+
+    - name: Display Traffic Shaper Report
+      # Documentation: Clear debug output for operational visibility and logging.
+      ansible.builtin.debug:
+        msg: |
+          ======================= TRAFFIC SHAPER =======================
+          Target Host: {{ inventory_hostname }}
+          Configuration:
+          {{ shaper_result.stdout }}

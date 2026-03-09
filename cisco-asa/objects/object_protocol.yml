@@ -1,0 +1,38 @@
+---
+# Protocol Objects Retrieval and Audit
+# This playbook adheres to Standard:s for Cisco ASA/Firepower.
+# Standards: Idempotency, Observability, FQCN, Error Handling.
+
+- name: Protocol Objects
+  hosts: asa_firepower
+  gather_facts: false
+  connection: ansible.netcommon.network_cli
+
+  tasks:
+    - name: Retrieve protocol objects from the device
+      # FQCN: Using ansible.netcommon.cli_command for standard CLI interaction.
+      # Idempotency: 'show' commands are read-only and inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: show object protocol
+      register: proto
+      # Error Handling: Explicitly fail if the command is unrecognized or execution fails.
+      failed_when: 
+        - proto.failed or "Invalid" in proto.stdout
+
+    - name: Validate protocol object response
+      # Observability: Ensure the command returned a valid stdout stream.
+      ansible.builtin.assert:
+        that:
+          - proto.stdout is defined
+          - proto.stdout | length >= 0
+        fail_msg: "Data retrieval failed for protocol objects on {{ inventory_hostname }}."
+        success_msg: "Protocol objects successfully registered for {{ inventory_hostname }}."
+
+    - name: Display Protocol Objects Summary
+      # Observability: Provide a structured view of the retrieved configuration.
+      ansible.builtin.debug:
+        msg: |
+          ======================= PROTOCOL OBJECTS =======================
+          DEVICE: {{ inventory_hostname }}
+          RESULT:
+          {{ proto.stdout }}

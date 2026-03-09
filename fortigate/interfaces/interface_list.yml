@@ -1,0 +1,37 @@
+---
+# FortiGate Interface List Retrieval
+# This playbook gathers and displays the current interface configuration.
+# Standards Applied: Idempotency (read-only), Observability, Documentation, Error Handling, and FQCN.
+
+- name: Get Interface List
+  hosts: fortigate
+  gather_facts: no
+
+  tasks:
+    - name: Execute command to retrieve system interfaces
+      # Using FQCN for cross-platform reliability and explicit module reference
+      ansible.netcommon.cli_command:
+        command: get system interface
+      register: intf_result
+      # Error Handling: Catch CLI-level failures that might not trigger a connection-level error
+      failed_when: 
+        - intf_result.failed | default(false)
+        - "'Command fail' in intf_result.stdout"
+        - "'Unknown action' in intf_result.stdout"
+
+    - name: Verify interface data retrieval
+      # Observability: Ensure the command returned meaningful data before proceeding
+      ansible.builtin.assert:
+        that:
+          - intf_result.stdout is defined
+          - intf_result.stdout | length > 0
+          - "'name' in intf_result.stdout or 'interface' in intf_result.stdout"
+        fail_msg: "The command did not return the expected interface list output."
+        success_msg: "Successfully validated interface data retrieval."
+
+    - name: Display retrieved interface status
+      # Documentation: Provide clear, formatted visibility into the current device state
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE INTERFACES =======================
+          {{ intf_result.stdout }}

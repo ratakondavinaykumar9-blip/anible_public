@@ -1,0 +1,33 @@
+---
+- name: FortiGate Address Groups Management
+  hosts: fortigate
+  gather_facts: false
+  # Strategy: This playbook is inherently idempotent as it only performs read operations.
+  # It ensures observability through explicit validation of the CLI output.
+
+  tasks:
+    - name: Retrieve address groups from FortiGate
+      # Best Practices: Using Fully Qualified Collection Name (FQCN) for the CLI module
+      ansible.netcommon.cli_command:
+        command: get firewall addrgrp
+      register: addrgrp_result
+      # Error Handling: Ensure the task fails if the command is not recognized or the device returns an error
+      failed_when: 
+        - addrgrp_result.failed | default(false)
+        - "'error' in addrgrp_result.stdout | lower" or "'unknown' in addrgrp_result.stdout | lower"
+
+    - name: Verify address group data retrieval
+      # Observability: Assert that the command returned non-empty output to confirm successful communication
+      ansible.builtin.assert:
+        that:
+          - addrgrp_result.stdout is defined
+          - addrgrp_result.stdout | length > 0
+        fail_msg: "Address group retrieval failed or returned an empty configuration."
+        success_msg: "Address groups successfully captured from the device."
+
+    - name: Display address group configuration
+      # Documentation: Providing a clear, formatted view of the retrieved data for auditing and troubleshooting
+      ansible.builtin.debug:
+        msg: |
+          ======================= ADDRESS GROUPS =======================
+          {{ addrgrp_result.stdout }}

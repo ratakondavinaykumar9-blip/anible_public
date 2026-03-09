@@ -1,0 +1,47 @@
+---
+- name: Cisco FTD Advanced - Deep Inspection, Malware and Intrusion Policies
+  hosts: fmc
+  gather_facts: no
+  collections:
+    - cisco.fmcansible
+  vars:
+    fmc_host: "{{ inventory_hostname }}"
+
+  tasks:
+    - name: Create SSL Decryption Policy
+      cisco.fmcansible.fmc_ssl_policies:
+        operation: upsert
+        data:
+          name: "Corporate_SSL_Decryption"
+          defaultAction:
+            action: "DECRYPT_RESIGN"
+
+    - name: Create File/Malware Policy
+      cisco.fmcansible.fmc_file_policies:
+        operation: upsert
+        data:
+          name: "Block_Malware_Executables"
+          defaultAction:
+            action: "BLOCK_MALWARE"
+
+    - name: Create Intrusion Policy
+      cisco.fmcansible.fmc_intrusion_policies:
+        operation: upsert
+        data:
+          name: "Security_Over_Connectivity_IPS"
+          basePolicy: "Security Over Connectivity"
+
+    - name: Apply Deep Inspection to Access Rule
+      cisco.fmcansible.fmc_access_rules:
+        operation: upsert
+        path_params:
+          containerUUID: "{{ acp_id }}" # Assuming dynamic lookup or variable
+        data:
+          name: "Inspect_Outbound_Web"
+          action: "ALLOW"
+          intrusionPolicy:
+            name: "Security_Over_Connectivity_IPS"
+          filePolicy:
+            name: "Block_Malware_Executables"
+          enableSyslog: true
+          logEnd: true

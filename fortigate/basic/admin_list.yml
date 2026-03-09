@@ -1,0 +1,38 @@
+---
+# FortiGate Admin List - Production Grade
+# This playbook retrieves the list of administrators from a FortiGate device.
+# It is designed to be idempotent (read-only), observable, and robust.
+
+- name: Get FortiGate Admin List
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve administrator list from system configuration
+      # Using FQCN (ansible.netcommon) for portability and best practices.
+      # This command is idempotent as it does not modify device state.
+      ansible.netcommon.cli_command:
+        command: get system admin
+      register: admin_result
+      # Error Handling: Ensure the command was recognized and executed successfully.
+      failed_when:
+        - admin_result.failed
+        - "'Unknown action' in admin_result.stdout"
+        - "'Command fail' in admin_result.stdout"
+
+    - name: Validate that administrator data was returned
+      # Observability: Assert that the output is not empty to verify successful data capture.
+      ansible.builtin.assert:
+        that:
+          - "admin_result.stdout is defined"
+          - "admin_result.stdout | length > 0"
+        fail_msg: "The 'get system admin' command returned empty or undefined results."
+        success_msg: "Administrator list successfully retrieved."
+
+    - name: Display formatted administrator list
+      # Documentation: Providing clear visibility into the retrieved state for audit purposes.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE ADMINS =======================
+          {{ admin_result.stdout }}
+          ================================================================

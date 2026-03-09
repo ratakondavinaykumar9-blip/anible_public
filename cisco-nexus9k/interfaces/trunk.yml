@@ -1,0 +1,94 @@
+---
+# Trunk Port Configuration
+# Auto-improved: 2026-03-08
+# Author: Analyst (OpenClaw) / Standardized by Architect:#
+# Improvements:
+# 1. Idempotency: Uses resource modules with 'merged' state and 'save_when: modified'.
+# 2. Observability: Added 'ansible.builtin.assert' tasks to verify operational state.
+# 3. Documentation: Detailed comments explaining the purpose of each task block.
+# 4. Error Handling: Implemented 'block/rescue' with 'ansible.builtin.fail' for clear error reporting.
+# 5. Best Practices: Used Fully Qualified Collection Names (FQCN) for all modules.
+
+- name: Configure Trunk Ports
+  hosts: nexus9k
+  gather_facts: false
+  connection: ansible.netcommon.network_cli
+
+  vars:
+    # Structured list of interfaces and their required trunking parameters
+    trunk_interfaces:
+      - { name: 'Ethernet1/1', description: 'Trunk to Spine-01', vlans: '10,20,30,40,50', native: 99 }
+      - { name: 'Ethernet1/2', description: 'Trunk to Spine-02', vlans: '10,20,30,40,50', native: 99 }
+      - { name: 'Ethernet1/3', description: 'Trunk to Core-Router', vlans: '10,20,30', native: 99 }
+    enabled: true
+    speed: 'auto'
+    duplex: 'auto'
+
+  tasks:
+    - name: Apply Trunk Interface Configuration
+      block:
+        - name: Configure interface L1 parameters and descriptions
+          cisco.nxos.nxos_interfaces:
+            config:
+              - name: "{{ item.name }}"
+                description: "{{ item.description }}"
+                enabled: "{{ enabled }}"
+                speed: "{{ speed }}"
+                duplex: "{{ duplex }}"
+            state: merged
+          loop: "{{ trunk_interfaces }}"
+          register: interface_config
+          # Idempotency: 'merged' state ensures we only apply changes if the current config differs.
+
+        - name: Configure Layer 2 trunking mode and VLANs
+          cisco.nxos.nxos_l2_interfaces:
+            config:
+              - name: "{{ item.name }}"
+                mode: trunk
+                trunk:
+                  allowed_vlans: "{{ item.vlans }}"
+                  native_vlan: "{{ item.native }}"
+            state: merged
+          loop: "{{ trunk_interfaces }}"
+          register: trunk_config
+          # FQCN: Using resource modules (plural) is the current best practice for Cisco NX-OS.
+
+      rescue:
+        - name: Report configuration failure
+          ansible.builtin.fail:
+            msg: "Critical failure during trunk configuration on {{ inventory_hostname }}. Rolling back or stopping."
+
+    - name: Verify Operational Status
+      cisco.nxos.nxos_command:
+        commands:
+          - "show interface {{ item.name }} switchport"
+      loop: "{{ trunk_interfaces }}"
+      register: verify_output
+      changed_when: false
+      # Observability: Capture the actual operational state from the device for post-change validation.
+
+    - name: Assert Operational Trunking State
+      ansible.builtin.assert:
+        that:
+          - "'Operational Mode: trunk' in verify_output.results[idx].stdout[0]"
+          - "'Trunking Native Mode VLAN: {{ item.native }}' in verify_output.results[idx].stdout[0]"
+        fail_msg: "Validation failed for {{ item.name }}. The interface is not in the expected trunking state."
+        success_msg: "Successfully verified operational trunking state for {{ item.name }}."
+      loop: "{{ trunk_interfaces }}"
+      loop_control:
+        index_var: idx
+      # Observability: Ensures the intent (code) matches the reality (device state).
+
+    - name: Persist Configuration
+      cisco.nxos.nxos_config:
+        save_when: modified
+      when: interface_config is changed or trunk_config is changed
+      # Idempotency: The configuration is only saved to startup-config if the running-config was modified.
+
+    - name: Display Deployment Summary
+      ansible.builtin.debug:
+        msg: |
+          Deployment Summary for {{ inventory_hostname }}:
+          - Total Interfaces Processed: {{ trunk_interfaces | length }}
+          - Configuration Status: {{ 'Changes applied' if (interface_config is changed or trunk_config is changed) else 'No changes needed' }}
+          - Verification: All interfaces passed operational state assertions.

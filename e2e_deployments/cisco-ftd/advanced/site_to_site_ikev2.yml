@@ -1,0 +1,56 @@
+---
+- name: Cisco FTD Advanced - Site-to-Site IKEv2 VPN
+  hosts: fmc
+  gather_facts: no
+  collections:
+    - cisco.fmcansible
+  vars:
+    fmc_host: "{{ inventory_hostname }}"
+
+  tasks:
+    - name: Create IKEv2 Policy
+      cisco.fmcansible.fmc_ikev2_policies:
+        operation: upsert
+        data:
+          name: "IKEv2_AES256_SHA256"
+          encryption: ["AES-256"]
+          hash: ["SHA256"]
+          diffieHellmanGroup: ["21"]
+          lifetimeInSeconds: 86400
+
+    - name: Create IPsec Proposal
+      cisco.fmcansible.fmc_ipsec_proposals:
+        operation: upsert
+        data:
+          name: "IPsec_AES256_SHA256"
+          encryption: "AES-256"
+          hash: "SHA-256"
+
+    - name: Configure Site-to-Site VPN Topology (Point-to-Point)
+      cisco.fmcansible.fmc_ftd_s2s_vpns:
+        operation: upsert
+        data:
+          name: "Azure_Cloud_VPN"
+          topologyType: "POINT_TO_POINT"
+          ikeV2Enabled: true
+          ikeV1Enabled: false
+          ikeV2Settings:
+            policy:
+              name: "IKEv2_AES256_SHA256"
+          ipsecSettings:
+            ikeV2IpsecProposal:
+              name: "IPsec_AES256_SHA256"
+          endpoints:
+            - device:
+                name: "E2E-FTD-01"
+              interface:
+                name: "outside"
+              protectedNetworks:
+                objects:
+                  - name: "NET_INTERNAL_10.0.0.0"
+            - extDevice:
+                name: "Azure_VNG"
+              protectedNetworks:
+                objects:
+                  - name: "NET_AZURE_VNET"
+              connectionType: "BIDIRECTIONAL"

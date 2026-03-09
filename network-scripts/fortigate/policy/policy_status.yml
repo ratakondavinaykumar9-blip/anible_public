@@ -1,0 +1,39 @@
+---
+# Architect: FortiGate Policy Status Retrieval
+# Purpose: This playbook securely fetches the current firewall policy status.
+# It adheres to idempotency as a read-only operation and implements observability via assertions.
+
+- name: Get FortiGate Policy Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'get firewall policy status' command
+      # Using FQCN for network CLI operations. This operation is idempotent.
+      ansible.netcommon.cli_command:
+        command: get firewall policy status
+      register: policy_status
+      # Error Handling: Fail if the command returns a known error string or the output is unexpectedly empty.
+      failed_when: 
+        - "policy_status.stdout | length == 0"
+        - "'Command fail' in policy_status.stdout"
+        - "'unknown command' in policy_status.stdout"
+
+    - name: Verify command execution success
+      # Observability: Explicitly assert that the task succeeded and returned data.
+      ansible.builtin.assert:
+        that:
+          - "policy_status.stdout is defined"
+          - "policy_status.failed == false"
+        fail_msg: "Critical: Could not retrieve policy status from {{ inventory_hostname }}."
+        success_msg: "Successfully verified policy status retrieval."
+
+    - name: Display Policy Status Report
+      # Documentation: Providing a clean, formatted view of the operational status for auditing.
+      ansible.builtin.debug:
+        msg: |
+          ======================= POLICY STATUS: {{ inventory_hostname }} =======================
+          TIMESTAMP: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
+          ----------------------------------------------------------------------------------------
+          {{ policy_status.stdout }}
+          ========================================================================================

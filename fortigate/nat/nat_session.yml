@@ -1,0 +1,40 @@
+---
+# Nat Session
+# Improved: 2026-03-08
+# Author: Architect:#
+# Description:
+# This playbook retrieves active NAT sessions from FortiGate devices.
+# Improvements include FQCN usage, observability via assertions, and robust error handling.
+
+- name: FortiGate NAT Session Retrieval
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve NAT session list
+      # Executes a diagnostic command to filter active sessions for NAT entries.
+      # This is a read-only operation and is idempotent by nature.
+      ansible.netcommon.cli_command:
+        command: "get system session list | grep NAT"
+      register: nat_sess_raw
+      # Distinguish between 'no matches found' (which grep might return as an error) 
+      # and actual command execution failures.
+      failed_when:
+        - nat_sess_raw.failed
+        - "'Command fail' in nat_sess_raw.stdout or 'Unknown action' in nat_sess_raw.stdout"
+
+    - name: Verify command execution success
+      # Ensures the output is captured correctly for observability.
+      ansible.builtin.assert:
+        that:
+          - "nat_sess_raw.stdout is defined"
+        fail_msg: "Failed to retrieve session information from the device."
+        success_msg: "Successfully captured session data."
+
+    - name: Display NAT Sessions
+      # Outputs the results in a formatted block for better operator visibility.
+      ansible.builtin.debug:
+        msg: |
+          ======================= NAT SESSIONS =======================
+          {{ nat_sess_raw.stdout if nat_sess_raw.stdout != '' else 'No active NAT sessions detected.' }}
+          ============================================================

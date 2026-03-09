@@ -1,0 +1,112 @@
+---
+- name: End-to-End Enterprise Deployment for Cisco FTD via FMC
+  hosts: fmc
+  gather_facts: no
+  collections:
+    - cisco.fmcansible
+  vars:
+    fmc_host: "{{ inventory_hostname }}"
+    fmc_username: "{{ ansible_user }}"
+    fmc_password: "{{ ansible_password }}"
+    # Assuming the device is already registered to FMC
+    target_device: "E2E-FTD-01"
+
+  tasks:
+    - name: Create Network Object (Internal Subnet)
+      cisco.fmcansible.fmc_network_objects:
+        operation: upsert
+        data:
+          name: "NET_INTERNAL_10.0.0.0"
+          value: "10.0.0.0/24"
+          type: "Network"
+      register: net_obj
+      tags: [objects]
+
+    - name: Create Host Object (DMZ Web Server)
+      cisco.fmcansible.fmc_network_objects:
+        operation: upsert
+        data:
+          name: "HOST_DMZ_WEBSERVER"
+          value: "172.16.0.100"
+          type: "Host"
+      tags: [objects]
+
+    - name: Create Port Object (HTTPS)
+      cisco.fmcansible.fmc_port_objects:
+        operation: upsert
+        data:
+          name: "PORT_HTTPS_443"
+          port: "443"
+          protocol: "TCP"
+      tags: [objects]
+
+    - name: Configure Auto NAT (Inside to Outside)
+      cisco.fmcansible.fmc_auto_nat_rules:
+        operation: upsert
+        data:
+          natType: "DYNAMIC"
+          originalNetwork: 
+            name: "NET_INTERNAL_10.0.0.0"
+          translatedNetwork:
+            name: "Interface"
+            type: "Network"
+          interfaceInTranslatedNetwork: true
+          sourceInterface: 
+            name: "inside"
+          destinationInterface: 
+            name: "outside"
+      tags: [nat]
+
+    - name: Ensure Access Control Policy Exists
+      cisco.fmcansible.fmc_access_policies:
+        operation: upsert
+        data:
+          name: "E2E_Perimeter_Policy"
+          defaultAction:
+            action: "BLOCK"
+      register: acp
+      tags: [policy]
+
+    - name: Add Outbound Permit Rule
+      cisco.fmcansible.fmc_access_rules:
+        operation: upsert
+        path_params:
+          containerUUID: "{{ acp.info.id }}"
+        data:
+          name: "Outbound_Internet"
+          action: "ALLOW"
+          sourceNetworks:
+            objects:
+              - name: "NET_INTERNAL_10.0.0.0"
+          enableSyslog: true
+          sendEventsToFMC: true
+          logEnd: true
+      tags: [policy]
+
+    - name: Add Inbound Web Server Rule
+      cisco.fmcansible.fmc_access_rules:
+        operation: upsert
+        path_params:
+          containerUUID: "{{ acp.info.id }}"
+        data:
+          name: "Inbound_Web"
+          action: "ALLOW"
+          destinationNetworks:
+            objects:
+              - name: "HOST_DMZ_WEBSERVER"
+          destinationPorts:
+            objects:
+              - name: "PORT_HTTPS_443"
+          enableSyslog: true
+          sendEventsToFMC: true
+          logEnd: true
+      tags: [policy]
+
+    - name: Deploy configuration to FTD device
+      cisco.fmcansible.fmc_deployments:
+        operation: deploy
+        data:
+          deviceList:
+            - "{{ target_device }}"
+          ignoreWarning: true
+      tags: [deploy]

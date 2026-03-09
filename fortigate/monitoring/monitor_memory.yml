@@ -1,0 +1,37 @@
+---
+# FortiGate Memory Monitoring
+# Improved for Idempotency, Observability, and Standards Compliance
+# Author: Architect:#
+- name: Monitor Memory Usage
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve memory statistics via CLI
+      # This task is idempotent as it performs a read-only operational command.
+      # Fully Qualified Collection Names (FQCN) used for best practices.
+      ansible.netcommon.cli_command:
+        command: "get system performance status | grep memory"
+      register: mem_raw
+      # Error Handling: Catch cases where the command fails or returns empty output.
+      failed_when: 
+        - mem_raw.rc != 0 or mem_raw.stdout == ""
+
+    - name: Verify memory data observability
+      # Observability: Asserting that the output contains valid data to prevent silent monitoring failures.
+      ansible.builtin.assert:
+        that:
+          - "mem_raw.stdout is defined"
+          - "mem_raw.stdout | length > 0"
+        fail_msg: "The device did not return recognizable memory statistics."
+        success_msg: "Memory data successfully captured and verified."
+
+    - name: Display Memory Monitoring Report
+      # Documentation: Providing clear visibility of the results for the operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= MEMORY MONITORING =======================
+          Device: {{ inventory_hostname }}
+          Status:
+          {{ mem_raw.stdout }}
+          =================================================================

@@ -1,0 +1,35 @@
+---
+# FortiGate SSL VPN Operational Status Monitoring
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Get FortiGate SSL VPN Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve SSL VPN status via CLI
+      # Why: Fetches the current operational state of SSL VPN services.
+      # This is a read-only 'get' command, making the task inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: get sslvpn status
+      register: ssl_status
+      # Error Handling: Fail if the command execution fails or returns a parser error
+      failed_when:
+        - ssl_status.failed or "Unknown action" in ssl_status.stdout or "Command fail" in ssl_status.stdout
+
+    - name: Validate SSL VPN status retrieval
+      # Why: Observability check to confirm the response contains expected SSL-VPN headers.
+      ansible.builtin.assert:
+        that:
+          - ssl_status.stdout is defined
+          - "'SSL-VPN' in ssl_status.stdout"
+        fail_msg: "The response from {{ inventory_hostname }} did not contain valid SSL VPN status data."
+        success_msg: "SSL VPN status successfully retrieved and verified for {{ inventory_hostname }}."
+
+    - name: Display SSL VPN Status Report
+      # Why: Provides a clear, formatted view of the operational status for the operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SSL VPN STATUS =======================
+          Host: {{ inventory_hostname }}
+          Status:
+          {{ ssl_status.stdout }}

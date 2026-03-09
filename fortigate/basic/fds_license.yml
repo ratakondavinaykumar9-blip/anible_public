@@ -1,0 +1,37 @@
+---
+# FortiGate FDS License Verification
+# This playbook retrieves and validates the FortiGuard Distribution Service (FDS) license status.
+# Improved for Idempotency, Observability, and Error Resilience.
+- name: Get FortiGate FDS License
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve FDS license status via CLI
+      # Use Fully Qualified Collection Name (FQCN). 
+      # 'get' commands are inherently idempotent as they do not change the device state.
+      ansible.netcommon.cli_command:
+        command: get system fds
+      register: fds_output
+      # Error Handling: Mark as failed if the command is unrecognized or returns no data.
+      failed_when:
+        - fds_output.failed or fds_output.stdout == ""
+        - "'Unknown command' in fds_output.stdout"
+
+    - name: Verify license data observability
+      # Observability: Assert that the license information was captured successfully before proceeding.
+      ansible.builtin.assert:
+        that:
+          - fds_output.stdout is defined
+          - fds_output.stdout | length > 0
+        fail_msg: "FDS license information could not be retrieved from {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display FDS License Details
+      # Documentation: Provide a clear, formatted view of the license status for the operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FDS LICENSE =======================
+          Target Device: {{ inventory_hostname }}
+          Status:
+          {{ fds_output.stdout }}

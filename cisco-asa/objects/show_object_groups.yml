@@ -1,0 +1,34 @@
+---
+- name: Get Object Groups from Cisco ASA/Firepower
+  hosts: asa_firepower
+  gather_facts: false
+  # This playbook retrieves the current object-group configuration from Cisco ASA/Firepower devices.
+  # It incorporates validation and error handling to ensure production-grade reliability.
+
+  tasks:
+    - name: Retrieve object-group configuration
+      # Standard: Best Practices - Using Fully Qualified Collection Name (FQCN)
+      # Standard: Idempotency - 'show' commands are read-only and inherently idempotent
+      cisco.asa.asa_command:
+        commands:
+          - show running-config object-group
+      register: groups_res
+      # Standard: Error Handling - Catch syntax errors or device-specific failures
+      failed_when: 
+        - groups_res.failed or "Invalid input" in groups_res.stdout[0]
+
+    - name: Verify configuration data retrieval
+      # Standard: Observability - Use assert to ensure the command returned non-empty data
+      ansible.builtin.assert:
+        that:
+          - groups_res.stdout is defined
+          - groups_res.stdout[0] | length > 0
+        fail_msg: "Failed to retrieve object-group configuration or no groups exist."
+        success_msg: "Object-group configuration successfully retrieved."
+
+    - name: Display Object Groups
+      # Standard: Observability - Output formatted data for auditing and logging
+      ansible.builtin.debug:
+        msg: |
+          ======================= OBJECT GROUPS =======================
+          {{ groups_res.stdout[0] }}

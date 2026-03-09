@@ -1,0 +1,34 @@
+---
+# FortiGate DNS Configuration Audit
+# Purpose: Retrieves and verifies the system DNS settings on FortiGate devices.
+# This playbook is idempotent as it only performs 'get' operations without modifying state.
+- name: Get DNS Settings
+  hosts: fortigate
+  gather_facts: false # Optimization: Disable standard fact gathering as we are using CLI commands.
+
+  tasks:
+    - name: Retrieve DNS configuration via CLI
+      # Use Fully Qualified Collection Name (FQCN) for best practices and portability.
+      ansible.netcommon.cli_command:
+        command: get system dns
+      register: dns_result
+      # Error Handling: Explicitly fail if the return code is non-zero or the output contains error strings.
+      failed_when: 
+        - dns_result.rc != 0
+        - "'Command fail' in dns_result.stdout" or "'Unknown command' in dns_result.stdout"
+
+    - name: Validate DNS configuration integrity
+      # Observability: Assert that the output contains expected configuration keywords.
+      # This ensures the device returned an actual configuration block rather than an empty response.
+      ansible.builtin.assert:
+        that:
+          - "'primary' in dns_result.stdout"
+        fail_msg: "DNS configuration is missing a primary server or the output is malformed."
+        success_msg: "DNS configuration successfully retrieved and validated."
+
+    - name: Display formatted DNS settings
+      # Observability: Provide a clean, human-readable view of the operational state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE DNS STATUS =======================
+          {{ dns_result.stdout }}

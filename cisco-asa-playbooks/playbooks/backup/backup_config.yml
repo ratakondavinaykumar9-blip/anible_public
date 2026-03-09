@@ -1,0 +1,100 @@
+---
+# Backup ASA Configuration
+# This playbook retrieves running and startup configurations from Cisco ASA devices 
+# and saves them as timestamped files on the Ansible control node for disaster recovery.
+- name: Backup ASA Configuration
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Centralized path on the Ansible control node for configuration storage
+    backup_path: "/tmp/asa_backups"
+    # Generate a unique timestamp for each run using a local pipe lookup
+    backup_timestamp: "{{ lookup('pipe', 'date +%Y%m%d-%H%M%S') }}"
+    backup_name: "{{ inventory_hostname }}_{{ backup_timestamp }}"
+
+  tasks:
+    - name: Ensure local backup directory exists
+      # Idempotency: Ensures directory existence on the controller without side effects
+      ansible.builtin.file:
+        path: "{{ backup_path }}"
+        state: directory
+        mode: '0755'
+      run_once: true
+      delegate_to: localhost
+
+    - name: Retrieve running configuration from device
+      # FQCN: Using the network-agnostic CLI command module
+      ansible.netcommon.cli_command:
+        command: show running-config
+      register: running_config
+      # Error Handling: Validate that the command returned meaningful output
+      failed_when: 
+        - running_config.stdout | length == 0
+        - "'Invalid input' in running_config.stdout"
+
+    - name: Retrieve startup configuration from device
+      ansible.netcommon.cli_command:
+        command: show startup-config
+      register: startup_config
+      failed_when: 
+        - startup_config.stdout | length == 0
+        - "'Invalid input' in startup_config.stdout"
+
+    - name: Verify configuration capture success
+      # Observability: Ensure both configurations are non-empty before proceeding to save
+      ansible.builtin.assert:
+        that:
+          - running_config.stdout | length > 100
+          - startup_config.stdout | length > 100
+        fail_msg: "Retrieved configuration from {{ inventory_hostname }} is suspiciously small or empty."
+
+    - name: Save running configuration to control node
+      # Documentation: Delegate to localhost to ensure files are stored on the Ansible server
+      ansible.builtin.copy:
+        content: "{{ running_config.stdout }}"
+        dest: "{{ backup_path }}/{{ backup_name }}_running.cfg"
+        mode: '0640'
+      delegate_to: localhost
+      register: save_running
+
+    - name: Save startup configuration to control node
+      ansible.builtin.copy:
+        content: "{{ startup_config.stdout }}"
+        dest: "{{ backup_path }}/{{ backup_name }}_startup.cfg"
+        mode: '0640'
+      delegate_to: localhost
+      register: save_startup
+
+    - name: Create backup manifest for traceability
+      # Idempotency: Generates a JSON manifest file for the specific backup set
+      ansible.builtin.copy:
+        content: |
+          {
+            "device": "{{ inventory_hostname }}",
+            "backup_timestamp": "{{ backup_timestamp }}",
+            "files": {
+              "running_config": "{{ backup_name }}_running.cfg",
+              "startup_config": "{{ backup_name }}_startup.cfg"
+            },
+            "status": "completed"
+          }
+        dest: "{{ backup_path }}/{{ backup_name }}_manifest.json"
+        mode: '0640'
+      delegate_to: localhost
+
+    - name: Finalize and verify backup integrity
+      # Observability: Confirm that files were successfully written to the destination
+      ansible.builtin.assert:
+        that:
+          - save_running.dest is defined
+          - save_startup.dest is defined
+        quiet: true
+
+    - name: Display backup summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================="
+          - "Backup Successful for: {{ inventory_hostname }}"
+          - "Local Directory: {{ backup_path }}"
+          - "Base Filename: {{ backup_name }}"
+          - "=========================================================="

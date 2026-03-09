@@ -1,0 +1,38 @@
+---
+# FortiGate Interface Statistics
+# This playbook retrieves low-level netlink interface statistics from a FortiGate device.
+# It adheres to Standard:s for idempotency, observability, and error handling.
+
+- name: Get FortiGate Interface Statistics
+  hosts: fortigate
+  gather_facts: false
+  # Ensuring the connection type is explicitly defined for network operations
+  connection: ansible.netcommon.network_cli
+
+  tasks:
+    - name: Retrieve netlink interface statistics via CLI
+      # FQCN: Using ansible.netcommon collection for broad compatibility
+      ansible.netcommon.cli_command:
+        command: diagnose netlink interface list
+      register: interface_stats_result
+      # Error Handling: Catch specific CLI error strings that might not trigger a non-zero exit code
+      failed_when: 
+        - interface_stats_result.stdout is not defined
+        - "'Command fail' in interface_stats_result.stdout or 'Unknown action' in interface_stats_result.stdout"
+
+    - name: Validate interface statistics data integrity
+      # Observability: Use assert to verify that the command returned the expected structural data (e.g., ifindex)
+      ansible.builtin.assert:
+        that:
+          - interface_stats_result.stdout | length > 0
+          - "'ifindex' in interface_stats_result.stdout"
+        fail_msg: "The retrieved interface statistics are empty or in an unrecognized format."
+        success_msg: "Interface statistics successfully validated."
+        quiet: true
+
+    - name: Display formatted interface statistics
+      # Documentation: Providing a clear, human-readable view of the registered variable
+      ansible.builtin.debug:
+        msg: |
+          ======================= INTERFACE STATS =======================
+          {{ interface_stats_result.stdout }}

@@ -1,0 +1,37 @@
+---
+# FortiGate Policy Hit Count Analysis
+# This playbook retrieves policy hitcount statistics for operational monitoring.
+# Adheres to standards for idempotency, observability, and FQCN usage.
+- name: Get FortiGate Policy Hit Count
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve hitcount statistics via CLI
+      # This task is read-only; changed_when: false ensures idempotency reporting.
+      ansible.netcommon.cli_command:
+        command: get firewall policy hitcount
+      register: policy_hits
+      changed_when: false
+      # Error Handling: Detect if the command is unsupported or failed on the device.
+      failed_when:
+        - policy_hits.stdout is not defined
+        - "'Unknown' in policy_hits.stdout"
+        - "'Command fail' in policy_hits.stdout"
+
+    - name: Validate hitcount data integrity
+      # Observability: Confirm the response contains data to ensure the capture was successful.
+      ansible.builtin.assert:
+        that:
+          - policy_hits.stdout | length > 0
+        fail_msg: "No hitcount data was returned from {{ inventory_hostname }}."
+        success_msg: "Hitcount data successfully validated for {{ inventory_hostname }}."
+
+    - name: Display Policy Hit Count
+      # Formatted output for improved operator visibility and auditing.
+      ansible.builtin.debug:
+        msg: |
+          ======================= POLICY HIT COUNT =======================
+          Device: {{ inventory_hostname }}
+          ---------------------------------------------------------------
+          {{ policy_hits.stdout }}

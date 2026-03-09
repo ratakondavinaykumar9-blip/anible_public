@@ -1,0 +1,33 @@
+---
+# Playbook: Get Cisco ASA/Firepower Failover Configuration
+# Purpose: Retrieves and validates High Availability (HA) failover configuration.
+# Standards: Idempotency is inherent as this is a read-only retrieval of device state.
+- name: Get Failover Configuration
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve failover configuration from device
+      # Why: Using platform-specific FQCN (cisco.asa) for robust integration with Cisco ASA/Firepower.
+      cisco.asa.asa_command:
+        commands:
+          - show running-config failover
+      register: failover_output
+      # Error Handling: Ensures the playbook identifies connection or command failures.
+      failed_when: failover_output.failed | default(false)
+
+    - name: Verify data observability
+      # Why: Asserting that the command returned a valid response structure to confirm successful execution.
+      ansible.builtin.assert:
+        that:
+          - "failover_output.stdout is defined"
+          - "failover_output.stdout | length > 0"
+        fail_msg: "Data retrieval failed for {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display Failover Configuration
+      # Why: Provides a formatted output for human readability and operational verification.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FAILOVER CONFIG =======================
+          {{ failover_output.stdout[0] if failover_output.stdout[0] != '' else 'Failover is not configured on this device.' }}

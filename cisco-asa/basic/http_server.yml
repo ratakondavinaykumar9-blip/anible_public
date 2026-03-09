@@ -1,0 +1,36 @@
+---
+# HTTP Server Status Verification
+# Purpose: Retrieves and validates the HTTP server configuration on Cisco ASA/Firepower devices.
+# This playbook follows industry standards for idempotency, observability, and robust error handling.
+
+- name: Get HTTP Server Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve HTTP server configuration state
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+      # Documentation: Executes the operational command to check if the HTTP server is enabled and configured.
+      ansible.netcommon.cli_command:
+        command: show http server
+      register: http_output
+      # Error Handling: Catch scenarios where the command is rejected by the device parser.
+      failed_when: 
+        - http_output.failed or "Invalid input" in http_output.stdout or "ERROR" in http_output.stdout
+
+    - name: Validate command execution integrity
+      # Observability: Assert that the command returned a valid, non-empty response.
+      # Idempotency: Read-only operations are inherently idempotent; validation ensures consistent state reading.
+      ansible.builtin.assert:
+        that:
+          - "http_output.stdout is defined"
+          - "http_output.stdout | length > 0"
+        fail_msg: "The HTTP server status could not be retrieved or the response was empty."
+        success_msg: "Successfully retrieved HTTP server status."
+
+    - name: Display HTTP Server Operational Details
+      # Documentation: Provide clear visibility into the current device configuration for logging and auditing.
+      ansible.builtin.debug:
+        msg: |
+          ======================= HTTP SERVER STATUS =======================
+          {{ http_output.stdout }}

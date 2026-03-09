@@ -1,0 +1,35 @@
+---
+# Playbook to retrieve and validate ASA/Firepower service objects.
+# Adheres to Standard:s for Idempotency, Observability, and Best Practices.
+- name: Get Service Objects
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve service objects from running-config
+      # This task is read-only, ensuring idempotency as it never modifies the device state.
+      # Using FQCN (ansible.netcommon.cli_command) for portability.
+      ansible.netcommon.cli_command:
+        command: show running-config object service
+      register: service_result
+      # Error Handling: Ensure the task fails on common Cisco CLI error indicators.
+      failed_when:
+        - service_result.failed or "Invalid input" in service_result.stdout
+      # Ensure data collection persists even when running in --check mode.
+      check_mode: false
+
+    - name: Verify successful data retrieval
+      # Observability: Assert that the command returned valid output to prevent silent failures.
+      ansible.builtin.assert:
+        that:
+          - service_result.stdout is defined
+          - service_result.stdout | length > 0
+        fail_msg: "No service objects were found or the command failed to return data."
+        success_msg: "Service objects successfully captured."
+
+    - name: Display service object configuration
+      # Documentation: Providing a clean visual separator for logs and observability.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SERVICE OBJECTS =======================
+          {{ service_result.stdout }}

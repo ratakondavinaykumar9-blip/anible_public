@@ -1,0 +1,38 @@
+---
+# FortiGate IPSec Phase 1 Status Retrieval
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Purpose: Retrieves and validates the IPSec Phase 1 configuration status from FortiGate devices.
+- name: FortiGate IPSec Phase 1 Monitoring
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve IPSec Phase 1 status via CLI
+      # Use FQCN for consistency and portability across Ansible versions.
+      # This task is read-only, making it inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: get vpn ipsec phase1
+      register: phase1_output
+      # Idempotency: Explicitly state that this task does not modify system state.
+      changed_when: false
+      # Error Handling: Capture specific FortiOS CLI error strings to ensure failures are trapped.
+      failed_when:
+        - phase1_output.failed
+        - "'Command fail' in phase1_output.stdout or 'Unknown action' in phase1_output.stdout"
+
+    - name: Validate IPSec Phase 1 response
+      # Observability: Verify that the device returned a non-empty configuration response.
+      ansible.builtin.assert:
+        that:
+          - phase1_output.stdout is defined
+          - phase1_output.stdout | length > 0
+        fail_msg: "IPSec Phase 1 data could not be retrieved or the output is empty."
+        success_msg: "IPSec Phase 1 data successfully captured and validated."
+
+    - name: Display IPSec Phase 1 Details
+      # Observability: Output the formatted result for administrative review.
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC PHASE 1 STATUS =======================
+          {{ phase1_output.stdout }}
+      when: phase1_output.stdout is defined

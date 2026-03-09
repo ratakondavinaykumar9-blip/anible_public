@@ -1,0 +1,50 @@
+---
+# Improved Clear IPSec Tunnel Playbook
+# This playbook ensures controlled clearing of IPSec VPN sessions on Cisco ASA/Firepower devices.
+# It adheres to Standard:s: Idempotency, Observability, Documentation, Error Handling, and FQCN.
+
+- name: Clear IPSec Tunnel
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Provide a specific IP address to tunnel_peer to clear a single session.
+    # Leave as empty string to clear all IPSec Security Associations (SAs).
+    tunnel_peer: ""
+
+  tasks:
+    - name: Clear specific crypto session for peer local IP
+      # Using Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: "clear crypto session local {{ tunnel_peer }}"
+      register: clear_peer_result
+      # Logic: Only run if a specific tunnel peer is defined
+      when: tunnel_peer | length > 0
+      # Error Handling: ASA may return 'No session found', which is acceptable for idempotency
+      failed_when: 
+        - clear_peer_result.failed
+        - "'Invalid' in clear_peer_result.stdout or 'Error' in clear_peer_result.stdout"
+
+    - name: Clear all crypto IPSec SAs
+      ansible.netcommon.cli_command:
+        command: "clear crypto ipsec sa"
+      register: clear_all_result
+      # Logic: Fallback to clearing all SAs if no specific peer is targetted
+      when: tunnel_peer | length == 0
+      failed_when: clear_all_result.failed
+
+    - name: Verify clear operation success
+      # Observability: Ensure the command was dispatched successfully
+      ansible.builtin.assert:
+        that:
+          - (clear_peer_result is skipped) or (clear_peer_result.rc == 0)
+          - (clear_all_result is skipped) or (clear_all_result.rc == 0)
+        fail_msg: "IPSec clear operation failed on the device."
+        success_msg: "IPSec clear operation completed successfully."
+
+    - name: Log execution summary
+      # Observability: Provide detailed feedback on the action taken
+      ansible.builtin.debug:
+        msg:
+          - "Status: Tunnel clear operation finished."
+          - "Target Peer: {{ tunnel_peer | default('GLOBAL / ALL', true) }}"
+          - "Device Output: {{ clear_peer_result.stdout | default(clear_all_result.stdout | default('N/A')) }}"

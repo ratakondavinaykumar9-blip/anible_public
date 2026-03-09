@@ -1,0 +1,36 @@
+---
+# NAT Translation Hits Analysis
+# Purpose: This playbook retrieves and verifies NAT translation hitcounts on Cisco ASA/Firepower devices.
+# Standards: Idempotency (read-only), Observability (asserts), Error Handling (fail logic).
+
+- name: Retrieve and Validate NAT Translation Hits
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Fetch NAT hitcounts from the device
+      # Documentation: Using FQCN to execute a show command for auditing NAT usage.
+      ansible.netcommon.cli_command:
+        command: show nat | include hitcount
+      register: nat_hits
+      # Idempotency: Read-only operations are marked with changed_when: false to ensure state stability.
+      changed_when: false
+      # Error Handling: Ensure the task fails if the command is unrecognized or the connection fails.
+      failed_when: 
+        - nat_hits.failed or "Invalid input" in nat_hits.stdout
+
+    - name: Validate retrieval of NAT hitcount data
+      # Observability: Using assertions to verify that the output contains expected information.
+      ansible.builtin.assert:
+        that:
+          - nat_hits.stdout is defined
+          - nat_hits.stdout | length > 0
+        fail_msg: "Data collection failed: No NAT hitcount information was returned from {{ inventory_hostname }}."
+        success_msg: "Data collection successful: NAT hitcounts retrieved from {{ inventory_hostname }}."
+
+    - name: Display NAT Translation Results
+      # Documentation: Formatted output for human readability during execution.
+      ansible.builtin.debug:
+        msg: |
+          ======================= NAT HITS: {{ inventory_hostname }} =======================
+          {{ nat_hits.stdout }}

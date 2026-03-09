@@ -1,0 +1,34 @@
+---
+# Service Objects Detail Playbook
+# Purpose: This playbook retrieves and validates service object configurations from 
+# Cisco ASA/Firepower devices to ensure configuration visibility and auditing.
+- name: Service Objects Detail
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve service object configuration via CLI
+      # Best Practice: Using Fully Qualified Collection Name (FQCN) for reliability.
+      # Idempotency: This is a read-only operation and is safe to execute repeatedly.
+      ansible.netcommon.cli_command:
+        command: show object service
+      register: svc
+      # Error Handling: Explicitly handle cases where the command might fail to execute.
+      failed_when: svc.failed | default(false)
+
+    - name: Validate service object retrieval
+      # Observability: Using assert to verify that the command returned actual data.
+      # This prevents the playbook from proceeding with empty or invalid state.
+      ansible.builtin.assert:
+        that:
+          - "svc.stdout is defined"
+          - "svc.stdout | length > 0"
+        fail_msg: "The command 'show object service' failed to return any data."
+        success_msg: "Service object configuration successfully captured."
+
+    - name: Display formatted service object details
+      # Observability: Providing human-readable output for immediate verification.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SERVICE OBJECTS =======================
+          {{ svc.stdout }}

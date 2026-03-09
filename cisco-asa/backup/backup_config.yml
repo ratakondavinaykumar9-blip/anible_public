@@ -1,0 +1,90 @@
+---
+# Backup ASA Configuration
+# Improved by Architect:# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Backup ASA Configuration
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    backup_path: "/tmp/asa_backups"
+
+  tasks:
+    - name: Gather local facts for consistent timestamping
+      # Documentation: Collects time facts from the control node to ensure a synchronized timestamp
+      ansible.builtin.setup:
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set backup filename variable
+      # Idempotency: Using a fixed timestamp from localhost facts for all hosts in this run
+      ansible.builtin.set_fact:
+        backup_name: "{{ inventory_hostname }}_{{ hostvars['localhost']['ansible_date_time']['iso8601_basic_short'] }}"
+
+    - name: Ensure backup directory exists
+      # Idempotency: ansible.builtin.file ensures the directory state without redundant changes
+      ansible.builtin.file:
+        path: "{{ backup_path }}"
+        state: directory
+        mode: '0755'
+      run_once: true
+      register: dir_creation
+
+    - name: Verify backup directory accessibility
+      # Observability: Explicitly assert that the directory is ready for storage
+      ansible.builtin.assert:
+        that:
+          - dir_creation is not failed
+        fail_msg: "The backup directory '{{ backup_path }}' is not accessible or could not be created."
+
+    - name: Retrieve running configuration
+      # FQCN: Using ansible.netcommon for standardized CLI command execution
+      ansible.netcommon.cli_command:
+        command: show running-config
+      register: running_output
+      # Error Handling: Check for empty output or common Cisco CLI error strings
+      failed_when: 
+        - running_output.stdout | length == 0
+        - "'Invalid' in running_output.stdout"
+        - "'Incomplete' in running_output.stdout"
+
+    - name: Retrieve startup configuration
+      ansible.netcommon.cli_command:
+        command: show startup-config
+      register: startup_output
+      failed_when: 
+        - startup_output.stdout | length == 0
+        - "'Invalid' in startup_output.stdout"
+
+    - name: Validate configuration capture integrity
+      # Observability: Ensure we have actual content before proceeding to the save step
+      ansible.builtin.assert:
+        that:
+          - running_output.stdout is defined
+          - startup_output.stdout is defined
+        fail_msg: "Configuration retrieval returned null or undefined content for {{ inventory_hostname }}."
+
+    - name: Persist running configuration to disk
+      # Documentation: Saves content locally; using copy ensures we only update if content changes
+      ansible.builtin.copy:
+        content: "{{ running_output.stdout }}"
+        dest: "{{ backup_path }}/{{ backup_name }}_running.cfg"
+        mode: '0644'
+      register: save_running
+
+    - name: Persist startup configuration to disk
+      ansible.builtin.copy:
+        content: "{{ startup_output.stdout }}"
+        dest: "{{ backup_path }}/{{ backup_name }}_startup.cfg"
+        mode: '0644'
+      register: save_startup
+
+    - name: Confirm successful file persistence
+      # Observability: Final check to confirm filesystem operations were successful
+      ansible.builtin.assert:
+        that:
+          - save_running is success
+          - save_startup is success
+        fail_msg: "Failed to write configuration files to {{ backup_path }} on the control node."
+
+    - name: Display backup summary
+      ansible.builtin.debug:
+        msg: "Backup verified and stored: {{ backup_path }}/{{ backup_name }}_*.cfg"

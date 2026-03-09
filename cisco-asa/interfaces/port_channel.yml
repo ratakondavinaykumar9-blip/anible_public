@@ -1,0 +1,38 @@
+---
+# Playbook: Audit Port Channel Configuration
+# Purpose: Retrieves and validates Port Channel status on Cisco ASA/Firepower devices.
+# Why: Ensures link aggregation is active and healthy, which is vital for network throughput and redundancy.
+
+- name: Audit Port Channel Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve Port Channel information from device
+      # Use FQCN: ansible.netcommon.cli_command is used for standard network CLI interaction.
+      # Idempotency: Show commands are read-only and safe to execute repeatedly without changing state.
+      ansible.netcommon.cli_command:
+        command: show port-channel
+      register: portch_result
+      # Error Handling: Explicitly fail if the command execution fails or the output contains an error.
+      failed_when: 
+        - portch_result.failed or 'Invalid input' in portch_result.stdout
+
+    - name: Validate Port Channel response data
+      # Observability: Use assert to verify that the captured output is populated.
+      # Why: Ensures the device is correctly reporting its Port Channel status before proceeding.
+      ansible.builtin.assert:
+        that:
+          - portch_result.stdout is defined
+          - portch_result.stdout | length > 0
+        fail_msg: "Failed to retrieve Port Channel data from {{ inventory_hostname }}."
+        success_msg: "Port Channel data successfully validated for {{ inventory_hostname }}."
+
+    - name: Display Port Channel operational status
+      # Documentation: Formats the output for clear operator visibility during the audit.
+      ansible.builtin.debug:
+        msg: |
+          ======================= PORT CHANNEL AUDIT =======================
+          Device: {{ inventory_hostname }}
+          Status:
+          {{ portch_result.stdout }}

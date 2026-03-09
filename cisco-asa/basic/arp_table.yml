@@ -1,0 +1,38 @@
+---
+# Arp Table Retrieval
+# Auto-improved: 2026-03-08
+# Author: Architect:#
+# This playbook retrieves the ARP table from Cisco ASA/Firepower devices.
+# It ensures idempotency by using read-only commands and implements
+# observability through assertion checks on the command output.
+---
+- name: Get ARP Table
+  hosts: asa_firepower
+  gather_facts: no
+
+  tasks:
+    - name: Execute 'show arp' on the target device
+      # Using FQCN for network command execution
+      # Read-only commands are inherently idempotent as they do not change device state
+      ansible.netcommon.cli_command:
+        command: show arp
+      register: arp_result
+      # Error Handling: Fail if the command fails or returns an 'Invalid' response
+      failed_when: 
+        - arp_result.failed or "Invalid" in arp_result.stdout
+
+    - name: Validate ARP table data integrity
+      # Observability: Ensure the output contains data before proceeding
+      ansible.builtin.assert:
+        that:
+          - arp_result.stdout is defined
+          - arp_result.stdout | length > 0
+        fail_msg: "ARP table data is missing or the command returned an empty result."
+        success_msg: "ARP table successfully captured."
+
+    - name: Display Formatted ARP Table
+      # Documentation: Provide a clean, readable view of the captured state
+      ansible.builtin.debug:
+        msg: |
+          ======================= ARP TABLE =======================
+          {{ arp_result.stdout }}

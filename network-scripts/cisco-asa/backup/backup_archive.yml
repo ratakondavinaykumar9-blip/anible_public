@@ -1,0 +1,76 @@
+---
+# Archive Backup for Cisco ASA/Firepower
+# This playbook ensures consistent configuration backups with built-in validation and error handling.
+- name: Archive Backup
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    backup_path: "/tmp/asa_backups"
+
+  tasks:
+    - name: Gather facts for timestamping
+      ansible.builtin.setup:
+        filter: "ansible_date_time"
+      delegate_to: localhost
+      # Why: Required for iso8601 timestamping since gather_facts is false for network hosts.
+
+    - name: Ensure backup directory exists on controller
+      ansible.builtin.file:
+        path: "{{ backup_path }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      # Why: Idempotency - ensures the destination path exists before write operations.
+
+    - name: Get running configuration from ASA
+      ansible.netcommon.cli_command:
+        command: show running-config
+      register: config
+      failed_when: "config.stdout == '' or 'Invalid' in config.stdout"
+      # Why: Error Handling - prevents saving empty or failed command outputs.
+
+    - name: Get version information from ASA
+      ansible.netcommon.cli_command:
+        command: show version
+      register: version
+      failed_when: "version.stdout == ''"
+      # Why: Ensures system audit data is captured successfully.
+
+    - name: Verify data retrieval success
+      ansible.builtin.assert:
+        that:
+          - config.stdout is defined
+          - version.stdout is defined
+        quiet: true
+        fail_msg: "Failed to retrieve configuration or version data from {{ inventory_hostname }}"
+      # Why: Observability - explicit check to ensure required variables are populated.
+
+    - name: Save timestamped archive to controller
+      ansible.builtin.copy:
+        content: |
+          # Backup Date: {{ ansible_date_time.iso8601 }}
+          # Device: {{ inventory_hostname }}
+          
+          # VERSION
+          {{ version.stdout }}
+          
+          # CONFIG
+          {{ config.stdout }}
+        dest: "{{ backup_path }}/archive_{{ inventory_hostname }}_{{ ansible_date_time.iso8601 | regex_replace(':', '-') }}.txt"
+        mode: '0644'
+      delegate_to: localhost
+      register: backup_result
+      # Why: Persists the combined data to a unique file on the Ansible controller.
+
+    - name: Validate file persistence
+      ansible.builtin.assert:
+        that:
+          - backup_result.dest is defined
+        quiet: true
+        fail_msg: "Backup file was not created successfully for {{ inventory_hostname }}"
+      # Why: Observability - confirms the physical write operation succeeded.
+
+    - name: Report backup completion
+      ansible.builtin.debug:
+        msg: "Archive backup for {{ inventory_hostname }} completed successfully at {{ backup_result.dest }}"
+      # Why: Documentation/UI - provides the user with the exact location of the new backup.

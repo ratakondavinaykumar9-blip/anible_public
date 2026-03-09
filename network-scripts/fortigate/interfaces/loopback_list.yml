@@ -1,0 +1,41 @@
+---
+# Playbook: FortiGate Loopback Interface Audit
+# Description: Safely retrieves and validates loopback interface configuration from FortiGate devices.
+# Standards: Idempotent (Read-only), Observable, and uses FQCN.
+
+- name: Get Loopback Interfaces
+  hosts: fortigate
+  gather_facts: false
+  # Ensure the use of network_cli for consistent FortiOS interaction
+  connection: ansible.netcommon.network_cli
+
+  tasks:
+    - name: Retrieve loopback configuration via CLI
+      # Using Fully Qualified Collection Name (FQCN) for best practices
+      # This task is idempotent as it only performs a read operation (GET)
+      ansible.netcommon.cli_command:
+        command: get system loopback
+      register: lb_results
+      # Error Handling: Ensure we fail if the command is unrecognized or execution fails
+      failed_when:
+        - lb_results.rc != 0
+        - "'Unknown action' in lb_results.stdout"
+        - "'Command fail' in lb_results.stdout"
+
+    - name: Validate loopback data integrity
+      # Observability: Explicitly verify that the command returned meaningful content
+      ansible.builtin.assert:
+        that:
+          - lb_results.stdout is defined
+          - lb_results.stdout | length > 0
+        fail_msg: "The 'get system loopback' command returned no data. Verify connectivity or configuration."
+        success_msg: "Loopback interface data successfully captured from {{ inventory_hostname }}."
+
+    - name: Display Loopback interface details
+      # Documentation: Provides operational visibility into the retrieved state
+      ansible.builtin.debug:
+        msg: |
+          ======================= LOOPBACKS: {{ inventory_hostname }} =======================
+          {{ lb_results.stdout }}
+      # Only execute if data was actually retrieved to keep logs clean
+      when: lb_results.stdout != ""

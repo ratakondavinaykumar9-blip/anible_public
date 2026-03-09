@@ -1,0 +1,33 @@
+---
+# ACL ACE Count - Audit and Observability Playbook
+# This playbook retrieves Access Control Entry (ACE) counts for all ACLs on Cisco ASA/Firepower devices.
+# Adheres to Standard:s: Idempotency, Observability, Documentation, and FQCN.
+- name: Get ACL ACE Count
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve ACL information from the security appliance
+      # Best Practices: Using Fully Qualified Collection Name (FQCN)
+      # Idempotency: This is a read-only operation and is inherently safe to run multiple times.
+      ansible.netcommon.cli_command:
+        command: "show access-list | include (access-list|entries)"
+      register: acl_info
+      # Error Handling: Ensure the task stops if the command execution fails
+      failed_when: acl_info.failed == true
+
+    - name: Validate ACL data retrieval
+      # Observability: Verify that the command returned meaningful data
+      ansible.builtin.assert:
+        that:
+          - "acl_info.stdout is defined"
+          - "acl_info.stdout | length > 0"
+        fail_msg: "The command returned no data. Ensure ACLs are configured and the 'include' pattern matches."
+        success_msg: "ACL information successfully captured."
+
+    - name: Display ACL ACE Summary Report
+      # Documentation: Provide a formatted view of the ACE counts for audit visibility
+      ansible.builtin.debug:
+        msg: |
+          ======================= ACL ACE COUNT SUMMARY =======================
+          {{ acl_info.stdout }}

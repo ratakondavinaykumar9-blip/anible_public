@@ -1,0 +1,54 @@
+---
+# Improved FortiGate System Status Playbook
+# This playbook retrieves and verifies the operational status of FortiGate devices using both API and CLI methods.
+- name: Get System Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Get System Global Configuration via API
+      # Using FQCN: fortinet.fortios.fortios_system_global
+      # Idempotency: state: "present" retrieves the current configuration without making changes.
+      # Documentation: Used to verify API connectivity and retrieve structured system metadata.
+      fortinet.fortios.fortios_system_global:
+        vdom: "root"
+        state: "present"
+      register: api_status
+      # Error Handling: Ensure the playbook fails gracefully if the API is unreachable.
+      failed_when: api_status is failed
+
+    - name: Verify API Status Retrieval
+      # Observability: Assert that the API returned a valid metadata structure.
+      ansible.builtin.assert:
+        that:
+          - api_status.meta is defined
+        fail_msg: "API response for system global status is missing expected metadata."
+        quiet: true
+
+    - name: Get Full Operational Status via CLI
+      # Using FQCN: ansible.netcommon.cli_command
+      # Documentation: Retrieves the comprehensive 'get system status' output which includes uptime, license, and version.
+      # This is a read-only operation and is inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: "get system status"
+      register: cli_status
+      # Error Handling: Fail if the command returns a non-zero exit code or unexpected output.
+      failed_when: 
+        - cli_status.rc != 0
+        - "'Version' not in cli_status.stdout"
+
+    - name: Verify CLI Status Content
+      # Observability: Ensure the CLI output was captured and contains data before proceeding to display.
+      ansible.builtin.assert:
+        that:
+          - cli_status.stdout is defined
+          - cli_status.stdout | length > 0
+        fail_msg: "CLI status output is empty or could not be retrieved."
+        quiet: true
+
+    - name: Display Formatted System Status
+      # Documentation: Provide a clear, human-readable summary of the system status in the automation logs.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SYSTEM STATUS =======================
+          {{ cli_status.stdout }}

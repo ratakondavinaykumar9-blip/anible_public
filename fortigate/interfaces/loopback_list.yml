@@ -1,0 +1,43 @@
+---
+# Loopback List
+# Auto-improved: 2026-03-08
+# Author: Architect:#
+# DESCRIPTION:
+# This playbook retrieves the loopback interface configuration from FortiGate devices.
+# It is designed to be idempotent (read-only) and includes validation logic to ensure
+# operational observability and robust error handling in automated workflows.
+
+- name: FortiGate Loopback Interface Discovery
+  hosts: fortigate
+  gather_facts: false # Disabled as device-specific facts are not required for CLI execution
+
+  tasks:
+    - name: Retrieve loopback configuration via CLI
+      # Use FQCN for network-common CLI module to ensure portability
+      ansible.netcommon.cli_command:
+        command: get system loopback
+      register: lb_result
+      # Error Handling: Fail if the return code is non-zero or specific error strings appear
+      failed_when:
+        - lb_result.failed | default(false)
+        - "'error' in lb_result.stdout | lower"
+        - "'unknown command' in lb_result.stdout | lower"
+
+    - name: Verify command output integrity
+      # Observability: Assert that the command returned data to prevent silent failures
+      ansible.builtin.assert:
+        that:
+          - lb_result.stdout is defined
+          - lb_result.stdout | length > 0
+        fail_msg: "The 'get system loopback' command returned no data. Check device connectivity or configuration."
+        success_msg: "Loopback data successfully captured."
+
+    - name: Display formatted Loopback information
+      # Documentation: Provide clear, human-readable output for auditing purposes
+      ansible.builtin.debug:
+        msg: |
+          ======================= LOOPBACKS =======================
+          DEVICE: {{ inventory_hostname }}
+          TIMESTAMP: {{ ansible_date_time.iso8601 | default('N/A') }}
+          DATA:
+          {{ lb_result.stdout }}

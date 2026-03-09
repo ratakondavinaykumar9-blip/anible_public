@@ -1,0 +1,34 @@
+---
+# Monitor Traffic
+# Auto-improved: 2026-03-08
+# Author: Analyst (OpenClaw) / Improved by Architect:#
+---
+# FortiGate Traffic Monitoring
+- name: Monitor Traffic
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Get system interface traffic statistics
+      # FQCN: Using ansible.netcommon.cli_command for standardized interaction.
+      # Idempotency: 'get' commands are read-only and inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: get system interface traffic
+      register: traffic
+      # Error Handling: Explicitly fail if the command is not recognized or returns an error.
+      failed_when: 
+        - traffic.failed or "Command fail" in traffic.stdout or "Unknown action" in traffic.stdout
+
+    - name: Validate traffic data capture
+      # Observability: Assert that the command returned content to ensure the monitor is effective.
+      ansible.builtin.assert:
+        that:
+          - traffic.stdout is defined
+          - traffic.stdout | length > 0
+        fail_msg: "Traffic statistics could not be retrieved from the device."
+        success_msg: "Traffic statistics successfully captured."
+
+    - name: Display Traffic Monitoring Report
+      # Documentation: Providing a clear, formatted view of the captured data for observability.
+      ansible.builtin.debug:
+        msg

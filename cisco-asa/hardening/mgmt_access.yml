@@ -1,0 +1,28 @@
+- name: Harden Cisco ASA Management Plane
+  hosts: asas
+  gather_facts: false
+  tasks:
+    - name: Configure SSH ACLs and Version
+      cisco.asa.asa_config:
+        lines:
+          - ssh 10.254.0.0 255.255.255.0 inside
+          - ssh timeout 15
+          - ssh version 2
+          - service password-encryption
+          - no http server enable
+          - no telnet server
+
+    - name: Configure SNMPv3
+      cisco.asa.asa_config:
+        lines:
+          - snmp-server group MGMT-GROUP v3 priv
+          - snmp-server user ADMIN-USER MGMT-GROUP v3 auth sha MyAuthPass123 priv aes 128 MyPrivPass123
+          - snmp-server host inside 10.254.0.100 version 3 ADMIN-USER
+
+    - name: Enable Logging
+      cisco.asa.asa_config:
+        lines:
+          - logging enable
+          - logging timestamp
+          - logging buffered informational
+          - logging host inside 10.254.0.100

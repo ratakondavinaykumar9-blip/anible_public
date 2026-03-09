@@ -1,0 +1,43 @@
+---
+# FortiGate Session Monitoring - Standard:
+# Purpose: Perform non-intrusive monitoring of network sessions with validation.
+- name: Monitor FortiGate Sessions
+  hosts: fortigate
+  gather_facts: false # Disabled to minimize overhead during monitoring tasks.
+
+  tasks:
+    - name: Collect detailed session information from the device
+      # FQCN (Fully Qualified Collection Name) used for future-proofing and consistency.
+      ansible.netcommon.cli_command:
+        command: "get system session list"
+      register: sessions_output
+      # Error Handling: Ensure the command was executed and returned output.
+      failed_when: sessions_output.stdout is not defined
+
+    - name: Collect session statistics and performance counters
+      ansible.netcommon.cli_command:
+        command: "get system session stat"
+      register: stats_output
+      # Error Handling: Fail if the response is empty, indicating a potential connectivity or privilege issue.
+      failed_when: stats_output.stdout == "" or stats_output.stdout is not defined
+
+    - name: Verify data integrity and collection success
+      # Observability: Use assertions to confirm the captured data contains expected keywords.
+      ansible.builtin.assert:
+        that:
+          - "'session' in stats_output.stdout"
+        fail_msg: "Critical: Failed to retrieve valid session statistics from {{ inventory_hostname }}."
+        success_msg: "Success: Session monitoring data verified for {{ inventory_hostname }}."
+
+    - name: Display formatted session monitoring report
+      # Observability: Provide a clear summary of the system state for operational review.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SESSION MONITORING SUMMARY =======================
+          Target Device: {{ inventory_hostname }}
+          
+          Session Statistics:
+          {{ stats_output.stdout }}
+
+          Status: Data successfully captured and validated.
+      # Idempotency: This playbook is read-only and inherently safe to execute multiple times.

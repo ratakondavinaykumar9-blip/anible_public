@@ -1,0 +1,32 @@
+---
+# Playbook: Retrieve Network Objects from Cisco ASA/Firepower
+# This playbook is idempotent as it performs read-only operations to audit the current state.
+- name: Get Network Objects
+  hosts: asa_firepower
+  gather_facts: false # Performance: Skip standard host fact gathering for network devices
+
+  tasks:
+    - name: Execute show command to retrieve network objects
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: show running-config object network
+      register: objects_output
+      # Error Handling: Explicitly fail if the CLI returns an error message or fails to execute
+      failed_when:
+        - objects_output.failed or "Invalid input" in objects_output.stdout
+
+    - name: Verify command execution and output validity
+      # Observability: Ensure the command returned data before proceeding
+      ansible.builtin.assert:
+        that:
+          - objects_output.stdout is defined
+          - objects_output.stdout | length > 0
+        fail_msg: "Failed to retrieve network objects or the configuration is empty."
+        success_msg: "Successfully retrieved network objects from the device."
+
+    - name: Display formatted network objects report
+      # Documentation: Provides human-readable output for auditing purposes
+      ansible.builtin.debug:
+        msg: |
+          ======================= NETWORK OBJECTS =======================
+          {{ objects_output.stdout }}

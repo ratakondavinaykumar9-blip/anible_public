@@ -1,0 +1,63 @@
+---
+# OSPF Status Verification
+# Auto-improved: 2026-03-08
+# Author: Analyst (OpenClaw) / Architect:#
+# Standards:
+# - Idempotency: Uses read-only operational commands (show).
+# - Observability: Register/Assert tasks included to verify command success.
+# - Documentation: In-line comments explaining task purpose and logic.
+# - Error Handling: failed_when logic to catch CLI-specific errors.
+# - Best Practices: Fully Qualified Collection Names (FQCN) used throughout.
+
+- name: Get OSPF Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve OSPF neighbor adjacencies
+      # Fetches the OSPF neighbor table to confirm operational adjacencies
+      ansible.netcommon.cli_command:
+        command: show ospf neighbor
+      register: ospf_neighbors
+      # Error Handling: Catches module failures or ASA-specific "Invalid input" errors
+      failed_when: >
+        ospf_neighbors.failed or 
+        "% Invalid" in ospf_neighbors.stdout or
+        "% OSFP not" in ospf_neighbors.stdout
+
+    - name: Verify OSPF neighbor data retrieval
+      # Observability: Asserts that the command returned meaningful output
+      ansible.builtin.assert:
+        that:
+          - ospf_neighbors.stdout is defined
+          - ospf_neighbors.stdout | length > 0
+        fail_msg: "OSPF neighbor output is empty. Check if OSPF is configured on {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Retrieve OSPF database information
+      # Fetches the OSPF Link State Database (LSDB) summary
+      ansible.netcommon.cli_command:
+        command: show ospf database
+      register: ospf_db
+      failed_when: >
+        ospf_db.failed or 
+        "% Invalid" in ospf_db.stdout
+
+    - name: Verify OSPF database data retrieval
+      # Observability: Ensures the database query was successful and returned data
+      ansible.builtin.assert:
+        that:
+          - ospf_db.stdout is defined
+          - ospf_db.stdout | length > 0
+        fail_msg: "OSPF database output is empty on {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display OSPF Operational Status
+      # Provides a consolidated view of OSPF state for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= OSPF NEIGHBORS =======================
+          {{ ospf_neighbors.stdout }}
+
+          ======================= OSPF DATABASE ========================
+          {{ ospf_db.stdout }}

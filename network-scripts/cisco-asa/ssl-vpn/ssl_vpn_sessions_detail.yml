@@ -1,0 +1,34 @@
+---
+# SSL VPN Sessions Detail Retrieval
+# This playbook collects, validates, and displays detailed SSL VPN session information 
+# from ASA/Firepower devices, ensuring operational visibility and error resilience.
+- name: SSL VPN Sessions Detail
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve SSL VPN session details from device
+      # Use FQCN (Fully Qualified Collection Name) for consistent execution across environments
+      ansible.netcommon.cli_command:
+        command: show vpn-sessiondb detail ssl
+      register: ssl_output
+      # Idempotency: 'show' commands are read-only and inherently safe for repeated execution.
+      # Error Handling: Explicitly check for command-level failures or invalid syntax responses.
+      failed_when: 
+        - ssl_output.failed or "% Invalid input" in ssl_output.stdout
+
+    - name: Validate session data integrity
+      # Observability: Assert that the command successfully returned data to verify the session state
+      ansible.builtin.assert:
+        that:
+          - ssl_output.stdout is defined
+          - ssl_output.stdout | length > 0
+        fail_msg: "Data retrieval failed: The session database returned no information for {{ inventory_hostname }}."
+        success_msg: "SSL VPN session database successfully queried."
+
+    - name: Display SSL VPN session information
+      # Provides a formatted summary of the retrieved session details for operator audit
+      ansible.builtin.debug:
+        msg: |
+          ======================= SSL VPN SESSIONS: {{ inventory_hostname }} =======================
+          {{ ssl_output.stdout }}

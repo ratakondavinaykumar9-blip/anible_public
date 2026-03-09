@@ -1,0 +1,28 @@
+# ASA Inventory - SECURITY NOTICE
+# Never commit this file with real passwords!
+# Use one of the methods below for secure credential handling
+
+[asa_firepower]
+# Example devices - ADD YOUR DEVICES HERE
+asa01 ansible_host=10.1.1.1
+asa02 ansible_host=10.1.1.2
+
+[asa_firepower:vars]
+# DO NOT hardcode passwords here!
+# Use ansible-vault or environment variables instead
+ansible_connection=network_cli
+ansible_network_os=cisco.asa.asa
+ansible_become=yes
+ansible_become_method=enable
+
+# Credential method 1: Use ansible-vault (RECOMMENDED)
+# Create vault: ansible-vault create group_vars/asa_firepower.yml
+# Then add: ansible_password: YOUR_PASSWORD
+#            ansible_become_pass: YOUR_ENABLE_PASSWORD
+
+# Credential method 2: Use environment variables
+# export ANSIBLE_NET_USERNAME=admin
+# export ANSIBLE_NET_PASSWORD=your_password
+
+# Credential method 3: Prompt at runtime (run below command)
+# ansible-playbook -i inventory playbook.yml --ask-pass --ask-become-pass

@@ -1,0 +1,35 @@
+---
+# EIGRP Status Check Playbook
+# This playbook retrieves and validates the EIGRP neighbor table from Cisco ASA/Firepower devices.
+# It is designed to be idempotent (read-only) and includes observability through assertions.
+
+- name: Retrieve and Verify EIGRP Status
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve EIGRP neighbor table using CLI command
+      # Using Fully Qualified Collection Name (FQCN) for reliability
+      ansible.netcommon.cli_command:
+        command: show eigrp neighbors
+      register: eigrp_status
+      # Handle cases where EIGRP might not be configured or the command is unsupported
+      failed_when: 
+        - eigrp_status.failed
+        - "'Invalid input' in eigrp_status.stdout"
+
+    - name: Validate command execution and output presence
+      # Observability: Ensure the device returned a valid response structure
+      ansible.builtin.assert:
+        that:
+          - "eigrp_status.stdout is defined"
+        fail_msg: "The EIGRP status command failed to return valid output on {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved EIGRP status from {{ inventory_hostname }}."
+
+    - name: Display formatted EIGRP neighbor information
+      # Provides clear visibility of the operational state for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= EIGRP NEIGHBORS: {{ inventory_hostname }} =======================
+          {{ eigrp_status.stdout | default('No EIGRP neighbor data returned.') }}
+          ==========================================================================================

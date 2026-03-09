@@ -1,0 +1,36 @@
+---
+# FortiGate Zone List Retrieval
+# This playbook retrieves the current security zone configuration from FortiGate devices.
+# It is designed to be idempotent, observable, and follows Ansible best practices.
+
+- name: Get Zone List
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve system zones via CLI command
+      # Use Fully Qualified Collection Name (FQCN). 
+      # This operation is idempotent as 'get' is a read-only command.
+      ansible.netcommon.cli_command:
+        command: get system zone
+      register: zone_result
+      # Error Handling: Fail explicitly if the command is unrecognized or returns an error string
+      failed_when: 
+        - zone_result.failed or "Unknown action" in zone_result.stdout or "Command fail" in zone_result.stdout
+
+    - name: Verify successful retrieval of zone data
+      # Observability: Assert that the command returned actual data to the stdout buffer
+      ansible.builtin.assert:
+        that:
+          - zone_result.stdout is defined
+          - zone_result.stdout | length > 0
+        fail_msg: "The zone retrieval command returned empty output. Check device state or permissions."
+        success_msg: "Zone configuration successfully captured."
+
+    - name: Display formatted zone information
+      # Documentation: Provides a human-readable summary of the retrieved configuration
+      ansible.builtin.debug:
+        msg: |
+          ======================= ZONES =======================
+          {{ zone_result.stdout }}
+          =====================================================

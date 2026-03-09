@@ -1,0 +1,79 @@
+---
+# IPSec Tunnel Troubleshooting Playbook
+# Enhanced for Idempotency, Observability, and Error Handling.
+# This playbook is read-only and inherently idempotent.
+
+- name: Troubleshoot IPSec Tunnel
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Target peer IP address for troubleshooting.
+    # Must be provided via -e "tunnel_peer=X.X.X.X"
+    tunnel_peer: ""
+
+  tasks:
+    - name: Validate input variables
+      # Observability: Ensures the playbook has the necessary context to execute.
+      ansible.builtin.assert:
+        that:
+          - tunnel_peer | length > 0
+          - tunnel_peer | ansible.utils.ipaddr
+        fail_msg: "A valid tunnel_peer IP address is required. Usage: -e 'tunnel_peer=1.2.3.4'"
+        quiet: true
+
+    - name: Check IKEv1 Security Association
+      # retrieves IKEv1 Phase 1 status. Command failure is ignored if no SA exists.
+      ansible.netcommon.cli_command:
+        command: "show crypto isakmp sa {{ tunnel_peer }}"
+      register: ikev1
+      failed_when: false
+
+    - name: Check IKEv2 Security Association
+      # retrieves IKEv2 Phase 1 status. FQCN used for best practice and stability.
+      ansible.netcommon.cli_command:
+        command: "show crypto ikev2 sa {{ tunnel_peer }}"
+      register: ikev2
+      failed_when: false
+
+    - name: Check IPsec Security Association
+      # retrieves Phase 2 (Data Tunnel) status for the specific peer.
+      ansible.netcommon.cli_command:
+        command: "show crypto ipsec sa peer {{ tunnel_peer }}"
+      register: ipsec
+      failed_when: false
+
+    - name: Check VPN Session Database
+      # Verifies active sessions in the VPN DB; often more reliable than 'show crypto' alone.
+      ansible.netcommon.cli_command:
+        command: "show vpn-sessiondb l2l filter-ipaddress={{ tunnel_peer }}"
+      register: session
+      failed_when: false
+
+    - name: Check Syslog for Tunnel Errors
+      # Gathers recent log entries to identify negotiation or proposal mismatches.
+      ansible.netcommon.cli_command:
+        command: "show logging | include {{ tunnel_peer }} | last 50"
+      register: logs
+      failed_when: false
+
+    - name: Verify Command Success
+      # Observability: Ensures that the device responded to the troubleshooting commands.
+      ansible.builtin.assert:
+        that:
+          - ikev1.stdout is defined
+          - ikev2.stdout is defined
+        fail_msg: "No response received from the device. Check connectivity and credentials."
+        quiet: true
+
+    - name: Display Troubleshooting Summary
+      # Consolidates status into a readable format for the operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= TUNNEL STATUS =======================
+          Peer: {{ tunnel_peer }}
+          
+          {% if 'AM_ACTIVE' in ikev1.stdout or 'UP-ACTIVE' in ikev2.stdout or 'Session Type: L2L' in session.stdout %}
+          ✅ STATUS: TUNNEL UP (Phase 1/Session Active)
+          {% else %}
+          ❌ STATUS: TUNNEL DOWN (No active SA/Session found)
+          {% endif %}

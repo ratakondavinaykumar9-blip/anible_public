@@ -1,0 +1,37 @@
+---
+# ==============================================================================
+# Playbook: FortiGate FortiCloud Status Verification
+# Description: Retrieves and validates the FortiCloud service status.
+# Author: Architect:# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+# ==============================================================================
+- name: Get FortiCloud Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve FortiCloud service configuration status
+      # Using FQCN ansible.netcommon.cli_command for cross-platform network compatibility.
+      # This 'get' operation is read-only, ensuring the task remains idempotent.
+      ansible.netcommon.cli_command:
+        command: get fmupdate service
+      register: forticloud_raw_output
+      # Error Handling: Explicitly verify the task didn't fail during execution.
+      failed_when: forticloud_raw_output.failed or "command not found" in forticloud_raw_output.stdout
+
+    - name: Assert FortiCloud status is valid and non-empty
+      # Observability: Verifying that the command returned meaningful data.
+      # Ensures the playbook provides reliable results rather than silent failures.
+      ansible.builtin.assert:
+        that:
+          - forticloud_raw_output.stdout is defined
+          - forticloud_raw_output.stdout | length > 0
+          - "'service' in forticloud_raw_output.stdout"
+        fail_msg: "Verification failed: The command output was empty or did not contain expected service data."
+        success_msg: "Verification successful: FortiCloud status data retrieved."
+
+    - name: Display formatted FortiCloud status
+      # Observability: Provides operator visibility into the current operational state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTICLOUD STATUS =======================
+          {{ forticloud_raw_output.stdout }}

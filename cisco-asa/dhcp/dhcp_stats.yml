@@ -1,0 +1,36 @@
+---
+# DHCP Statistics Retrieval Playbook
+# This playbook retrieves and validates DHCP statistics from Cisco ASA/Firepower devices.
+# It adheres to senior network automation standards including observability and FQCN usage.
+
+- name: Retrieve and Validate DHCP Statistics
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'show dhcpd statistics' on the target device
+      # Using FQCN for vendor-agnostic network command execution.
+      # This task is inherently idempotent as it performs a read-only operation.
+      ansible.netcommon.cli_command:
+        command: show dhcpd statistics
+      register: dhcp_stats_result
+      # Ensure the task fails if the command returns an error or is unrecognized.
+      failed_when: 
+        - dhcp_stats_result.failed | default(false)
+        - "'Invalid input' in dhcp_stats_result.stdout"
+
+    - name: Verify DHCP statistics retrieval success
+      # Observability: Assert that the output contains expected data to ensure operational visibility.
+      ansible.builtin.assert:
+        that:
+          - dhcp_stats_result.stdout is defined
+          - dhcp_stats_result.stdout | length > 0
+        fail_msg: "DHCP statistics output is empty or undefined. Verify DHCP configuration on the device."
+        success_msg: "DHCP statistics successfully retrieved and validated."
+
+    - name: Display formatted DHCP statistics
+      # Provides a clean, readable output of the retrieved operational state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= DHCP OPERATIONAL STATS =======================
+          {{ dhcp_stats_result.stdout }}

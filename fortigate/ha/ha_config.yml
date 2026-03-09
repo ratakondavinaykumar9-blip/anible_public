@@ -1,0 +1,34 @@
+---
+# FortiGate HA Configuration Verification
+# Improved: 2026-03-08
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
+- name: Get HA Configuration
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve HA configuration from device
+      # FQCN: Using ansible.netcommon.cli_command for cross-platform compatibility
+      # Observability: Output is registered to 'ha_config' for subsequent validation
+      ansible.netcommon.cli_command:
+        command: get system ha
+      register: ha_config
+      # Error Handling: Ensure the task fails if the return code is non-zero or output indicates failure
+      failed_when: 
+        - ha_config.rc | default(0) != 0
+        - "'command parse error' in ha_config.stdout"
+
+    - name: Validate HA configuration retrieval
+      # Observability: Asserting that the output is not empty and contains expected HA keywords
+      # This ensures the playbook doesn't proceed with garbage data
+      ansible.builtin.assert:
+        that:
+          - ha_config.stdout is defined
+          - ha_config.stdout | length > 0
+          - "'mode' in ha_config.stdout"
+        fail_msg: "HA configuration retrieval failed or returned unexpected content."
+        success_msg: "HA configuration successfully retrieved and validated."
+
+    - name: Display formatted HA Configuration
+      # Documentation

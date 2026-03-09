@@ -1,0 +1,39 @@
+---
+# FortiGate Process Status Collection
+# Purpose: Gathers active process statistics from FortiGate devices for health monitoring.
+# Standard: Architect:Automation Standards (Idempotency, Observability, FQCN).
+- name: Get FortiGate Process Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Execute process list diagnostic command
+      # Best Practices: Using Fully Qualified Collection Name (FQCN) for the network command.
+      # Documentation: 'diagnose system process list' provides a comprehensive view of running daemons.
+      ansible.netcommon.cli_command:
+        command: diagnose system process list
+      register: proc_result
+      # Error Handling: Ensure the task fails if the command is unrecognized or returns an error string.
+      failed_when: 
+        - proc_result.failed or "Command fail" in proc_result.stdout or "Unknown action" in proc_result.stdout
+
+    - name: Verify process data integrity
+      # Observability: Validate that the output is not empty and contains expected process data.
+      ansible.builtin.assert:
+        that:
+          - proc_result.stdout is defined
+          - proc_result.stdout | length > 0
+        fail_msg: "Process diagnostic returned empty or invalid output on {{ inventory_hostname }}."
+        success_msg: "Process diagnostic successfully captured for {{ inventory_hostname }}."
+
+    - name: Display formatted process status report
+      # Observability: Provides human-readable visibility into the captured diagnostic state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= PROCESS REPORT: {{ inventory_hostname }} =======================
+          {{ proc_result.stdout }}
+
+    - name: Ensure play completion state
+      # Idempotency: This playbook is read-only and inherently idempotent as it does not modify the target configuration.
+      ansible.builtin.set_fact:
+        process_audit_timestamp: "{{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}"

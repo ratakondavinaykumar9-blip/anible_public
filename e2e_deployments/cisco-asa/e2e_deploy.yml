@@ -1,0 +1,159 @@
+---
+- name: End-to-End Enterprise Deployment for Cisco ASA
+  hosts: asa_firepower
+  gather_facts: no
+  vars:
+    # Variables would typically come from group_vars/host_vars
+    asa_hostname: "E2E-ASA-FW01"
+    asa_domain: "enterprise.internal"
+    outside_ip: "198.51.100.2"
+    outside_mask: "255.255.255.0"
+    inside_ip: "10.0.0.1"
+    inside_mask: "255.255.255.0"
+    dmz_ip: "172.16.0.1"
+    dmz_mask: "255.255.255.0"
+
+  tasks:
+    - name: Ensure Local Backup Directory Exists
+      delegate_to: localhost
+      file:
+        path: "{{ playbook_dir }}/backups/{{ inventory_hostname }}"
+        state: directory
+      tags: [backup, always]
+
+    - name: Pre-Change Snapshot (Running Config)
+      cisco.asa.asa_command:
+        commands: "show running-config"
+      register: pre_change_config
+      tags: [backup, always]
+
+    - name: Save Snapshot to Disk
+      delegate_to: localhost
+      copy:
+        content: "{{ pre_change_config.stdout[0] }}"
+        dest: "{{ playbook_dir }}/backups/{{ inventory_hostname }}/pre_deploy_{{ ansible_date_time.isoformat }}.cfg"
+      tags: [backup, always]
+
+    - name: Configure Base System Parameters (Hostname, Domain)
+      cisco.asa.asa_command:
+        commands:
+          - hostname {{ asa_hostname }}
+          - domain-name {{ asa_domain }}
+      tags: [base, system]
+
+    - name: Configure Interfaces (Outside, Inside, DMZ)
+      cisco.asa.asa_config:
+        lines:
+          - nameif outside
+          - security-level 0
+          - ip address {{ outside_ip }} {{ outside_mask }}
+        parents: interface GigabitEthernet0/0
+        match: exact
+      tags: [interfaces, network]
+
+    - name: Configure Inside Interface
+      cisco.asa.asa_config:
+        lines:
+          - nameif inside
+          - security-level 100
+          - ip address {{ inside_ip }} {{ inside_mask }}
+        parents: interface GigabitEthernet0/1
+        match: exact
+      tags: [interfaces, network]
+
+    - name: Configure DMZ Interface
+      cisco.asa.asa_config:
+        lines:
+          - nameif dmz
+          - security-level 50
+          - ip address {{ dmz_ip }} {{ dmz_mask }}
+        parents: interface GigabitEthernet0/2
+        match: exact
+      tags: [interfaces, network]
+
+    - name: Enable Physical Interfaces
+      cisco.asa.asa_config:
+        lines:
+          - no shutdown
+        parents: interface {{ item }}
+      loop:
+        - GigabitEthernet0/0
+        - GigabitEthernet0/1
+        - GigabitEthernet0/2
+      tags: [interfaces, network]
+
+    - name: Configure Default Route
+      cisco.asa.asa_config:
+        lines:
+          - route outside 0.0.0.0 0.0.0.0 198.51.100.1 1
+      tags: [routing]
+
+    - name: Configure Network Object Groups
+      cisco.asa.asa_config:
+        lines:
+          - network-object 10.0.0.0 255.255.255.0
+          - network-object 10.1.0.0 255.255.255.0
+        parents: object-group network INTERNAL_NETWORKS
+      tags: [objects]
+
+    - name: Configure Service Object Groups
+      cisco.asa.asa_config:
+        lines:
+          - port-object eq 80
+          - port-object eq 443
+        parents: object-group service WEB_SERVICES tcp
+      tags: [objects]
+
+    - name: Configure Dynamic PAT (Hide NAT) for Inside to Outside
+      cisco.asa.asa_config:
+        lines:
+          - nat (inside,outside) after-auto source dynamic INTERNAL_NETWORKS interface
+      tags: [nat]
+
+    - name: Configure Static NAT (Port Forwarding) for Web Server in DMZ
+      cisco.asa.asa_config:
+        lines:
+          - host 172.16.0.100
+          - nat (dmz,outside) static interface service tcp 443 443
+        parents: object network DMZ_WEBSERVER
+      tags: [nat]
+
+    - name: Configure Access Control Lists (ACLs) - Inbound Outside
+      cisco.asa.asa_config:
+        lines:
+          - access-list OUTSIDE_IN extended permit tcp any object DMZ_WEBSERVER eq 443
+          - access-list OUTSIDE_IN extended deny ip any any log informational
+      tags: [acls, security]
+
+    - name: Apply ACL to Outside Interface
+      cisco.asa.asa_config:
+        lines:
+          - access-group OUTSIDE_IN in interface outside
+      tags: [acls, security]
+
+    - name: Configure VPN (IPSec Site-to-Site) - Phase 1 (IKEv1)
+      cisco.asa.asa_config:
+        lines:
+          - crypto ikev1 policy 10
+          - authentication pre-share
+          - encryption aes-256
+          - hash sha
+          - group 2
+          - lifetime 86400
+          - crypto ikev1 enable outside
+      tags: [vpn, ipsec]
+
+    - name: Configure VPN (IPSec Site-to-Site) - Phase 2 & Tunnel Group
+      cisco.asa.asa_config:
+        lines:
+          - crypto ipsec ikev1 transform-set ESP-AES256-SHA esp-aes-256 esp-sha-hmac
+          - tunnel-group 203.0.113.5 type ipsec-l2l
+          - tunnel-group 203.0.113.5 ipsec-attributes
+          - ikev1 pre-shared-key MyS3cr3tK3y!
+      tags: [vpn, ipsec]
+
+    - name: Write Memory (Save Configuration)
+      cisco.asa.asa_command:
+        commands:
+          - write memory
+      tags: [save]

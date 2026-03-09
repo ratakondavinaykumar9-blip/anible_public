@@ -1,0 +1,34 @@
+---
+# FortiGate UTM Statistics Retrieval
+# Improved by Architect:# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Get FortiGate UTM Statistics
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Execute UTM statistics retrieval command
+      # This task uses a read-only 'get' command, making it idempotent by nature.
+      # FQCN (Fully Qualified Collection Name) is used for standard compliance.
+      ansible.netcommon.cli_command:
+        command: get system siteresult
+      register: utm_stats_output
+      # Error Handling: Ensure the task fails if the command result is undefined or returns an error string.
+      failed_when: 
+        - utm_stats_output.failed or "Unknown action" in utm_stats_output.stdout
+
+    - name: Validate UTM statistics response
+      # Observability: Verify that the command returned actual data before proceeding.
+      ansible.builtin.assert:
+        that:
+          - utm_stats_output.stdout is defined
+          - utm_stats_output.stdout | length > 0
+        fail_msg: "The UTM statistics command returned no data or the response was empty."
+        success_msg: "UTM statistics successfully captured."
+        quiet: true
+
+    - name: Display captured UTM statistics
+      # Provides formatted visibility into the retrieved operational data for the operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= UTM STATS =======================
+          {{ utm_stats_output.stdout }}

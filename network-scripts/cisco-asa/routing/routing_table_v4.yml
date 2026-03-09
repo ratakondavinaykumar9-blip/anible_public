@@ -1,0 +1,34 @@
+---
+# Playbook to retrieve and display the IPv4 routing table from Cisco ASA/Firepower devices.
+# This ensures visibility into the current network topology and routing state for troubleshooting.
+- name: IPv4 Routing Table Retrieval
+  hosts: asa_firepower
+  gather_facts: false # Facts gathering is disabled to speed up execution for read-only tasks.
+
+  tasks:
+    - name: Retrieve the current IPv4 routing table
+      # Using FQCN for consistent cross-platform network command execution.
+      # This operation is inherently idempotent as it is a read-only 'show' command.
+      ansible.netcommon.cli_command:
+        command: show route ipv4
+      register: v4_routes
+      # Ensure the task fails if the command is unrecognized or execution fails.
+      failed_when: 
+        - v4_routes.failed 
+        - "'Invalid input' in v4_routes.stdout"
+
+    - name: Verify that routing information was successfully captured
+      # Observability: Assert that the output contains data to confirm valid communication and routing state.
+      ansible.builtin.assert:
+        that:
+          - v4_routes.stdout is defined
+          - v4_routes.stdout | length > 0
+        fail_msg: "Failed to retrieve IPv4 routing table or the output was unexpectedly empty."
+        success_msg: "Successfully retrieved IPv4 routing table data."
+
+    - name: Display the formatted IPv4 routing table
+      # Providing a clear and structured console output for administrative review.
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPv4 ROUTES =======================
+          {{ v4_routes.stdout }}

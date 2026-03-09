@@ -1,0 +1,37 @@
+---
+# Inspect Stats Detail
+# Auto-improved: 2026-03-08
+# Improved by: Architect:#
+# This playbook retrieves service-policy inspection statistics from ASA/Firepower devices.
+# It ensures idempotency through read-only commands and provides observability via assertions.
+---
+- name: Inspection Stats
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve service-policy inspection statistics
+      # FQCN: Using ansible.netcommon.cli_command for cross-platform compatibility.
+      # Idempotency: This is a read-only 'show' command and is safe to run repeatedly.
+      ansible.netcommon.cli_command:
+        command: show service-policy inspect
+      register: inspect_result
+      # Error Handling: Ensure the task fails if the device returns an error message.
+      failed_when:
+        - inspect_result.failed == true or "Invalid input" in inspect_result.stdout or "ERROR" in inspect_result.stdout
+
+    - name: Validate inspection statistics response
+      # Observability: Use assertions to verify that the command returned actual data.
+      ansible.builtin.assert:
+        that:
+          - inspect_result.stdout is defined
+          - inspect_result.stdout | length > 0
+        fail_msg: "The command 'show service-policy inspect' returned no data or failed."
+        success_msg: "Inspection statistics retrieved successfully."
+
+    - name: Display inspection statistics
+      # Documentation: Outputs the results for human verification.
+      ansible.builtin.debug:
+        msg: |
+          ======================= INSPECTION STATS =======================
+          {{ inspect_result.stdout }}

@@ -1,0 +1,30 @@
+---
+# Fan Status Retrieval and Validation
+# Purpose: Retrieves and verifies hardware fan health on Cisco ASA/Firepower devices.
+# Standards: Implements FQCN, Observability (assert), and robust Error Handling.
+- name: Get Fan Status
+  hosts: asa_firepower
+  gather_facts: false # Fact gathering is disabled to improve execution speed for CLI-only tasks.
+
+  tasks:
+    - name: Retrieve fan status via CLI
+      # Use Fully Qualified Collection Name (FQCN) for reliability and portability.
+      ansible.netcommon.cli_command:
+        command: show fan
+      # Register output to enable observability and validation in subsequent tasks.
+      register: fan_result
+      # Error Handling: Ensure the playbook fails if the command returns an error or empty output.
+      failed_when:
+        - fan_result.stdout is not defined or fan_result.stdout | length == 0
+        - "'Invalid' in fan_result.stdout"
+
+    - name: Validate fan operational status
+      # Observability: Assert that the hardware is reporting an 'OK' or 'Normal' state.
+      # This ensures the playbook provides a clear pass/fail signal for automation pipelines.
+      ansible.builtin.assert:
+        that:
+          - "'OK' in fan_result.stdout or 'Normal' in fan_result.stdout"
+        fail_msg: "Hardware Alert: Fan status check failed on {{ inventory_hostname }}. Immediate inspection required."
+        success_msg: "Fan status verified as operational on {{ inventory_hostname }}."
+
+    - name: Display

@@ -1,0 +1,38 @@
+---
+# Failover Interface
+# Auto-improved: 2026-03-08 12:00
+# Author: Analyst (OpenClaw)
+#
+---
+# Show Failover Interface Status
+- name: Get Failover Interfaces
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get interface status
+      # Best Practice: Use Fully Qualified Collection Name (FQCN) for the cli_command module.
+      # Idempotency: Read-only 'show' commands are safe to execute repeatedly without device state change.
+      ansible.netcommon.cli_command:
+        command: show failover interface
+      register: intf
+      # Error Handling: Fail the task if the command returns no output to avoid empty processing.
+      failed_when: 
+        - intf.stdout is not defined or intf.stdout | length == 0
+
+    - name: Verify failover interface output
+      # Observability: Use assert to verify the output contains expected failover status keywords.
+      ansible.builtin.assert:
+        that:
+          - "'Interface' in intf.stdout or 'Failover' in intf.stdout"
+        fail_msg: "The command 'show failover interface' returned unexpected or empty results on {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display Failover Interfaces
+      # Observability: Provide a formatted view of the captured failover interface status.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FAILOVER INTERFACES =======================
+          {{ intf.stdout }}
+
+---

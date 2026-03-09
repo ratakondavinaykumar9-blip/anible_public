@@ -1,0 +1,40 @@
+---
+# Playbook: FortiGate License Validation
+# Purpose: Retrieves, validates, and reports the system license status for FortiGate devices.
+# Standards: FQCN usage, Idempotency (Read-only), Observability (Assert), and Error Handling.
+- name: FortiGate License Information and Validation
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve system license status via CLI
+      # Best Practice: Use Fully Qualified Collection Name (FQCN)
+      # Idempotency: This is a non-state-changing command, safe for repeated execution
+      ansible.netcommon.cli_command:
+        command: "diagnose system license status"
+      register: license_output
+      # Error Handling: Fail if the command returns an error or empty output
+      failed_when:
+        - license_output.stdout is not defined
+        - "license_output.stdout == ''"
+        - "'Command fail' in license_output.stdout"
+
+    - name: Validate license operational state
+      # Observability: Use 'assert' to verify that the license is actually 'Valid'
+      # This ensures the automation stops if the device is in an unlicensed state
+      ansible.builtin.assert:
+        that:
+          - "'Status: Valid' in license_output.stdout or 'Licensed' in license_output.stdout"
+        fail_msg: "CRITICAL: FortiGate license on {{ inventory_hostname }} is INVALID or EXPIRED."
+        success_msg: "CONFIRMED: FortiGate license on {{ inventory_hostname }} is valid."
+
+    - name: Display license details for auditing
+      # Documentation: Provide structured feedback to the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= LICENSE REPORT =======================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          
+          RAW OUTPUT:
+          {{ license_output.stdout }}

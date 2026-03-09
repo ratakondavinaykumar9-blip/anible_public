@@ -1,0 +1,77 @@
+---
+- name: Fortinet Advanced - SD-WAN and ADVPN
+  hosts: fortigate
+  gather_facts: no
+  collections:
+    - fortinet.fortios
+  vars:
+    vdom: "root"
+
+  tasks:
+    - name: Configure SD-WAN Zone
+      fortios_system_sdwan:
+        vdom: "{{ vdom }}"
+        system_sdwan:
+          status: "enable"
+          zone:
+            - name: "virtual-wan-link"
+          members:
+            - interface: "port1"
+              seq_num: 1
+              gateway: "198.51.100.1"
+              cost: 0
+            - interface: "port2"
+              seq_num: 2
+              gateway: "203.0.113.1"
+              cost: 10
+
+    - name: Configure SD-WAN Health Check (Performance SLA)
+      fortios_system_sdwan:
+        vdom: "{{ vdom }}"
+        system_sdwan:
+          health_check:
+            - name: "SLA_Internet"
+              server: "8.8.8.8"
+              members:
+                - seq_num: 1
+                - seq_num: 2
+              sla:
+                - id: 1
+                  latency_threshold: 150
+                  jitter_threshold: 30
+                  packetloss_threshold: 2
+
+    - name: Configure SD-WAN Service Rules
+      fortios_system_sdwan:
+        vdom: "{{ vdom }}"
+        system_sdwan:
+          service:
+            - id: 1
+              name: "Voice_Video"
+              mode: "sla"
+              dst:
+                - name: "all"
+              src:
+                - name: "all"
+              health_check: "SLA_Internet"
+              priority_members:
+                - seq_num: 1
+                - seq_num: 2
+              sla:
+                - id: 1
+
+    - name: Configure ADVPN (IPsec Phase 1) Hub
+      fortios_vpn_ipsec_phase1_interface:
+        vdom: "{{ vdom }}"
+        vpn_ipsec_phase1_interface:
+          name: "ADVPN_Hub"
+          type: "dynamic"
+          interface: "virtual-wan-link"
+          ike_version: "2"
+          peertype: "any"
+          net_device: "enable"
+          proposal: "aes256-sha256"
+          add_route: "disable"
+          dpd: "on-idle"
+          auto_discovery_sender: "enable"
+          psksecret: "AdvpnS3cr3t!"

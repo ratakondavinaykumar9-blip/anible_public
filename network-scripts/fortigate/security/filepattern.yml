@@ -1,0 +1,34 @@
+---
+# FortiGate File Filter Management Playbook
+# This playbook retrieves and validates file-filter-profile configurations.
+# Standards: Idempotent (read-only), Observable (assert), Documented, FQCN.
+
+- name: Retrieve FortiGate File Filter
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Fetch file filter profile configuration via CLI
+      # Using FQCN for best practices and consistency
+      ansible.netcommon.cli_command:
+        command: get firewall file-filter-profile
+      register: file_filter_output
+      # Error Handling: Capture cases where the CLI might return a success code but an error string
+      failed_when: 
+        - file_filter_output.failed or "Command fail" in file_filter_output.stdout or "Unknown action" in file_filter_output.stdout
+
+    - name: Validate configuration data retrieval
+      # Observability: Ensure the registered variable contains valid, non-empty data
+      ansible.builtin.assert:
+        that:
+          - file_filter_output.stdout is defined
+          - file_filter_output.stdout | length > 0
+        fail_msg: "Failed to retrieve file filter profiles: Output is empty or undefined."
+        success_msg: "File filter profiles successfully retrieved."
+
+    - name: Display formatted file filter profile details
+      # Observability: Provide structured feedback to the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= FILE FILTER DATA =======================
+          {{ file_filter_output.stdout }}

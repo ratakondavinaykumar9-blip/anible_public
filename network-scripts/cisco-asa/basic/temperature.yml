@@ -1,0 +1,39 @@
+---
+# Architect:Improved Playbook: Cisco ASA/Firepower Temperature Audit
+# Purpose: Retrieves hardware sensor data and validates system health status.
+- name: Audit System Temperature
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve system temperature data
+      # Best Practice: Using Fully Qualified Collection Name (FQCN).
+      # Idempotency: This is a read-only operation and safe to run repeatedly.
+      ansible.netcommon.cli_command:
+        command: show temperature
+      register: temp_data
+      # Error Handling: Ensure the command was recognized and executed successfully.
+      failed_when:
+        - temp_data.stdout is not defined
+        - "'Invalid input' in temp_data.stdout"
+
+    - name: Validate temperature sensor response
+      # Observability: Assert that the device returned valid data containing expected keywords.
+      ansible.builtin.assert:
+        that:
+          - "temp_data.stdout | length > 0"
+          - "temp_data.stdout is search('Celsius|Fahrenheit|Temperature|OK')"
+        fail_msg: "Critical: Temperature data retrieval failed or returned invalid output for {{ inventory_hostname }}."
+        success_msg: "Temperature data successfully validated for {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display Formatted Temperature Report
+      # Documentation: Provide structured, human-readable output for operational logs.
+      ansible.builtin.debug:
+        msg: |
+          ===========================================================
+          AUDIT REPORT: SYSTEM TEMPERATURE
+          DEVICE: {{ inventory_hostname }}
+          ===========================================================
+          {{ temp_data.stdout }}
+          ===========================================================

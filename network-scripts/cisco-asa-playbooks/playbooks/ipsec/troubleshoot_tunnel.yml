@@ -1,0 +1,123 @@
+---
+# IPSec Tunnel Troubleshooting Playbook
+# Optimized for Cisco ASA/Firepower using Network Automation Framework Automation Standards
+- name: Troubleshoot IPSec Tunnel
+  hosts: asa_firepower
+  # Standard: Gather facts to provide timestamps for observability and reporting
+  gather_facts: yes
+  vars:
+    # Default format is 'text' for operator visibility; use 'json' for programmatic analysis
+    output_format: text
+    # The remote peer IP address to investigate (Mandatory)
+    tunnel_peer: ""
+
+  tasks:
+    - name: "Pre-flight: Validate Peer IP"
+      # Standard: Observability - Ensure required inputs are present before execution
+      ansible.builtin.assert:
+        that:
+          - tunnel_peer | length > 0
+        fail_msg: "ERROR: tunnel_peer variable is required. Usage: -e 'tunnel_peer=203.0.113.1'"
+        success_msg: "Validation successful for peer {{ tunnel_peer }}"
+
+    - name: "Capture: IKEv1 Security Associations"
+      # Standard: Use Fully Qualified Collection Names (FQCN)
+      ansible.netcommon.cli_command:
+        command: "show crypto isakmp sa {{ tunnel_peer }}"
+      register: ikev1_sa
+      # Standard: Error Handling - Prevent playbook failure if no SA is found (common in troubleshooting)
+      failed_when: false
+
+    - name: "Capture: IKEv2 Security Associations"
+      ansible.netcommon.cli_command:
+        command: "show crypto ikev2 sa {{ tunnel_peer }}"
+      register: ikev2_sa
+      failed_when: false
+
+    - name: "Capture: IPsec Phase 2 SAs"
+      # Retrieve encapsulation/decapsulation counters and selectors
+      ansible.netcommon.cli_command:
+        command: "show crypto ipsec sa peer {{ tunnel_peer }}"
+      register: ipsec_sa
+      failed_when: false
+
+    - name: "Capture: VPN Session Database"
+      # Retrieve active session metadata (uptime, bytes transmitted)
+      ansible.netcommon.cli_command:
+        command: "show vpn-sessiondb l2l filter-ipaddress={{ tunnel_peer }}"
+      register: tunnel_session
+      failed_when: false
+
+    - name: "Capture: Interface Operational Status"
+      # Verify that the physical/logical egress paths are UP
+      ansible.netcommon.cli_command:
+        command: "show interface ip brief"
+      register: interface_brief
+      # Standard: Observability - Verify connectivity to device by ensuring output is not null
+      failed_when: interface_brief.stdout | length == 0
+
+    - name: "Capture: Relevant Syslog Errors"
+      # Filter recent logs for peer-specific failures or general crypto errors
+      ansible.netcommon.cli_command:
+        command: "show logging | include {{ tunnel_peer }}|error|fail | last 50"
+      register: error_logs
+      failed_when: false
+
+    - name: "Export: JSON Diagnostics for SolarWinds"
+      # Standard: Idempotency - Overwrites diagnostic file with fresh state on each run
+      ansible.builtin.copy:
+        content: |
+          {
+            "device": "{{ inventory_hostname }}",
+            "timestamp": "{{ ansible_date_time.iso8601 }}",
+            "troubleshooting_peer": "{{ tunnel_peer }}",
+            "ikev1_sa": {{ ikev1_sa.stdout | to_json }},
+            "ikev2_sa": {{ ikev2_sa.stdout | to_json }},
+            "ipsec_sa": {{ ipsec_sa.stdout | to_json }},
+            "tunnel_session": {{ tunnel_session.stdout | to_json }},
+            "interfaces": {{ interface_brief.stdout | to_json }},
+            "error_logs": {{ error_logs.stdout | to_json }}
+          }
+        dest: "/tmp/asa_ipsec_troubleshoot_{{ inventory_hostname }}_{{ tunnel_peer }}.json"
+        mode: '0644'
+      when: output_format == 'json'
+
+    - name: "Display: Human Readable Troubleshooting Report"
+      ansible.builtin.debug:
+        msg: |
+          ==============================================================================
+          IPSEC TROUBLESHOOTING REPORT: {{ inventory_hostname }}
+          PEER: {{ tunnel_peer }}
+          TIMESTAMP: {{ ansible_date_time.iso8601 }}
+          ==============================================================================
+
+          [IKE PHASE 1 STATUS]
+          {{ ikev1_sa.stdout | default('No IKEv1 SA found') }}
+          {{ ikev2_sa.stdout | default('No IKEv2 SA found') }}
+
+          [IPSEC PHASE 2 STATUS]
+          {{ ipsec_sa.stdout | default('No IPsec SA found') }}
+
+          [VPN SESSION DB]
+          {{ tunnel_session.stdout | default('No active session entries') }}
+
+          [RECENT SYSLOG ERRORS]
+          {{ error_logs.stdout | default('No recent errors found in buffer') }}
+      when: output_format == 'text'
+
+    - name: "Analysis: Tunnel Health Summary"
+      # Standard: Observability - Automated logic to summarize state
+      ansible.builtin.debug:
+        msg: |
+          =======================
+          TUNNEL STATUS SUMMARY
+          =======================
+          Peer: {{ tunnel_peer }}
+          {% set p1_up = 'AM_ACTIVE' in ikev1_sa.stdout or 'UP-ACTIVE' in ikev2_sa.stdout %}
+          {% set p2_up = 'peer' in ipsec_sa.stdout.lower() and 'caps:' in ipsec_sa.stdout %}
+
+          IKE Phase 1: {{ '✅ UP' if p1_up else '❌ DOWN' }}
+          IPsec Phase 2: {{ '✅ UP' if p2_up else '❌ DOWN' }}
+
+          VERDICT: {{ 'Tunnel is healthy.' if (p1_up and p2_up) else 'Tunnel failure detected. Review Phase 1 credentials or Phase 2 ACL selectors.' }}
+      when: output_format == 'text'

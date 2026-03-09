@@ -1,0 +1,14 @@
+[srx300]
+srx-fw-01 ansible_host=192.168.1.20
+srx-fw-02 ansible_host=192.168.1.21
+
+[srx300:vars]
+ansible_connection=netconf
+ansible_network_os=junipernetworks.junos.junos
+ansible_user=admin
+ansible_port=830
+ansible_timeout=60
+
+[firewalls]
+srx-fw-01
+srx-fw-02

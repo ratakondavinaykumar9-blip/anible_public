@@ -1,0 +1,17 @@
+---
+# Fortinet Output Sanitization Logic
+# Purpose: Clean 'show' command output for consumption by Python parsers
+
+- name: Sanitize FortiGate Output
+  set_fact:
+    sanitized_output: "{{ raw_output | regex_replace('\\x1b\\[[0-9;]*[a-zA-Z]', '') | regex_replace('--More--', '') | regex_replace('^.*config-version=.*$', '') }}"
+
+- name: Remove redundant empty lines and terminal artifacts
+  set_fact:
+    sanitized_output: "{{ sanitized_output.splitlines() | map('trim') | reject('equalto', '') | join('\n') }}"
+
+- name: Save Clean Output
+  copy:
+    content: "{{ sanitized_output }}"
+    dest: "{{ clean_output_path }}"
+  delegate_to: localhost

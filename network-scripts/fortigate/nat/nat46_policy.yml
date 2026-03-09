@@ -1,0 +1,34 @@
+---
+# FortiGate NAT46 Policies - Architect:Improved Version
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+
+- name: Retrieve and Validate FortiGate NAT46 Policies
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Fetch NAT46 operational state via CLI
+      # FQCN: Using fully qualified collection name for portability and precision.
+      # Idempotency: Read-only operations are inherently idempotent and safe for repeated runs.
+      ansible.netcommon.cli_command:
+        command: "get firewall nat46"
+      register: nat46_data
+      # Error Handling: Fail on explicit command errors while allowing for empty policy lists.
+      failed_when:
+        - nat46_data.failed
+        - "'parse error' in nat46_data.stdout or 'Command fail' in nat46_data.stdout"
+
+    - name: Validate data retrieval success
+      # Observability: Use assert to verify that the command returned valid data structures.
+      ansible.builtin.assert:
+        that:
+          - "nat46_data.stdout is defined"
+        fail_msg: "NAT46 data retrieval failed. Check device permissions or feature availability."
+        success_msg: "NAT46 operational state successfully captured."
+
+    - name: Display NAT46 operational data
+      # Documentation: Provide clear, formatted output for operator visibility and audit trails.
+      ansible.builtin.debug:
+        msg: |
+          ======================= NAT46 STATUS =======================
+          {{ nat46_data.stdout | default('No NAT46 configuration or policies found.') }}

@@ -1,0 +1,49 @@
+---
+# FortiGate Log Viewer - Production Ready
+# Improved for idempotency, observability, and robust error handling.
+- name: View FortiGate Logs
+  hosts: fortigate
+  gather_facts: false
+  vars:
+    # Category of logs to retrieve (e.g., traffic, event, virus)
+    log_type: "traffic"
+    # Number of lines to display from the end of the log buffer
+    log_count: 50
+
+  tasks:
+    - name: Validate input parameters
+      # Observability: Ensure variables are within expected bounds before execution
+      ansible.builtin.assert:
+        that:
+          - log_count | int > 0
+          - log_type is defined
+        fail_msg: "Variable log_count must be a positive integer and log_type must be defined."
+        quiet: true
+
+    - name: Retrieve logs from device
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: "execute log filter category {{ log_type }} && execute log display | head {{ log_count }}"
+      register: logs_result
+      # Idempotency: Read-only operations must report 'changed: false'
+      changed_when: false
+      # Error Handling: Catch FortiOS specific command failures
+      failed_when:
+        - logs_result.rc != 0
+        - "'Command fail' in logs_result.stdout"
+
+    - name: Verify log data integrity
+      # Observability: Confirm the command returned content and didn't just exit silently
+      ansible.builtin.assert:
+        that:
+          - logs_result.stdout | length > 0
+        fail_msg: "No logs were returned for type: {{ log_type }}. Check if logging is enabled."
+        quiet: true
+
+    - name: Display formatted log output
+      # Observability: Provide a clear, human-readable summary of the captured data
+      ansible.builtin.debug:
+        msg: |
+          ======================= {{ log_type | upper }} LOGS (Last {{ log_count }}) =======================
+          {{ logs_result.stdout }}
+          ====================================================================================

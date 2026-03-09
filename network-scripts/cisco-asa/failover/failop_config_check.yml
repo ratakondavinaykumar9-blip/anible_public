@@ -1,0 +1,34 @@
+---
+# Failover Config Check
+# This playbook retrieves and validates the failover status on Cisco ASA/Firepower devices.
+# It ensures high availability state is consistent and provides observability through assertions.
+
+- name: Failover Config Check
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get failover configuration and state
+      # Idempotency: 'show' commands are read-only and do not alter state.
+      # FQCN: Using fully qualified collection name for the CLI module.
+      ansible.netcommon.cli_command:
+        command: show failover
+      register: fo
+      # Error Handling: Fail if the command returns an error or is unrecognized by the device.
+      failed_when:
+        - fo.failed or 'Invalid input' in fo.stdout or 'usage:' in fo.stdout
+
+    - name: Validate failover operational status
+      # Observability: Verify that failover is actually enabled to ensure HA is functional.
+      ansible.builtin.assert:
+        that:
+          - "'Failover On' in fo.stdout"
+        fail_msg: "Failover is currently DISABLED on {{ inventory_hostname }}"
+        success_msg: "Failover is ENABLED and operational on {{ inventory_hostname }}"
+
+    - name: Display failover details
+      # Documentation: Logging the stdout for visibility and audit trails in execution logs.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FAILOVER STATUS =======================
+          {{ fo.stdout }}

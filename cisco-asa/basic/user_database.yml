@@ -1,0 +1,32 @@
+---
+# User Database
+# Improved by Architect:# Purpose: Securely retrieve and verify the local user database from Cisco ASA/Firepower.
+# Standards: Idempotency (Read-only), Observability (Assert), FQCN usage.
+
+- name: User Database Audit
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve local username configuration
+      # Use Fully Qualified Collection Name (FQCN) for reliability and best practice
+      ansible.netcommon.cli_command:
+        command: show running-config username
+      register: users_result
+      # Error Handling: Ensure task failure is explicitly tracked
+      failed_when: users_result.failed | default(false)
+
+    - name: Validate that user data was successfully retrieved
+      # Observability: Assert confirms the device returned a valid response object
+      ansible.builtin.assert:
+        that:
+          - users_result.stdout is defined
+        fail_msg: "Failed to retrieve configuration from {{ inventory_hostname }}. Check connectivity and credentials."
+        quiet: true
+
+    - name: Display the User Database
+      # Documentation: Formatting output for operator visibility and troubleshooting
+      ansible.builtin.debug:
+        msg: |
+          ======================= USER DATABASE =======================
+          {{ users_result.stdout | default('No local users found or command returned empty.') }}

@@ -1,0 +1,24 @@
+- name: Configure FortiGate SD-WAN Service Rules (Traffic Steering)
+  hosts: fortigates
+  connection: httpapi
+  vars:
+    vdom: "root"
+  tasks:
+    - name: Create SD-WAN Rule for Office365 Steering
+      fortinet.fortios.fortios_system_sdwan:
+        vdom: "{{ vdom }}"
+        system_sdwan:
+          service:
+            - id: 1
+              name: "Office365_Steering"
+              mode: "priority"
+              protocol: 6
+              start_port: 443
+              end_port: 443
+              dst:
+                - name: "Office365_Subnets" # Pre-defined address object
+              priority_members:
+                - 1 # ISP-A
+                - 2 # ISP-B
+              health_check: "Google_DNS"
+              link_cost_threshold: 10

@@ -1,0 +1,34 @@
+---
+# FortiGate IPSec Monitor
+# This playbook retrieves operational status of VPN tunnels.
+# Standards: Idempotency (read-only), Observability, Documentation, Error Handling, FQCN.
+
+- name: IPSec Monitor
+  hosts: fortigate
+  gather_facts: false # Performance: Skipping fact gathering as it is not required for CLI monitoring.
+
+  tasks:
+    - name: Get IPSec monitor status via CLI
+      # Using FQCN (Fully Qualified Collection Name) for consistency and portability.
+      ansible.netcommon.cli_command:
+        command: get vpn ipsec monitor
+      register: ipsec_mon
+      # Error Handling: Explicitly check for task failure or specific error strings in output.
+      failed_when: 
+        - ipsec_mon.failed or "Command fail" in ipsec_mon.stdout
+
+    - name: Validate retrieval of IPSec data
+      # Observability: Use assert to verify that the response is not empty before proceeding.
+      ansible.builtin.assert:
+        that:
+          - ipsec_mon.stdout is defined
+          - ipsec_mon.stdout | length > 0
+        fail_msg: "IPSec monitor command failed or returned empty data."
+        success_msg: "IPSec monitor data retrieved successfully."
+
+    - name: Display IPSec monitor results
+      # Documentation: Providing a clear, formatted output for the end-user or operator.
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC MONITOR =======================
+          {{ ipsec_mon.stdout }}

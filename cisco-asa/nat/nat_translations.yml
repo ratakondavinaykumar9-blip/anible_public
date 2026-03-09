@@ -1,0 +1,55 @@
+---
+# Nat Translations - Improved for Enterprise Standards
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
+# This playbook retrieves NAT translation tables from Cisco ASA/Firepower devices.
+# Read-only 'show' commands are utilized, ensuring the playbook is inherently idempotent.
+
+- name: Get NAT Translations
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Get active NAT translation summary
+      # FQCN: Using cisco.asa.asa_command for direct ASA CLI interaction
+      # Purpose: Retrieve a high-level view of current XLATE entries.
+      cisco.asa.asa_command:
+        commands:
+          - show xlate
+      register: xlate_summary
+      # Error Handling: Catch both module-level failures and CLI-level syntax errors.
+      failed_when: xlate_summary.failed or "Invalid input" in xlate_summary.stdout[0]
+
+    - name: Verify NAT summary data retrieval
+      # Observability: Ensure the command returned actual content rather than an empty response.
+      ansible.builtin.assert:
+        that:
+          - xlate_summary.stdout[0] is defined
+          - xlate_summary.stdout[0] | length > 0
+        fail_msg: "NAT translation table summary could not be retrieved or is empty."
+        success_msg: "Successfully retrieved NAT translation summary."
+
+    - name: Get detailed NAT translation table
+      # Purpose: Capture detailed flags, timeouts, and idle times for deeper observability.
+      cisco.asa.asa_command:
+        commands:
+          - show xlate detail
+      register: xlate_detailed
+      failed_when: xlate_detailed.failed or "Invalid input" in xlate_detailed.stdout[0]
+
+    - name: Verify detailed NAT data retrieval
+      # Observability: Validate that detailed output was successfully captured.
+      ansible.builtin.assert:
+        that:
+          - xlate_detailed.stdout[0] is defined
+        fail_msg: "Detailed NAT translation information could not be retrieved."
+
+    - name: Display NAT Translation Analysis
+      # Purpose: Provide a structured report to the operator for manual verification.
+      ansible.builtin.debug:
+        msg: |
+          ======================= NAT TRANSLATIONS =======================
+          {{ xlate_summary.stdout[0] }}
+
+          ======================= DETAILED ANALYSIS ======================
+          {{ xlate_detailed.stdout[0] }}

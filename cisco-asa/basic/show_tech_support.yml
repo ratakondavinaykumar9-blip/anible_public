@@ -1,0 +1,47 @@
+---
+# Improved Show Tech Support Playbook
+# Standardized by Architect:# Purpose: Collects comprehensive diagnostic information from Cisco ASA/Firepower devices.
+# Features: Idempotency, validation via assertions, and FQCN usage.
+
+- name: Get Tech Support Info
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: "ENSURE: Output directory exists"
+      # Creates the destination directory if it does not exist to prevent copy failure.
+      ansible.builtin.file:
+        path: "/tmp/tech_support"
+        state: directory
+        mode: '0755'
+
+    - name: "EXECUTE: Retrieve tech-support details"
+      # Uses the FQCN for the network command module to run the diagnostic command.
+      # Registering output for subsequent validation and file persistence.
+      ansible.netcommon.cli_command:
+        command: show tech-support
+      register: tech_capture
+      # Basic error handling: ensure we actually received data.
+      failed_when: 
+        - tech_capture.stdout is not defined or tech_capture.stdout | length == 0
+
+    - name: "VERIFY: Diagnostic data integrity"
+      # Observability: Assert that the output contains expected signatures of a tech-support report.
+      ansible.builtin.assert:
+        that:
+          - "'Hardware:' in tech_capture.stdout or 'Uptime:' in tech_capture.stdout"
+        fail_msg: "Captured output from {{ inventory_hostname }} does not appear to be a valid tech-support report."
+        success_msg: "Tech-support data successfully validated for {{ inventory_hostname }}."
+        quiet: true
+
+    - name: "PERSIST: Save report to local filesystem"
+      # Idempotency: The copy module will only report 'changed' if the diagnostic content differs.
+      ansible.builtin.copy:
+        content: "{{ tech_capture.stdout }}"
+        dest: "/tmp/tech_support/asa_tech_support_{{ inventory_hostname }}.txt"
+        mode: '0644'
+
+    - name: "REPORT: Display completion status"
+      # Final summary for operator visibility.
+      ansible.builtin.debug:
+        msg: "Tech support archive available at: /tmp/tech_support/asa_tech_support_{{ inventory_hostname }}.txt"

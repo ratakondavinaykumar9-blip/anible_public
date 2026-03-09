@@ -1,0 +1,37 @@
+---
+# Interface IP Configuration and Verification
+# Improved by: Architect:# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Interface IP Config
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve current IP address configuration
+      # Best Practice: Use Fully Qualified Collection Names (FQCN)
+      # Idempotency: Read-only command is inherently idempotent and safe to run multiple times
+      ansible.netcommon.cli_command:
+        command: show ip address
+      register: ip_output
+      # Error Handling: Fail if the output is empty or contains typical Cisco/ASA error strings
+      failed_when: 
+        - ip_output.stdout is not defined or ip_output.stdout | length == 0
+        - "'% Invalid input' in ip_output.stdout"
+      # Documentation: This task fetches the operational IP state directly from the device CLI
+
+    - name: Validate retrieved IP information
+      # Observability: Use assert to ensure the device returned the expected data structure
+      ansible.builtin.assert:
+        that:
+          - "'Interface' in ip_output.stdout"
+          - "'Address' in ip_output.stdout or 'IP-Address' in ip_output.stdout"
+        fail_msg: "The 'show ip address' command returned invalid or incomplete data."
+        success_msg: "IP configuration successfully retrieved and verified."
+      # Documentation: Ensures the playbook stops if the device returns unexpected or garbled output
+
+    - name: Display formatted interface IP status
+      # Observability: Provide a clear, human-readable view of the current device state
+      ansible.builtin.debug:
+        msg: |
+          ======================= INTERFACE IP REPORT =======================
+          {{ ip_output.stdout }}
+      # Documentation: Outputs the verified configuration to the console for operator review

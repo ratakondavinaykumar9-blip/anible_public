@@ -1,0 +1,33 @@
+---
+# FortiGate Route Cache Retrieval
+# This playbook retrieves the current routing table cache from FortiGate devices.
+# It is designed to be idempotent (read-only), observable, and follows FQCN standards.
+- name: Get FortiGate Route Cache
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve routing table cache via CLI
+      # Use FQCN for network command execution
+      ansible.netcommon.cli_command:
+        command: get router info routing-table cache
+      register: cache_output
+      # Error Handling: Ensure the task fails if the command is not recognized or execution fails
+      failed_when:
+        - cache_output.failed or "command parse error" in cache_output.stdout | lower
+
+    - name: Validate route cache response
+      # Observability: Assert that the output is defined to ensure data was captured
+      ansible.builtin.assert:
+        that:
+          - cache_output.stdout is defined
+        fail_msg: "The route cache command failed to return a valid response."
+        success_msg: "Route cache data successfully captured."
+        quiet: true
+
+    - name: Display formatted Route Cache
+      # Observability: Provide a clear view of the retrieved data for logging and troubleshooting
+      ansible.builtin.debug:
+        msg: |
+          ======================= ROUTE CACHE =======================
+          {{ cache_output.stdout }}

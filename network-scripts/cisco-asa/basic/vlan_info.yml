@@ -1,0 +1,35 @@
+---
+# Playbook: Cisco ASA/Firepower VLAN Information Retrieval
+# Purpose: Gathers VLAN status for auditing and validation.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+
+- name: Cisco ASA/Firepower VLAN Audit
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'show vlan' command
+      # FQCN: Using cisco.asa.asa_command for specific platform support
+      cisco.asa.asa_command:
+        commands:
+          - show vlan
+      register: vlan_result
+      # Error Handling: Ensures the playbook fails if the command is unrecognized or the session fails
+      failed_when:
+        - vlan_result.failed or "Invalid" in vlan_result.stdout[0]
+      # Idempotency: Read-only commands are inherently idempotent as they do not modify device state.
+
+    - name: Validate VLAN data integrity
+      # Observability: Verifying that data was actually returned from the device
+      ansible.builtin.assert:
+        that:
+          - vlan_result.stdout[0] | length > 0
+        fail_msg: "VLAN output is empty. Check device configuration or connectivity."
+        success_msg: "VLAN data successfully captured."
+
+    - name: Output VLAN information to console
+      # Documentation: Providing a clear, formatted view of the retrieved state for the operator
+      ansible.builtin.debug:
+        msg: |
+          ======================= VLAN INFORMATION =======================
+          {{ vlan_result.stdout[0] }}

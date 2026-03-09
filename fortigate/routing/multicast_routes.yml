@@ -1,0 +1,42 @@
+---
+# Multicast Routes Audit
+# Improved: 2026-03-08
+# Author: Architect:#
+# Standards Applied:
+# 1. Idempotency: Read-only tasks marked with changed_when: false.
+# 2. Observability: Registration of outputs and explicit validation via assert.
+# 3. Documentation: Inline comments explaining task purpose and logic.
+# 4. Error Handling: Explicit failure conditions based on return codes.
+# 5. Best Practices: Full usage of Fully Qualified Collection Names (FQCN).
+
+- name: FortiGate Multicast Route Verification
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Fetch multicast routing information
+      # Executes the specific FortiOS command to retrieve the multicast RIB.
+      # FQCN used to ensure portability and clarity of the module source.
+      ansible.netcommon.cli_command:
+        command: get router info routing-table multicast
+      register: mc_capture
+      # Idempotency: Read-only operations must not indicate a change in system state.
+      changed_when: false
+      # Error Handling: Ensure the playbook fails if the device returns a non-zero exit status.
+      failed_when: mc_capture.rc != 0
+
+    - name: Validate capture success and data integrity
+      # Observability: Verification step to ensure we aren't processing empty or failed output.
+      ansible.builtin.assert:
+        that:
+          - mc_capture.stdout is defined
+          - mc_capture.stdout | length > 0
+        fail_msg: "Multicast routing data is empty or could not be retrieved from the device."
+        success_msg: "Multicast routing data successfully validated."
+
+    - name: Output Multicast Routing Table
+      # Provides human-readable output for auditing and operational troubleshooting.
+      ansible.builtin.debug:
+        msg: |
+          ======================= MULTICAST ROUTES =======================
+          {{ mc_capture.stdout }}

@@ -1,0 +1,34 @@
+---
+# Network Automation Framework Architect: User Database Audit Playbook
+# Purpose: Retrieves the local username configuration from Cisco ASA/Firepower devices.
+# Standards: Idempotent (read-only), Observable (assertions), Documented (inline comments), 
+# Error-Aware (failure conditions), and FQCN-compliant.
+- name: User Database Audit
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve local username configuration from device
+      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interactions.
+      # This operation is inherently idempotent as it does not modify device state.
+      ansible.netcommon.cli_command:
+        command: show running-config username
+      register: users_result
+      # Error Handling: Explicitly fail if the command is unrecognized or if the connection fails.
+      failed_when: users_result.failed or "Invalid input" in users_result.stdout
+
+    - name: Assert user database visibility
+      # Observability: Verify that the command returned a non-empty configuration set.
+      ansible.builtin.assert:
+        that:
+          - users_result.stdout is defined
+          - users_result.stdout | length > 0
+        fail_msg: "Audit failed: No user configuration was returned from the device."
+        success_msg: "Audit successful: User database retrieved."
+
+    - name: Report User Database details
+      # Observability: Provide a clear visual report of the retrieved configuration for operator review.
+      ansible.builtin.debug:
+        msg: |
+          ======================= USER DATABASE =======================
+          {{ users_result.stdout }}

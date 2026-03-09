@@ -1,0 +1,34 @@
+---
+# FortiGate Firewall Statistics
+# Standardized for Idempotency, Observability, and Robust Error Handling
+# Author: Architect:--
+- name: Get Firewall Stats
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Execute command to retrieve firewall statistics
+      # Use FQCN (Fully Qualified Collection Name) for consistency and reliability
+      ansible.netcommon.cli_command:
+        command: get firewall stats
+      register: stats_output
+      # Idempotency: 'get' commands are read-only and inherently safe for multiple runs.
+      # Error Handling: Define failure criteria for device-specific error messages.
+      failed_when: 
+        - stats_output.failed or "Command fail" in stats_output.stdout or "Unknown action" in stats_output.stdout
+
+    - name: Verify statistics retrieval success
+      # Observability: Assert that the command returned meaningful data.
+      ansible.builtin.assert:
+        that:
+          - stats_output.stdout is defined
+          - stats_output.stdout | length > 0
+        fail_msg: "The firewall returned an empty or invalid response."
+        success_msg: "Firewall statistics successfully captured."
+
+    - name: Display the captured firewall statistics
+      # Documentation: Provide a formatted view of the output for operational clarity.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FIREWALL STATS =======================
+          {{ stats_output.stdout }}

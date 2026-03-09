@@ -1,0 +1,38 @@
+---
+# Architect:Improved Playbook
+# Objective: Retrieve and validate interface descriptions from Cisco ASA/Firepower devices.
+# This playbook adheres to standards for idempotency, observability, and error handling.
+
+- name: Get Interface Descriptions
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute "show interface description" command
+      # FQCN: Using ansible.netcommon.cli_command for standard network CLI interaction.
+      ansible.netcommon.cli_command:
+        command: show interface description
+      register: interface_desc
+      # Idempotency: Read-only 'show' commands must not trigger a "changed" status.
+      changed_when: false
+      # Error Handling: Define explicit failure conditions based on CLI response patterns.
+      failed_when:
+        - interface_desc.failed
+        - "'Invalid input' in interface_desc.stdout"
+        - "'%' in interface_desc.stdout"
+
+    - name: Validate output content integrity
+      # Observability: Ensure the device returned valid data before proceeding.
+      ansible.builtin.assert:
+        that:
+          - "'Interface' in interface_desc.stdout"
+          - interface_desc.stdout_lines | length > 0
+        fail_msg: "Interface description output is empty or the command was not recognized by the device."
+        success_msg: "Interface descriptions successfully retrieved and validated."
+
+    - name: Display formatted interface descriptions
+      # Observability: Provide a clear, human-readable summary of the command output.
+      ansible.builtin.debug:
+        msg: |
+          ======================= INTERFACE DESCRIPTIONS =======================
+          {{ interface_desc.stdout }}

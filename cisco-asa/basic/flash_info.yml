@@ -1,0 +1,37 @@
+---
+# Flash Info
+# Improved by Architect:# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
+- name: Get Flash Information
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve flash information from ASA
+      # FQCN: Using ansible.netcommon.cli_command for standardized CLI execution across network devices
+      # Documentation: Executes the 'show flash' command to retrieve file system details and verify storage capacity
+      # Idempotency: This is a read-only command that does not modify device state, making it safe for repetitive execution
+      ansible.netcommon.cli_command:
+        command: show flash
+      register: flash_output
+      # Error Handling: Validate that the command executed successfully and identify common Cisco CLI error indicators
+      failed_when:
+        - flash_output.stdout | length == 0
+        - "'Invalid' in flash_output.stdout"
+        - "'Incomplete' in flash_output.stdout"
+        - "'% Error' in flash_output.stdout"
+
+    - name: Validate flash information capture
+      # Observability: Explicitly assert that the output was successfully registered and contains expected data
+      ansible.builtin.assert:
+        that:
+          - flash_output.stdout is defined
+          - flash_output.stdout | length > 0
+        fail_msg: "Flash information could not be retrieved from {{ inventory_hostname }}."
+
+    - name: Display retrieved flash details
+      # Documentation: Outputs the formatted flash data to provide operational visibility and status confirmation
+      ansible.builtin.debug:
+        msg: |
+          ======================= FLASH INFO: {{ inventory_hostname }} =======================
+          {{ flash_output.stdout }}

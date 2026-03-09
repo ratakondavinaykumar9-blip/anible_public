@@ -1,0 +1,34 @@
+---
+# FortiGate HA Status - Improved for Reliability and Observability
+# This playbook retrieves and validates the High Availability (HA) status of FortiGate devices.
+- name: Get HA Status
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve HA status from FortiGate
+      # Use FQCN (Fully Qualified Collection Name) for consistency and portability
+      # This task is inherently idempotent as it is a read-only 'get' command
+      ansible.netcommon.cli_command:
+        command: get system ha status
+      register: ha_status_raw
+      # Error Handling: Explicitly fail if the command is unrecognized or execution fails
+      failed_when: 
+        - ha_status_raw.failed or "Unknown command" in ha_status_raw.stdout
+
+    - name: Validate HA Status Output Integrity
+      # Observability: Assert that the output contains expected HA fields to ensure data quality
+      ansible.builtin.assert:
+        that:
+          - "'HA Health Status' in ha_status_raw.stdout"
+          - "'Mode:' in ha_status_raw.stdout"
+        fail_msg: "HA status output is invalid, incomplete, or HA is not configured on this device."
+        success_msg: "HA status successfully retrieved and validated."
+
+    - name: Display HA Status Summary
+      # Provide formatted output for better visibility during playbook execution
+      ansible.builtin.debug:
+        msg: |
+          ======================= HA STATUS SUMMARY =======================
+          {{ ha_status_raw.stdout }}
+          =================================================================

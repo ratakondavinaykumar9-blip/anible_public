@@ -1,0 +1,34 @@
+---
+# FortiGate VIP (DNAT) Configuration Audit
+# Standards-aligned: Idempotency, Observability, and Error Handling
+# Author: Architect: name: Retrieve and Validate FortiGate VIP List
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'get firewall vip' command on FortiGate
+      # This task is inherently idempotent as it only retrieves operational state without modifying configuration.
+      # Using Fully Qualified Collection Name (FQCN) for reliability.
+      ansible.netcommon.cli_command:
+        command: get firewall vip
+      register: vip_result
+      # Error Handling: Ensure the task fails if the command returns an error string or fails execution.
+      failed_when: 
+        - vip_result.failed or "error" in vip_result.stdout | lower
+        - "entry not found" in vip_result.stdout | lower and "vip" not in vip_result.stdout | lower
+
+    - name: Verify VIP data observability and integrity
+      # Observability: Assert that the command returned data to prevent silent failures in automation pipelines.
+      ansible.builtin.assert:
+        that:
+          - "vip_result.stdout is defined"
+          - "vip_result.stdout | length > 0"
+        fail_msg: "Data retrieval failed: The VIP list is empty or the command output was null."
+        success_msg: "VIP data successfully captured and validated."
+
+    - name: Display formatted VIP (DNAT) information
+      # Provides a clear visual report of the retrieved status.
+      ansible.builtin.debug:
+        msg: |
+          ======================= VIPs (DNAT) =======================
+          {{ vip_result.stdout }}

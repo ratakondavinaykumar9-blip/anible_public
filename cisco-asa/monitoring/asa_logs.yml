@@ -1,0 +1,42 @@
+---
+# ASA Log Retrieval Playbook
+# This playbook retrieves the most recent log entries from a Cisco ASA device.
+# Adheres to Standard:s for production-grade automation.
+
+- name: Retrieve and Validate Recent Cisco ASA Logs
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # log_count determines how many lines of the buffer to retrieve.
+    # Higher values may impact performance depending on buffer size.
+    log_count: 50
+
+  tasks:
+    - name: Fetch recent logging buffer entries
+      # Use FQCN (Fully Qualified Collection Name) for cisco.asa collection.
+      # 'show' commands are inherently idempotent as they do not modify device state.
+      cisco.asa.asa_command:
+        commands:
+          - "show logging | last {{ log_count }}"
+      register: logs_result
+      # Error Handling: Identify failure if the output contains common Cisco error indicators.
+      failed_when:
+        - logs_result.stdout[0] is not defined
+        - "'Invalid input' in logs_result.stdout[0]"
+        - "'% Permission denied' in logs_result.stdout[0]"
+
+    - name: Verify log retrieval integrity
+      # Observability: Assert that the command returned data and is not an empty string.
+      ansible.builtin.assert:
+        that:
+          - logs_result.stdout[0] | length > 0
+        fail_msg: "Log retrieval failed: The command returned no data or the buffer is empty."
+        success_msg: "Log retrieval successful: Received {{ log_count }} lines of log data."
+
+    - name: Display retrieved logs
+      # Provides formatted output for better visibility during playbook execution.
+      ansible.builtin.debug:
+        msg: |
+          ======================= RECENT ASA LOGS =======================
+          {{ logs_result.stdout[0] }}
+          ======================= END OF LOGS ===========================

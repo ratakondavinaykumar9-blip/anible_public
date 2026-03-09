@@ -1,0 +1,35 @@
+---
+# FortiGate Policy Retrieval Playbook
+# This playbook retrieves the current firewall policy list from FortiGate devices.
+# Standards Implemented: Idempotency, Observability, Documentation, Error Handling, FQCN.
+- name: FortiGate Policy List
+  hosts: fortigate
+  gather_facts: false # Performance: Facts are not required for CLI command execution.
+
+  tasks:
+    - name: Retrieve firewall policies via CLI
+      # Using Fully Qualified Collection Name (FQCN) for network command execution
+      ansible.netcommon.cli_command:
+        command: get firewall policy
+      register: policy_result
+      # Idempotency: Retrieval operations must not report a 'changed' status.
+      changed_when: false
+      # Error Handling: Fail if the underlying command failed or returned a CLI error.
+      failed_when:
+        - policy_result.failed or "Command fail" in policy_result.stdout
+
+    - name: Validate policy data retrieval (Observability)
+      # Assert ensures the response is not empty and contains valid data before proceeding.
+      ansible.builtin.assert:
+        that:
+          - "policy_result.stdout is defined"
+          - "policy_result.stdout | length > 0"
+          - "'edit' in policy_result.stdout or 'config' in policy_result.stdout or policy_result.stdout != ''"
+        fail_msg: "Failed to retrieve valid policy data or the policy list is empty."
+        success_msg: "Successfully captured FortiGate policy data."
+
+    - name: Display formatted policy output
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE POLICIES =======================
+          {{ policy_result.stdout }}

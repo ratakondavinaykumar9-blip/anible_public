@@ -1,0 +1,72 @@
+---
+# Backup ASA Configuration with Versioning - Improved
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
+- name: Backup ASA Configuration with Versioning
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    backup_path: "/tmp/asa_backups"
+
+  tasks:
+    - name: "SETUP: Gather local facts for timestamping"
+      # Documentation: Collects controller-side date/time facts since gather_facts is disabled for network devices
+      ansible.builtin.setup:
+        gather_subset:
+          - '!all'
+          - 'min'
+      delegate_to: localhost
+      run_once: true
+
+    - name: "PRE-CHECK: Ensure backup directory exists"
+      # Idempotency: Ensures directory is present without re-creating if it already exists
+      ansible.builtin.file:
+        path: "{{ backup_path }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+
+    - name: "COLLECT: Retrieve running configuration"
+      # Best Practices: Using Fully Qualified Collection Name (FQCN) for Cisco ASA
+      cisco.asa.asa_command:
+        commands:
+          - show running-config
+      register: running_config
+      # Error Handling: Fail explicitly if the command returns no content or fails to execute
+      failed_when: 
+        - running_config.stdout is not defined or running_config.stdout | length == 0
+
+    - name: "COLLECT: Retrieve version information"
+      cisco.asa.asa_command:
+        commands:
+          - show version
+      register: version_info
+
+    - name: "VALIDATE: Verify successful collection"
+      # Observability: Asserts that critical configuration markers are present in the output
+      ansible.builtin.assert:
+        that:
+          - "'interface' in running_config.stdout[0] or 'access-list' in running_config.stdout[0]"
+          - "'Cisco' in version_info.stdout[0]"
+        fail_msg: "Validation failed: Retrieved data for {{ inventory_hostname }} is incomplete or invalid."
+
+    - name: "SAVE: Persist configuration to local file"
+      # Documentation: Saves configuration with metadata header for auditability and version tracking
+      ansible.builtin.copy:
+        content: |
+          # ASA Configuration Backup
+          # Host: {{ inventory_hostname }}
+          # Version Info:
+          # {{ version_info.stdout[0].split('\n')[:5] | join('\n# ') }}
+          # Date: {{ ansible_date_time.iso8601 }}
+          
+          {{ running_config.stdout[0] }}
+        dest: "{{ backup_path }}/{{ inventory_hostname }}_{{ ansible_date_time.iso8601 | regex_replace(':', '-') }}.cfg"
+        mode: '0640'
+      delegate_to: localhost
+
+    - name: "REPORT: Confirm backup completion"
+      # Observability: Provide final status message to the operator
+      ansible.builtin.debug:
+        msg: "Backup for {{ inventory_hostname }} successfully saved to {{ backup_path }}/"

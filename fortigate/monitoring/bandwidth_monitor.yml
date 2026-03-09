@@ -1,0 +1,35 @@
+---
+# FortiGate Bandwidth Monitor
+# This playbook retrieves real-time bandwidth statistics from a FortiGate device.
+# It is designed to be idempotent (read-only diagnostic) and follows Network Automation Framework observability standards.
+- name: Monitor Bandwidth
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Execute bandwidth diagnostic command
+      # Using Fully Qualified Collection Name (FQCN) for network CLI operations.
+      # This command is a read-only diagnostic and inherently safe for repeated execution.
+      ansible.netcommon.cli_command:
+        command: diagnose netlink interface -bandwidth
+      register: bw_stats
+      # Error Handling: Ensure the task fails if the device returns an error or unknown command.
+      failed_when: 
+        - bw_stats.failed
+        - "'Unknown' in bw_stats.stdout or 'error' in bw_stats.stdout.lower()"
+
+    - name: Assert bandwidth data presence
+      # Observability: Verify that the command returned usable output before displaying.
+      ansible.builtin.assert:
+        that:
+          - bw_stats.stdout is defined
+          - bw_stats.stdout | length > 0
+        fail_msg: "Bandwidth statistics could not be retrieved from the device or output was empty."
+        success_msg: "Bandwidth statistics successfully captured."
+
+    - name: Display Bandwidth Output
+      # Provide the operator with the formatted bandwidth data for visibility.
+      ansible.builtin.debug:
+        msg: |
+          ======================= FORTIGATE BANDWIDTH REPORT =======================
+          {{ bw_stats.stdout }}

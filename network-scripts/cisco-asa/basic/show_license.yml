@@ -1,0 +1,32 @@
+---
+# Standard: Playbook: License Retrieval
+# Purpose: Gathers and validates license information from Cisco ASA/Firepower devices.
+- name: Get License Details
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Execute 'show version' to gather license and hardware data
+      # Using FQCN: ansible.netcommon.cli_command is preferred for generic CLI interaction.
+      # Read-only operation ensures idempotency as it does not modify device state.
+      ansible.netcommon.cli_command:
+        command: show version
+      register: asa_version_output
+      # Error Handling: Fail explicitly if the command execution fails or returns empty results.
+      failed_when: asa_version_output.failed or not asa_version_output.stdout
+
+    - name: Verify the integrity of retrieved license data
+      # Observability: Validating the presence of key fields to ensure output is meaningful.
+      ansible.builtin.assert:
+        that:
+          - "'Serial Number' in asa_version_output.stdout"
+          - "'Hardware' in asa_version_output.stdout"
+        fail_msg: "The retrieved output does not contain expected hardware or license strings."
+        quiet: true
+
+    - name: Display formatted license information
+      # Observability: Providing a human-readable summary of the device status.
+      ansible.builtin.debug:
+        msg: |
+          ======================= DEVICE LICENSE REPORT =======================
+          {{ asa_version_output.stdout }}

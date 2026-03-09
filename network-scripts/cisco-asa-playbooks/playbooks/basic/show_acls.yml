@@ -1,0 +1,64 @@
+---
+# ==============================================================================
+# Playbook: Get Access Lists (ACLs) from Cisco ASA
+# Standards: Idempotency (state: gathered), Observability (register/assert),
+#            Documentation (inline comments), Error Handling (failed_when), FQCN.
+# ==============================================================================
+- name: Get and Audit Cisco ASA Access Lists
+  hosts: asa_firepower
+  gather_facts: false
+  vars:
+    # Set output preference: 'text' for console summary or 'json' for file export
+    output_format: "{{ output_format | default('text') }}"
+    # Local path for audit file generation for observability and compliance
+    report_path: "/tmp/asa_acls_{{ inventory_hostname }}.json"
+
+  tasks:
+    - name: Gather current ACL configuration from the security appliance
+      # Use FQCN and state: gathered to ensure an idempotent, read-only retrieval
+      cisco.asa.asa_acls:
+        state: gathered
+      register: acl_data
+      # Error Handling: Ensure we fail if the module cannot communicate or returns invalid data
+      failed_when: 
+        - acl_data.failed | default(false)
+        - "'gathered' not in acl_data and 'ansible_facts' not in acl_data"
+
+    - name: Validate ACL data integrity
+      # Observability: Assert that we received a valid configuration object before proceeding
+      ansible.builtin.assert:
+        that:
+          - acl_data.gathered is defined or acl_data.ansible_facts.asa_acls is defined
+        fail_msg: "Data validation failed: No ACL configuration was retrieved from {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Normalize retrieved ACL data
+      # Best Practices: Create a consistent variable to handle differences in collection versions
+      ansible.builtin.set_fact:
+        normalized_acls: "{{ acl_data.gathered | default(acl_data.ansible_facts.asa_acls) | default([]) }}"
+
+    - name: Persist ACL configuration as JSON for audit records
+      # Observability: Export structured data for long-term tracking and external analysis
+      ansible.builtin.copy:
+        content: "{{ normalized_acls | to_nice_json }}"
+        dest: "{{ report_path }}"
+        mode: '0640'
+      when: output_format | lower == 'json'
+
+    - name: Display human-readable ACL summary report
+      # Documentation: Provide clear, structured visibility into the device security posture
+      ansible.builtin.debug:
+        msg: |
+          ======================================================================
+          ACCESS LIST INVENTORY: {{ inventory_hostname }}
+          ======================================================================
+          {% if normalized_acls | length > 0 %}
+          {% for acl in normalized_acls %}
+          * ACL Name: {{ acl.name }}
+            - Total Entries: {{ acl.acl_entries | default([]) | length }}
+          {% endfor %}
+          {% else %}
+          Status: No Access Control Lists (ACLs) detected on this device.
+          {% endif %}
+          ======================================================================
+      when: output_format | lower == 'text'

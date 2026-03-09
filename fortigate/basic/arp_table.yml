@@ -1,0 +1,36 @@
+---
+# FortiGate ARP Table Retrieval
+# Purpose: Fetches the Address Resolution Protocol (ARP) cache from FortiOS devices.
+# Standards: Idempotent (read-only), Observable (assertions), and FQCN compliant.
+- name: Get FortiGate ARP Table
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Fetch ARP table using CLI command
+      # FQCN: ansible.netcommon.cli_command is used for generic network CLI interaction.
+      # This operation is inherently idempotent as it does not modify device state.
+      ansible.netcommon.cli_command:
+        command: "get system arp"
+      register: arp_result
+      # Error Handling: Ensure the task fails if the command returns an error or empty result.
+      failed_when: 
+        - arp_result.failed
+        - "'command parse error' in arp_result.stdout | lower"
+        - "'unknown command' in arp_result.stdout | lower"
+
+    - name: Verify ARP data integrity
+      # Observability: Assert that we received a valid response to prevent silent downstream failures.
+      ansible.builtin.assert:
+        that:
+          - "arp_result.stdout is defined"
+          - "arp_result.stdout | length > 0"
+        fail_msg: "The ARP table could not be retrieved or the output is unexpectedly empty."
+        quiet: true
+
+    - name: Display Formatted ARP Table
+      # Observability: Output the results for logging and manual audit.
+      ansible.builtin.debug:
+        msg: |
+          ======================= ARP TABLE: {{ inventory_hostname }} =======================
+          {{ arp_result.stdout }}

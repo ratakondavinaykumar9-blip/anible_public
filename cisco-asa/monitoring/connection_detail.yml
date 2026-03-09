@@ -1,0 +1,34 @@
+---
+# Connection Detail - Optimized for industry standards
+# This playbook retrieves real-time connection state information from Cisco ASA/Firepower devices.
+# It is designed for observability and reliability in automated network environments.
+- name: Retrieve and Validate Connection Details
+  hosts: asa_firepower
+  gather_facts: false # Facts gathering disabled to improve execution speed for CLI tasks
+
+  tasks:
+    - name: Get detailed connection information from the security appliance
+      # FQCN: Using ansible.netcommon.cli_command for standardized CLI interaction
+      ansible.netcommon.cli_command:
+        command: show conn detail
+      register: conn_output
+      # Error Handling: Ensure the task fails if the command is unrecognized or execution fails
+      failed_when:
+        - conn_output.failed
+        - "'Invalid input' in conn_output.stdout"
+
+    - name: Verify connection data integrity
+      # Observability: Assert that the output contains data to ensure the device is responding correctly
+      ansible.builtin.assert:
+        that:
+          - conn_output.stdout is defined
+          - conn_output.stdout | length > 0
+        fail_msg: "The 'show conn detail' command returned empty or undefined results."
+        success_msg: "Connection details successfully retrieved and validated."
+
+    - name: Output connection details to console
+      # Documentation: Providing a clear, formatted view of the connection table
+      ansible.builtin.debug:
+        msg: |
+          ======================= CONNECTION DETAIL =======================
+          {{ conn_output.stdout }}

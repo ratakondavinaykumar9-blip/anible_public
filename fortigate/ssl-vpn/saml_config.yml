@@ -1,0 +1,23 @@
+- name: Configure FortiGate SAML Authentication (Azure AD)
+  hosts: fortigates
+  connection: httpapi
+  vars:
+    vdom: "root"
+    tenant_id: "YOUR_AZURE_TENANT_ID"
+    fgt_fqdn: "vpn.yourdomain.com"
+  tasks:
+    - name: Create SAML User Object
+      fortinet.fortios.fortios_user_saml:
+        vdom: "{{ vdom }}"
+        state: "present"
+        user_saml:
+          name: "AZURE-AD-SAML"
+          entity_id: "https://{{ fgt_fqdn }}/remote/saml/metadata/"
+          single_sign_on_url: "https://{{ fgt_fqdn }}/remote/saml/login/"
+          single_logout_url: "https://{{ fgt_fqdn }}/remote/saml/logout/"
+          idp_entity_id: "https://sts.windows.net/{{ tenant_id }}/"
+          idp_single_sign_on_url: "https://login.microsoftonline.com/{{ tenant_id }}/saml2"
+          idp_single_logout_url: "https://login.microsoftonline.com/{{ tenant_id }}/saml2"
+          idp_cert: "REMOTE_Cert_1"
+          user_name: "username"
+          group_name: "group"

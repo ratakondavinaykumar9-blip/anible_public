@@ -1,0 +1,33 @@
+---
+# FortiGate VPN Summary - Standard:ized
+# Purpose: Safely retrieve, validate, and display VPN status from FortiGate firewalls.
+# Idempotency: This playbook is read-only (GET command) and safe for repeated execution.
+- name: VPN Status Summary
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve VPN status summary via CLI
+      # Use Fully Qualified Collection Name (FQCN) for reliability
+      ansible.netcommon.cli_command:
+        command: get vpn status
+      register: vpn_status_result
+      # Error Handling: Explicitly define failure conditions based on common FortiOS error patterns
+      failed_when: 
+        - vpn_status_result.failed or "Unknown action" in vpn_status_result.stdout or "Command fail" in vpn_status_result.stdout
+
+    - name: Validate VPN status data integrity
+      # Observability: Use assert to verify that the output is defined and contains data
+      ansible.builtin.assert:
+        that:
+          - vpn_status_result.stdout is defined
+          - vpn_status_result.stdout | length > 0
+        fail_msg: "VPN status retrieval returned empty or undefined results."
+        success_msg: "VPN status data successfully validated."
+
+    - name: Display VPN Summary Report
+      # Documentation: Provide a clear, formatted summary for human operators
+      ansible.builtin.debug:
+        msg: |
+          ======================= VPN SUMMARY =======================
+          {{ vpn_status_result.stdout }}

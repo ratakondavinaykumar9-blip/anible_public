@@ -1,0 +1,88 @@
+RATAGONDA VINAYKUMAR
+Network Security Engineer
+
+Ontario, Canada | ratakondavinaykumar9@gmail.com | linkedin.com/in/vinaykumar
+
+================================================================================
+PROFESSIONAL SUMMARY
+================================================================================
+
+Results-driven Network Security Engineer with 3+ years of experience in designing, implementing, and managing enterprise security infrastructure. Proven expertise in Cisco and Fortinet firewall solutions, cloud security (Azure), and network automation. Demonstrated success in data center migrations, high availability implementations, and security automation using Ansible.
+
+================================================================================
+CORE COMPETENCIES
+================================================================================
+
+FIREWALL SECURITY: Cisco FTD, FMC, ASA, Fortinet FortiGate, Palo Alto, Checkpoint
+CLOUD SECURITY: Azure Firewall, Azure NSG, ASG, VNET Configuration, UDR, NAT Gateway
+NETWORK SECURITY: SSL Decryption, IPS/IDS, High Availability, Clustering, ACLs
+IDENTITY AND ACCESS: Cisco ISE, TACACS+, RADIUS, Role-Based Access Control
+AUTOMATION: Ansible, Python Scripting, Configuration Management
+MONITORING: SolarWinds NPM/NTA, SNMPv3, Splunk, Azure Monitor
+NETWORKING: TCP/IP, VLANs, VTP, OSPF, BGP, EIGRP, Switching
+
+================================================================================
+PROFESSIONAL EXPERIENCE
+================================================================================
+
+NETWORK SECURITY ENGINEER
+SITA, Canada | January 2022 - Present
+
+- Administered Cisco FTD, FMC, ASA, and Fortinet firewalls ensuring secure and highly available network infrastructure
+- Deployed and managed Azure Firewall, NSG rules, ASG policies, VNET configurations, and UDR for cloud security architecture
+- Implemented SSL inspection policies for threat detection and data loss prevention
+- Configured and tuned IPS/IDS rules for advanced threat protection
+- Designed and maintained firewall clustering and failover configurations for 99.99% uptime
+- Leveraged Cisco ISE with TACACS+ for centralized authentication and authorization
+- Developed Ansible playbooks for streamlined security operations
+- Led firewall migration projects with comprehensive system dependency mapping
+- Utilized SolarWinds, SNMPv3, and Azure Monitor for real-time threat detection
+
+================================================================================
+TECHNICAL PROJECTS
+================================================================================
+
+AZURE CLOUD SECURITY ARCHITECTURE
+- Designed and implemented Azure Firewall policies for enterprise cloud workloads
+- Configured NSG rules and ASGs for micro-segmentation
+- Built VNET peering and hub-spoke architectures with UDR for traffic routing
+- Implemented Azure NAT Gateway for outbound traffic management
+
+FIREWALL SECURITY AND AUTOMATION
+- Developed Ansible automation scripts for firewall policy management
+- Created reusable playbook templates for routine security operations
+- Implemented configuration backup and change management automation
+
+DATA CENTER SECURITY MIGRATION
+- Led end-to-end firewall migration from legacy to next-gen firewalls
+- Mapped application dependencies and created migration runbooks
+- Achieved zero-downtime migrations for critical services
+
+================================================================================
+CERTIFICATIONS
+================================================================================
+
+CCNP Security - Cisco - Obtained
+CCNA - Cisco - Obtained
+Azure Security Administrator Associate - Microsoft - In Progress
+
+================================================================================
+EDUCATION
+================================================================================
+
+Master of Applied Science in Electronics and Computer Engineering
+University of Windsor, Canada
+
+Bachelor of Technology in Electronics and Communication Engineering
+Mylavaram, AP, India
+
+================================================================================
+TECHNICAL TOOLS AND PLATFORMS
+================================================================================
+
+Security: Cisco FTD, FMC, ASA, FortiGate, Azure Firewall, Palo Alto, SSL Decryption
+Cloud: Azure, Azure Security Center, Azure Sentinel
+Automation: Ansible, Python, Bash
+Monitoring: SolarWinds, Splunk, Azure Monitor, Nagios
+Networking: Cisco Catalyst, Nexus, GNS3, Packet Tracer
+Protocols: TCP/IP, OSPF, BGP, EIGRP, VLAN, VTP, STP
