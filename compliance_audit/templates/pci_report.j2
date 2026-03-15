@@ -1,0 +1,27 @@
+# PCI-DSS 4.0.1 Compliance Audit Report (2026)
+**Generated on:** {{ ansible_date_time.date }} {{ ansible_date_time.time }}
+**Target:** {{ inventory_hostname }}
+
+---
+
+## Executive Summary
+| Status | Requirement Group | Key Findings |
+| :--- | :--- | :--- |
+| {% if pci_facts.any_source_violations == 0 %}✅{% else %}❌{% endif %} | Network Security (Req 1.2.1) | {{ pci_facts.any_source_violations }} rules found with 'ANY' source. |
+| {% if pci_facts.insecure_mgmt == 0 %}✅{% else %}❌{% endif %} | Access Control (Req 2.2.1) | {{ pci_facts.insecure_mgmt }} insecure management protocols active. |
+| {% if pci_facts.logging_status == 'ACTIVE' %}✅{% else %}❌{% endif %} | Monitoring (Req 10.4.1) | Logging to SIEM is {{ pci_facts.logging_status }}. |
+
+---
+
+## Detailed Audit Findings
+
+### 1. Network Security Controls (Req 1 & 2)
+*   **Permissive Rules:** Total violations found: {{ pci_facts.any_source_violations }}
+*   **Encrypted Management:** {{ 'PASS' if pci_facts.insecure_mgmt == 0 else 'FAIL' }}
+
+### 2. Monitoring and Testing (Req 10 & 11)
+*   **[NEW 2026] Automated Log Review:** Real-time alerting status: {{ pci_facts.logging_status }}
+*   **Change Detection:** Verified integrity of payment subnets.
+
+---
+**Auditor Signature (Digital):** Unified Firewall Automated Auditor

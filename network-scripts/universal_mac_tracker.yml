@@ -1,0 +1,80 @@
+---
+- name: "UNIVERSAL NETWORK TRACKER: MAC/IP Discovery"
+  hosts: all
+  gather_facts: no
+  vars:
+    # Usage: ansible-playbook universal_mac_tracker.yml -e "target_mac=0011.2233.4455"
+    target_mac: ""
+    # We generate variations for different vendor CLI formats
+    mac_dot: "{{ target_mac | replace(':', '.') | replace('-', '.') }}"
+    mac_colon: "{{ target_mac | replace('.', ':') | replace('-', ':') }}"
+
+  tasks:
+    # --- PHASE 1: RESEARCH (COMMAND EXECUTION) ---
+    
+    - name: "Researcher [Nexus/IOS]: Querying MAC & ARP"
+      cisco.nxos.nxos_command:
+        commands:
+          - "show mac address-table address {{ mac_dot }} | json"
+          - "show ip arp {{ mac_dot }} | json"
+      register: nexus_res
+      when: ansible_network_os == 'cisco.nxos.nxos'
+      ignore_errors: true
+
+    - name: "Researcher [ASA]: Querying ARP Table"
+      cisco.asa.asa_command:
+        commands:
+          - "show arp | include {{ mac_dot }}"
+      register: asa_res
+      when: ansible_network_os == 'cisco.asa.asa'
+      ignore_errors: true
+
+    - name: "Researcher [Fortinet]: Querying ARP via CLI"
+      fortinet.fortios.fortios_command:
+        commands:
+          - "get system arp | grep {{ mac_colon }}"
+      register: fgt_res
+      when: ansible_network_os == 'fortinet.fortios.fortios'
+      ignore_errors: true
+
+    - name: "Researcher [Dell]: Querying MAC Table"
+      dellemc.os10.os10_command:
+        commands:
+          - "show mac address-table address {{ mac_dot }}"
+      register: dell_res
+      when: ansible_network_os == 'dellemc.os10.os10'
+      ignore_errors: true
+
+    # --- PHASE 2: PLANNER (DATA AGGREGATION) ---
+
+    - name: "Planner: Consolidating Switch Location (L2)"
+      set_fact:
+        location_report: 
+          device: "{{ inventory_hostname }}"
+          type: "SWITCH"
+          port: "{{ nexus_res.stdout[0] | default('Unknown') }}"
+          vlan: "Refer to output"
+      when: (nexus_res.stdout is defined) or (dell_res.stdout is defined)
+
+    - name: "Planner: Consolidating Firewall Identity (L3)"
+      set_fact:
+        identity_report:
+          device: "{{ inventory_hostname }}"
+          type: "FIREWALL"
+          ip: "{{ (asa_res.stdout[0] | default('')) or (fgt_res.stdout[0] | default('')) }}"
+          interface: "Resolved via ARP"
+      when: (asa_res.stdout is defined) or (fgt_res.stdout is defined)
+
+    # --- PHASE 3: IMPLEMENTER (REPORTING) ---
+
+    - name: "Implementer: Final Discovery Report"
+      ansible.builtin.debug:
+        msg:
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "   NETWORK DISCOVERY: {{ target_mac }}          "
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "NODE: {{ inventory_hostname }} ({{ ansible_network_os }})"
+          - "STATUS: FOUND"
+          - "DETAILS: {{ identity_report | default(location_report) | default('Not found on this node') }}"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      when: (nexus_res.rc == 0 or asa_res.rc == 0 or dell_res.rc == 0 or (fgt_res.stdout is defined and fgt_res.stdout[0] != ''))

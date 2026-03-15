@@ -62,7 +62,7 @@
             state: present
       tags: [l3, vrrp]
 
-    - name: Configure BGP Routing
+    - name: Configure BGP Routing with EVPN
       dellemc.os10.os10_bgp:
         config:
           asn: "{{ bgp_asn }}"
@@ -71,7 +71,19 @@
             - ip: 10.255.1.20
               remote_asn: 65101
               state: present
-      tags: [routing, bgp]
+              address_family:
+                - type: l2vpn
+                  safi: evpn
+                  state: present
+      tags: [routing, bgp, evpn]
+
+    - name: Configure EVPN Instance
+      dellemc.os10.os10_command:
+        commands:
+          - config terminal
+          - evpn
+          - auto-rt
+      tags: [routing, evpn]
 
     - name: Configure VLT (Virtual Link Trunking) Domain
       dellemc.os10.os10_vlt:
@@ -105,3 +117,18 @@
       dellemc.os10.os10_command:
         commands: ['write memory']
       tags: [save]
+
+    # --- v12.0 SECURITY PROVING (POST-DEPLOYMENT) ---
+    - name: Security Validation - Remote Port Scan
+      delegate_to: localhost
+      ansible.builtin.shell: "nmap -sV -p 80,443,22 --open {{ inventory_hostname }}"
+      register: scan_results
+      tags: [validation, security_proving]
+      ignore_errors: true
+
+    - name: Verify Web Access Rule Enforcement
+      ansible.builtin.assert:
+        that:
+          - "'80/tcp open' in scan_results.stdout"
+        fail_msg: "SECURITY VIOLATION: HTTP port 80 is not open or ACL failed!"
+      tags: [validation, security_proving]

@@ -1,0 +1,37 @@
+---
+- name: "AMS INFRASTRUCTURE: MAC Address Locator"
+  hosts: staging # Or your AMS switch group
+  gather_facts: no
+  vars:
+    # Use: ansible-playbook ams_mac_locator.yml -e "target_mac=0011.2233.4455"
+    target_mac: ""
+
+  tasks:
+    - name: "Researcher: Querying MAC Address Table"
+      ansible.builtin.shell: "show mac address-table address {{ target_mac }}"
+      register: mac_output
+      when: ansible_network_os == 'cisco.ios.ios' or ansible_network_os == 'cisco.nxos.nxos'
+      ignore_errors: true
+
+    - name: "Researcher: Querying Juniper Switching Table"
+      ansible.builtin.shell: "show ethernet-switching table | match {{ target_mac }}"
+      register: mac_output_juniper
+      when: ansible_network_os == 'junipernetworks.junos.junos'
+      ignore_errors: true
+
+    - name: "Planner: Analyzing Connection Topology"
+      set_fact:
+        discovery_info: "{{ mac_output.stdout }}"
+      when: mac_output.stdout is defined and target_mac in mac_output.stdout
+
+    - name: "Implementer: Final MAC-to-Port Mapping"
+      ansible.builtin.debug:
+        msg: 
+          - "========================================"
+          - "   MAC DISCOVERY REPORT (AMS)           "
+          - "========================================"
+          - "SWITCH: {{ inventory_hostname }}"
+          - "TARGET: {{ target_mac }}"
+          - "RESULT: {{ discovery_info | default('NOT FOUND ON THIS NODE') }}"
+          - "========================================"
+      when: discovery_info is defined

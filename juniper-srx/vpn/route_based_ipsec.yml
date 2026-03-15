@@ -40,10 +40,19 @@
     ipsec_lifetime: 3600
 
   tasks:
+    - name: Pre-flight Validation
+      ansible.builtin.assert:
+        that:
+          - vpn_remote_gateway_ip | length > 0
+          - vpn_st0_ip | length > 0
+          - vpn_remote_subnets | length > 0
+          - vpn_preshared_key != "CHANGE_ME_VIA_VAULT"
+        fail_msg: "Pre-flight check failed: Ensure all required VPN variables are defined and PSK is not default."
+
     - name: VPN Deployment Block
       block:
         # 1. Resource Module: Define the st0 logical interface
-        # Why: st0 is the virtual tunnel interface required for route-based VPNs in Junos.
+        # Using 'merged' ensures idempotency by only adding missing configuration.
         - name: Configure st0 logical tunnel interface
           junipernetworks.junos.junos_interfaces:
             config:
@@ -53,16 +62,10 @@
                   - name: "{{ vpn_st0_unit }}"
                     description: "VPN Tunnel Unit {{ vpn_st0_unit }}"
             state: merged
-          register: res_st0_int
-
-        - name: Assert st0 interface configuration success
-          ansible.builtin.assert:
-            that:
-              - res_st0_int.failed == false
-            quiet: true
+          register: st0_int_config
 
         # 2. Resource Module: Assign IP address to the st0 unit
-        # Why: Provides the tunnel endpoint an identity for routing and reachability.
+        # Required for route-based VPN to facilitate next-hop routing.
         - name: Configure IPv4 on st0 interface
           junipernetworks.junos.junos_l3_interfaces:
             config:
@@ -70,16 +73,10 @@
                 ipv4:
                   - address: "{{ vpn_st0_ip }}"
             state: merged
-          register: res_st0_ip
-
-        - name: Assert st0 IP configuration success
-          ansible.builtin.assert:
-            that:
-              - res_st0_ip.failed == false
-            quiet: true
+          register: st0_l3_config
 
         # 3. Resource Module: Map st0 to the security zone
-        # Why: Junos is a flow-based firewall; interfaces must be in zones to process traffic.
+        # Essential for Junos flow-based processing to permit traffic through the tunnel.
         - name: Assign st0 unit to security zone
           junipernetworks.junos.junos_security_zones:
             config:
@@ -92,60 +89,44 @@
                       services:
                         - all
             state: merged
-          register: res_st0_zone
-
-        - name: Assert security zone assignment success
-          ansible.builtin.assert:
-            that:
-              - res_st0_zone.failed == false
-            quiet: true
+          register: zone_config
 
         # 4. Config Module: IKE and IPsec Engine Configuration
-        # Why: Defines the cryptographic parameters and gateway binding for the encrypted tunnel.
+        # These hierarchies are configured via set-lines for granular control where resource modules are unavailable.
         - name: Configure IKE and IPsec Proposals/Policies/Gateways
           junipernetworks.junos.junos_config:
             update: merge
             lines:
-              # IKE Phase 1 Proposal
+              # IKE Phase 1: Establish secure management channel
               - "set security ike proposal {{ ike_proposal_name }} authentication-method pre-shared-keys"
               - "set security ike proposal {{ ike_proposal_name }} dh-group {{ ike_dh_group }}"
               - "set security ike proposal {{ ike_proposal_name }} authentication-algorithm {{ ike_authentication }}"
               - "set security ike proposal {{ ike_proposal_name }} encryption-algorithm {{ ike_encryption }}"
               - "set security ike proposal {{ ike_proposal_name }} lifetime-seconds {{ ike_lifetime }}"
-              # IKE Phase 1 Policy
               - "set security ike policy {{ ike_policy_name }} proposals {{ ike_proposal_name }}"
               - "set security ike policy {{ ike_policy_name }} pre-shared-key ascii-text {{ vpn_preshared_key }}"
-              # IKE Phase 1 Gateway
               - "set security ike gateway {{ ike_gateway_name }} ike-policy {{ ike_policy_name }}"
               - "set security ike gateway {{ ike_gateway_name }} address {{ vpn_remote_gateway_ip }}"
               - "set security ike gateway {{ ike_gateway_name }} external-interface {{ vpn_external_interface }}"
               - "set security ike gateway {{ ike_gateway_name }} version {{ ike_version }}"
-              # IPsec Phase 2 Proposal
+              # IPsec Phase 2: Data plane encryption settings
               - "set security ipsec proposal {{ ipsec_proposal_name }} protocol esp"
               - "set security ipsec proposal {{ ipsec_proposal_name }} authentication-algorithm {{ ipsec_authentication }}"
               - "set security ipsec proposal {{ ipsec_proposal_name }} encryption-algorithm {{ ipsec_encryption }}"
               - "set security ipsec proposal {{ ipsec_proposal_name }} lifetime-seconds {{ ipsec_lifetime }}"
-              # IPsec Phase 2 Policy
               - "set security ipsec policy {{ ipsec_policy_name }} perfect-forward-secrecy keys {{ ipsec_perfect_forward_secrecy }}"
               - "set security ipsec policy {{ ipsec_policy_name }} proposals {{ ipsec_proposal_name }}"
-              # IPsec VPN Binding
+              # VPN Object: Bind everything to the st0 interface
               - "set security ipsec vpn {{ ipsec_vpn_name }} bind-interface st0.{{ vpn_st0_unit }}"
               - "set security ipsec vpn {{ ipsec_vpn_name }} ike gateway {{ ike_gateway_name }}"
               - "set security ipsec vpn {{ ipsec_vpn_name }} ike ipsec-policy {{ ipsec_policy_name }}"
               - "set security ipsec vpn {{ ipsec_vpn_name }} establish-tunnels immediately"
-              # TCP MSS Adjustment to prevent fragmentation issues across the tunnel
               - "set security flow tcp-mss ipsec-vpn mss {{ vpn_tcp_mss }}"
-            comment: "Configured Route-Based VPN for {{ vpn_peer_name }}"
-          register: res_crypto_config
-
-        - name: Assert crypto configuration success
-          ansible.builtin.assert:
-            that:
-              - res_crypto_config.failed == false
-            quiet: true
+            comment: "Deployment of Route-Based VPN for {{ vpn_peer_name }} via Ansible"
+          register: ike_ipsec_config
 
         # 5. Resource Module: Create static routes through the tunnel
-        # Why: Directs traffic destined for remote subnets into the st0 interface.
+        # Routes traffic for remote subnets into the IPsec tunnel.
         - name: Configure static routes for remote subnets
           junipernetworks.junos.junos_static_routes:
             config:
@@ -153,17 +134,10 @@
                 next_hop: "st0.{{ vpn_st0_unit }}"
             state: merged
           loop: "{{ vpn_remote_subnets }}"
-          register: res_static_routes
-
-        - name: Assert static route configuration success
-          ansible.builtin.assert:
-            that:
-              - item.failed == false
-            quiet: true
-          loop: "{{ res_static_routes.results }}"
+          register: route_config
 
         # 6. Resource Module: Permit traffic between Trust and VPN zones
-        # Why: Statefully allows traffic flow between the local protected zone and the VPN tunnel.
+        # Defines the firewall rules to allow traffic across the newly established tunnel.
         - name: Configure security policies for VPN traffic
           junipernetworks.junos.junos_security_policies:
             config:
@@ -188,37 +162,40 @@
                     then:
                       action: permit
             state: merged
-          register: res_sec_policies
+          register: policy_config
 
-        - name: Assert security policy configuration success
+        - name: Verify Configuration Changes
           ansible.builtin.assert:
             that:
-              - res_sec_policies.failed == false
-            quiet: true
+              - not ike_ipsec_config.failed
+              - not policy_config.failed
+            msg: "Configuration application failed on one or more tasks."
 
       rescue:
-        - name: Rollback Configuration on Error
+        - name: Rollback Configuration on Failure
           junipernetworks.junos.junos_config:
             rollback: 0
-          register: rollback_status
+          register: rollback_output
 
-        - name: Report Failure
+        - name: Fail Playbook with Detailed Message
           ansible.builtin.fail:
-            msg: >
-              VPN Deployment failed. Configuration rolled back.
-              Ensure gateway IP, interface unit, and pre-shared key are valid.
-              Rollback status: {{ rollback_status.msg | default('Unknown') }}
+            msg: "VPN Deployment failed. Configuration has been rolled back. Check logs for details on failed tasks."
 
       always:
-        - name: Verify IKE Security Association Status
+        - name: Capture Real-time VPN Security Associations
           junipernetworks.junos.junos_command:
             commands:
               - "show security ike sa"
               - "show security ipsec sa"
-          register: vpn_status
-          ignore_errors: true # Do not fail the playbook if the tunnel is not up yet
+          register: vpn_runtime_status
+          ignore_errors: true
 
-    - name: Display VPN Verification Output
+    - name: Display Deployment and Verification Summary
       ansible.builtin.debug:
-        var: vpn_status.stdout_lines
----
+        msg:
+          - "VPN Peer: {{ vpn_peer_name }}"
+          - "Interface Configured: {{ st0_int_config.changed }}"
+          - "IKE/IPsec Configured: {{ ike_ipsec_config.changed }}"
+          - "Routes Applied: {{ route_config.changed | default('No Change') }}"
+          - "IKE SA Status: {{ vpn_runtime_status.stdout[0] | default('N/A') }}"
+          - "IPsec SA Status: {{ vpn_runtime_status.stdout[1] | default('N/A') }}"

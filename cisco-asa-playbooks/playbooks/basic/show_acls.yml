@@ -1,50 +1,39 @@
 ---
-# Playbook: Get Cisco ASA Access Control Lists (ACLs)
-# Purpose: This playbook retrieves the current ACL configuration from Cisco ASA devices.
-#          It ensures data is captured reliably and provides formatted output for review.
-# Standards: Idempotency, Observability, Documentation, Error Handling, Best Practices.
-
-- name: Retrieve and Verify Cisco ASA Access Lists
+# Playbook: Get Cisco ASA/Firepower Access Lists
+# Purpose: Safely retrieve and audit current Access Control List (ACL) configurations.
+# Standards: Idempotency (read-only state), Observability (assertions), and FQCN usage.
+- name: Get Access Lists
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # facts are gathered via specific resource modules for efficiency
   vars:
-    # Default format is 'text'. Can be overridden via command line: -e "output_format=json"
-    output_format: "{{ output_format | default('text') }}"
+    # Set to 'json' to export to file, or 'text' for terminal summary
+    output_format: text
 
   tasks:
-    - name: Gather current ACL configuration from ASA
-      # Use Fully Qualified Collection Name (FQCN) for reliability.
-      # 'state: gathered' ensures we are only reading the configuration (Idempotency).
+    - name: Retrieve current ACL configuration from device
+      # Idempotency: 'state: gathered' is a read-only operation, making the task safe to run repeatedly.
+      # FQCN: Using cisco.asa.asa_acl to ensure the correct collection is invoked.
       cisco.asa.asa_acl:
         state: gathered
       register: acl_output
-      # Error Handling: Stop execution if the module fails or returns no facts.
+      # Error Handling: Ensure we fail if the device returns success but with missing data.
       failed_when: 
         - acl_output.failed | default(false)
-        - "'ansible_facts' not in acl_output"
+        - "'gathered' not in acl_output"
 
-    - name: Verify ACL data integrity
-      # Observability: Assert that the expected data structure exists before processing.
+    - name: Validate ACL data integrity
+      # Observability: Confirm the returned data is in the expected list format before processing.
       ansible.builtin.assert:
         that:
-          - acl_output.ansible_facts.asa_acls is defined
-        fail_msg: "The 'asa_acls' facts were not found for {{ inventory_hostname }}."
-        success_msg: "Successfully retrieved ACL facts for {{ inventory_hostname }}."
+          - acl_output.gathered is iterable
+        fail_msg: "Data retrieval failed or returned an unexpected format for {{ inventory_hostname }}."
+        success_msg: "ACL data integrity verified for {{ inventory_hostname }}."
         quiet: true
 
-    - name: Debug ACL data structure
-      # Observability: Show raw data when running with -v for troubleshooting.
-      ansible.builtin.debug:
-        var: acl_output.ansible_facts.asa_acls
-        verbosity: 1
-
-    - name: Save ACL configuration to JSON file
-      # Idempotency: Overwrites file only if content changes; explicit mode prevents permission drift.
-      # Documentation: JSON output is useful for programmatic analysis and long-term auditing.
+    - name: Export ACL configuration to JSON file
+      # Documentation: Persists the security state for external audit logs or version control.
       ansible.builtin.copy:
-        content: "{{ acl_output.ansible_facts.asa_acls | to_nice_json }}"
+        content: "{{ acl_output.gathered | to_nice_json }}"
         dest: "/tmp/asa_acls_{{ inventory_hostname }}.json"
-        mode: '0644'
-      when: output_format == 'json'
-
-    - name: Display human
+        mode: '0600' # Security Best Practice: Restrict access to sensitive security configurations.
+      when: output_format | default('text') == 'json

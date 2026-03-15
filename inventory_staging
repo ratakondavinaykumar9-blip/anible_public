@@ -1,0 +1,12 @@
+[staging]
+staging-asa01 ansible_host=192.168.100.10
+staging-fgt01 ansible_host=192.168.100.20
+staging-nxos01 ansible_host=192.168.100.30
+
+[staging:vars]
+ansible_connection=network_cli
+ansible_network_os=cisco.asa.asa
+ansible_user=netops_staging
+# Use vault or env for passwords
+ansible_become=yes
+ansible_become_method=enable

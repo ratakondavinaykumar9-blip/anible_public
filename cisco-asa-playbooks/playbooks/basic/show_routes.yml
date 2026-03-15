@@ -1,55 +1,59 @@
 ---
-- name: Retrieve and Audit Cisco ASA Routing Table
+# Playbook: Get ASA Routing Table
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Get Routing Table
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Output format control (text by default, json to export to file)
+    # Default output format; can be overridden at runtime
     output_format: text
 
   tasks:
-    - name: Gather minimal system facts for timestamping
-      ansible.builtin.setup:
-        gather_subset:
-          - "!all"
-          - "min"
-      when: output_format == 'json'
-      # Why: To ensure the generated report contains an accurate timestamp for audit trails.
-
-    - name: Execute 'show route' on the device
-      cisco.asa.asa_command:
-        commands:
-          - show route
+    - name: Retrieve routing table via CLI command (FQCN)
+      ansible.netcommon.cli_command:
+        command: show route
       register: route_output
-      # Error Handling: Explicitly fail if the command is unrecognized or the connection fails.
-      failed_when:
-        - route_output.failed
-        - "'Invalid input' in route_output.stdout[0]"
-      # Why: Capturing the routing table state using the device-specific collection module (FQCN).
+      # Error Handling: Ensure the command was accepted and returned data
+      failed_when: 
+        - route_output.stdout is not defined
+        - "'Invalid input' in route_output.stdout"
+      ignore_errors: false
 
-    - name: Validate routing table integrity
+    - name: Validate routing table content (Observability)
       ansible.builtin.assert:
         that:
-          - route_output.stdout[0] is defined
-          - route_output.stdout[0] | length > 0
-          - "'Gateway of last resort' in route_output.stdout[0]"
-        fail_msg: "Routing table validation failed: Output is empty or missing a default gateway."
+          - route_output.stdout | length > 0
+          - "'Codes:' in route_output.stdout"
+        fail_msg: "Routing table output is empty or does not contain expected header 'Codes:'"
         success_msg: "Routing table successfully retrieved and validated."
-      # Why: Observability task to confirm the device is in a valid operational state before processing data.
 
-    - name: Display routing table to console
+    - name: Display raw routing table output
       ansible.builtin.debug:
-        msg: "{{ route_output.stdout[0] }}"
+        var: route_output.stdout
 
-    - name: Persist routing data to structured JSON
-      # Idempotency: Ensures the report file is managed with consistent permissions and content.
+    - name: Capture ISO8601 timestamp (Observability)
+      # Manual timestamp generation since gather_facts is disabled for network devices
+      ansible.builtin.set_fact:
+        audit_timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+      when: output_format == 'json'
+
+    - name: Parse and save routing data to JSON (Idempotency)
+      # Uses copy module to ensure file state is managed idempotently
       ansible.builtin.copy:
-        content: "{{ report_content | to_nice_json }}"
+        content: |
+          {
+            "device": "{{ inventory_hostname }}",
+            "timestamp": "{{ audit_timestamp }}",
+            "routes": {{ route_output.stdout | to_json }}
+          }
         dest: "/tmp/asa_routes_{{ inventory_hostname }}.json"
         mode: '0644'
-      vars:
-        report_content:
-          device: "{{ inventory_hostname }}"
-          timestamp: "{{ ansible_facts.date_time.iso8601 | default('N/A') }}"
-          routes: "{{ route_output.stdout[0] }}"
       when: output_format == 'json'
-      # Why: Provides a machine-readable artifact for downstream analysis and observability.
+      register: file_creation
+
+    - name: Confirm JSON file creation (Observability)
+      ansible.builtin.assert:
+        that:
+          - file_creation is not failed
+        fail_msg: "Failed to write JSON output to /tmp/"
+      when: output_format == 'json'

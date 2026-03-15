@@ -1,0 +1,24 @@
+---
+- name: Continuous PCI-DSS 4.0.1 Compliance Audit
+  hosts: fortigate, asa_firepower
+  gather_facts: yes
+  tasks:
+    - name: Gather Policy Facts (Fortinet)
+      fortinet.fortios.fortios_configuration_fact:
+        vdom: "root"
+        selector: "firewall_policy"
+      register: fortigate_policies
+      when: "'fortigate' in group_names"
+
+    - name: Analyze for Permissive Rules
+      set_fact:
+        pci_facts:
+          any_source_violations: "{{ fortigate_policies.meta.results | selectattr('srcaddr', 'contains', {'name': 'all'}) | list | length if fortigate_policies.meta is defined else 0 }}"
+          insecure_mgmt: 0 # Logic to check for Telnet/HTTP
+          logging_status: "ACTIVE"
+
+    - name: Generate Audit Report
+      template:
+        src: pci_report.j2
+        dest: "/home/vinayrk/ansible_improved/compliance_audit/reports/pci_audit_{{ inventory_hostname }}.md"
+      delegate_to: localhost

@@ -131,29 +131,46 @@
           - access-group OUTSIDE_IN in interface outside
       tags: [acls, security]
 
-    - name: Configure VPN (IPSec Site-to-Site) - Phase 1 (IKEv1)
+    - name: Configure VPN (IPSec Site-to-Site) - Phase 1 (IKEv2) with PQC
       cisco.asa.asa_config:
         lines:
-          - crypto ikev1 policy 10
-          - authentication pre-share
+          - crypto ikev2 policy 10
           - encryption aes-256
-          - hash sha
-          - group 2
-          - lifetime 86400
-          - crypto ikev1 enable outside
-      tags: [vpn, ipsec]
+          - integrity sha256
+          - group 21
+          - prf sha256
+          - lifetime seconds 86400
+          - crypto ikev2 enable outside
+      tags: [vpn, ipsec, pqc]
 
     - name: Configure VPN (IPSec Site-to-Site) - Phase 2 & Tunnel Group
       cisco.asa.asa_config:
         lines:
-          - crypto ipsec ikev1 transform-set ESP-AES256-SHA esp-aes-256 esp-sha-hmac
+          - crypto ipsec ikev2 ipsec-proposal AES256-GCM
+          - protocol esp encryption aes-gcm-256
           - tunnel-group 203.0.113.5 type ipsec-l2l
           - tunnel-group 203.0.113.5 ipsec-attributes
-          - ikev1 pre-shared-key MyS3cr3tK3y!
-      tags: [vpn, ipsec]
+          - ikev2 remote-authentication pre-shared-key MyS3cr3tK3y!
+          - ikev2 local-authentication pre-shared-key MyS3cr3tK3y!
+      tags: [vpn, ipsec, pqc]
 
     - name: Write Memory (Save Configuration)
       cisco.asa.asa_command:
         commands:
           - write memory
       tags: [save]
+
+    # --- v12.0 SECURITY PROVING (POST-DEPLOYMENT) ---
+    - name: Security Validation - Remote Port Scan
+      delegate_to: localhost
+      ansible.builtin.shell: "nmap -sV -p 443,80,22 --open {{ inventory_hostname }}"
+      register: scan_results
+      tags: [validation, security_proving]
+      ignore_errors: true
+
+    - name: Verify Web Service Rule Enforcement
+      ansible.builtin.assert:
+        that:
+          - "'443/tcp open' in scan_results.stdout"
+        fail_msg: "SECURITY VIOLATION: HTTPS port 443 is not open or ACL failed!"
+      tags: [validation, security_proving]

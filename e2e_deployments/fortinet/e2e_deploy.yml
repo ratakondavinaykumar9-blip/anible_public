@@ -120,24 +120,30 @@
           logtraffic: "all"
       tags: [policy, security]
 
-    - name: Configure IPSec Phase 1
+    - name: Configure IPSec Phase 1 (Quantum-Safe Hybrid)
       fortios_vpn_ipsec_phase1_interface:
         vdom: "{{ vdom }}"
         vpn_ipsec_phase1_interface:
-          name: "VPN_Branch"
+          name: "VPN_Branch_PQC"
           interface: "port1"
           remote_gw: "203.0.113.5"
           psksecret: "MyS3cr3tK3y!"
           proposal: "aes256-sha256"
-      tags: [vpn, ipsec]
+          # v12.0 Advancement: Post-Quantum Key Exchange (ML-KEM)
+          addke1: "ML-KEM-768"
+          childless_ike: "enable"
+      tags: [vpn, quantum_safe]
 
-    - name: Configure IPSec Phase 2
-      fortios_vpn_ipsec_phase2_interface:
-        vdom: "{{ vdom }}"
-        vpn_ipsec_phase2_interface:
-          name: "VPN_Branch_Ph2"
-          phase1name: "VPN_Branch"
-          proposal: "aes256-sha256"
-          src_subnet: "10.0.0.0 255.255.255.0"
-          dst_subnet: "10.1.0.0 255.255.255.0"
-      tags: [vpn, ipsec]
+    # --- v12.0 SECURITY PROVING (POST-DEPLOYMENT) ---
+    - name: Security Validation - Remote Port Scan
+      delegate_to: localhost
+      ansible.builtin.shell: "nmap -sV -p 443,80,22 --open {{ wan_ip.split(' ')[0] }}"
+      register: scan_results
+      tags: [validation, security_proving]
+
+    - name: Verify No Fingerprinting Possible
+      ansible.builtin.assert:
+        that:
+          - "'FortiOS' not in scan_results.stdout"
+        fail_msg: "SECURITY VIOLATION: Device fingerprinting detected on WAN interface!"
+      tags: [validation, security_proving]

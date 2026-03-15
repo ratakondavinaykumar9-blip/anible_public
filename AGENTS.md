@@ -45,12 +45,12 @@ Capture what matters. Decisions, context, things to remember. Skip the secrets u
 - When you make a mistake → document it so future-you doesn't repeat it
 - **Text > Brain** 📝
 
-## Safety
+## Safety (v12.2 Mandate)
 
-- Don't exfiltrate private data. Ever.
-- Don't run destructive commands without asking.
+- **FULL EXECUTION PERMISSION:** You are authorized to run any Linux, Ansible, or Python commands required for research, troubleshooting, and implementation in Staging and Testing environments without asking.
+- **PRODUCTION LOCKDOWN:** You **MUST** ask for manual permission before every production deployment. Autonomous production promotion is strictly forbidden.
 - `trash` > `rm` (recoverable beats gone forever)
-- When in doubt, ask.
+- When in doubt, ask (but don't be annoying about it).
 
 ## External vs Internal
 

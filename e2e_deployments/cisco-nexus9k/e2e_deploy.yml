@@ -90,17 +90,28 @@
           router_id: "{{ ospf_router_id }}"
       tags: [routing, bgp]
 
-    - name: Configure BGP Neighbor
+    - name: Configure BGP Neighbor with RPKI
       cisco.nxos.nxos_bgp_neighbor:
         config:
           as_number: "65001"
           neighbors:
             - neighbor_address: 10.255.0.20
               remote_as: "65002"
+              description: "E2E Peer"
               address_family:
                 - afi: ipv4
                   safi: unicast
-      tags: [routing, bgp]
+                  route_map_in: "RPKI_VALIDATION"
+      tags: [routing, bgp, security]
+
+    - name: Configure BGP RPKI Server
+      cisco.nxos.nxos_command:
+        commands:
+          - conf t
+          - router bgp 65001
+          - rpki server 10.10.10.100
+          - transport tcp port 3323
+      tags: [routing, bgp, security]
 
     - name: Configure ACL for Data Center Protection
       cisco.nxos.nxos_acls:
@@ -142,3 +153,18 @@
         backup: yes
         save_when: modified
       tags: [save]
+
+    # --- v12.0 SECURITY PROVING (POST-DEPLOYMENT) ---
+    - name: Security Validation - Remote Port Scan
+      delegate_to: localhost
+      ansible.builtin.shell: "nmap -sV -p 443,80,22,179 --open {{ inventory_hostname }}"
+      register: scan_results
+      tags: [validation, security_proving]
+      ignore_errors: true
+
+    - name: Verify Web Access Rule Enforcement
+      ansible.builtin.assert:
+        that:
+          - "'443/tcp open' in scan_results.stdout"
+        fail_msg: "SECURITY VIOLATION: HTTPS port 443 is not open or ACL failed!"
+      tags: [validation, security_proving]

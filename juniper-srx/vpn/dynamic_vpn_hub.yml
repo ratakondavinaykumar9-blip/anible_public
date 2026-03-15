@@ -43,7 +43,7 @@
     - name: "ADVPN HUB CONFIGURATION BLOCK"
       block:
         - name: "ST0 MULTIPOINT INTERFACE SCALING"
-          # Ensure st0 interface is configured for multipoint; required for Hub scaling in ADVPN
+          # Resource modules provide idempotency by comparing candidate and running configs.
           junipernetworks.junos.junos_interfaces:
             config:
               - name: "st0"
@@ -51,12 +51,17 @@
                 units:
                   - name: "{{ vpn_tunnel_unit }}"
                     description: "ADVPN Hub Tunnel"
-                    multipoint: true
+                    multipoint: true # Mandatory for ADVPN Hub logic
             state: merged
           register: res_st0_int
 
+        - name: "ASSERT ST0 INTERFACE SUCCESS"
+          ansible.builtin.assert:
+            that: "res_st0_int.failed == false"
+            fail_msg: "Failed to initialize st0 multipoint interface scaling."
+
         - name: "ASSIGN TUNNEL LAYER 3 ADDRESS"
-          # Configure the logical tunnel interface with the overlay IP address
+          # Applying IPv4 address to the tunnel unit.
           junipernetworks.junos.junos_l3_interfaces:
             config:
               - name: "st0.{{ vpn_tunnel_unit }}"
@@ -66,7 +71,7 @@
           register: res_st0_l3
 
         - name: "PHASE 1: IKE PROPOSAL"
-          # Define IKE Phase 1 cryptographic parameters
+          # Cryptographic proposal for the IKEv2 control plane.
           junipernetworks.junos.junos_ike_proposal:
             config:
               - name: "{{ ike_proposal_name }}"
@@ -77,7 +82,7 @@
           register: res_ike_prop
 
         - name: "PHASE 1: IKE POLICY"
-          # Link IKE proposal to policy and define authentication credentials
+          # Policy mapping for the IKE proposal and authentication keys.
           junipernetworks.junos.junos_ike_policy:
             config:
               - name: "{{ ike_policy_name }}"
@@ -88,7 +93,7 @@
           register: res_ike_pol
 
         - name: "PHASE 1: IKE GATEWAY (DYNAMIC SUGGESTER)"
-          # Configure IKE Gateway with ADVPN suggester enabled to allow shortcut discovery
+          # 'advpn suggester' enables the Hub to signal shortcut paths to Spokes.
           junipernetworks.junos.junos_config:
             lines:
               - set security ike gateway {{ ike_gateway_name }} ike-policy {{ ike_policy_name }}
@@ -99,7 +104,7 @@
           register: res_ike_gw
 
         - name: "PHASE 2: IPSEC PROPOSAL"
-          # Define IPsec Phase 2 ESP parameters
+          # Encapsulating Security Payload (ESP) parameters for the data plane.
           junipernetworks.junos.junos_ipsec_proposal:
             config:
               - name: "{{ ipsec_proposal_name }}"
@@ -110,7 +115,6 @@
           register: res_ipsec_prop
 
         - name: "PHASE 2: IPSEC POLICY"
-          # Link IPsec proposal and enable Perfect Forward Secrecy (PFS)
           junipernetworks.junos.junos_ipsec_policy:
             config:
               - name: "{{ ipsec_policy_name }}"
@@ -121,7 +125,7 @@
           register: res_ipsec_pol
 
         - name: "PHASE 2: IPSEC VPN (ADVPN ENABLED)"
-          # Create IPsec VPN bind and activate ADVPN logic on the tunnel
+          # Binding the VPN to st0 and activating ADVPN shortcut logic.
           junipernetworks.junos.junos_config:
             lines:
               - set security ipsec vpn {{ ipsec_vpn_name }} bind-interface st0.{{ vpn_tunnel_unit }}
@@ -132,7 +136,7 @@
           register: res_ipsec_vpn
 
         - name: "SECURITY ZONE AND HOST-INBOUND TRAFFIC"
-          # Assign tunnel interface to security zone and permit necessary control plane traffic
+          # Permitting BGP and IKE on the tunnel interface within the security zone.
           junipernetworks.junos.junos_security_zones:
             config:
               - name: "{{ vpn_zone_name }}"
@@ -145,14 +149,14 @@
           register: res_sec_zone
 
         - name: "TCP MSS CLAMPING FOR IPSEC"
-          # Clamp MSS to prevent packet fragmentation over the VPN tunnel
+          # Adjusting TCP MSS to prevent fragmentation over the IPsec overhead.
           junipernetworks.junos.junos_config:
             lines:
               - set security flow tcp-mss all-tcp mss {{ vpn_mss_value }}
           register: res_mss
 
         - name: "BGP ROUTE REFLECTOR OVERLAY"
-          # Configure Hub as Route Reflector to facilitate Spoke-to-Spoke ADVPN shortcuts
+          # Overlay routing: Hub acts as a Route Reflector for shortcuts to function.
           junipernetworks.junos.junos_config:
             lines:
               - set protocols bgp group {{ bgp_group_name }} type internal
@@ -163,29 +167,28 @@
           register: res_bgp
 
         - name: "ASSERT CONFIGURATION INTEGRITY"
-          # Verify that critical configuration tasks were successful
+          # Final validation of critical configuration blocks.
           ansible.builtin.assert:
             that:
-              - not res_st0_int.failed
-              - not res_ike_gw.failed
-              - not res_ipsec_vpn.failed
-              - not res_bgp.failed
-            msg: "Configuration deployment failed. Check register variables for details."
+              - res_ike_gw.failed == false
+              - res_ipsec_vpn.failed == false
+              - res_bgp.failed == false
+            fail_msg: "Critical ADVPN Hub configuration steps failed to apply correctly."
 
       rescue:
         - name: "CRITICAL FAILURE: ROLLING BACK CONFIGURATION"
-          # Revert to the previous candidate/committed state if any task in the block fails
+          # Rollback to the previous configuration state on any task failure within the block.
           junipernetworks.junos.junos_config:
             rollback: 0
           register: rollback_status
 
         - name: "REPORT FAILURE REASON"
           ansible.builtin.fail:
-            msg: "Playbook failed during ADVPN Hub deployment. Configuration rolled back. Error: {{ ansible_failed_result.msg }}"
+            msg: "Playbook failed during ADVPN Hub deployment. Configuration rolled back. Error: {{ ansible_failed_result.msg | default('Unknown error') }}"
 
       always:
-        - name: "VERIFY VPN STATUS (ADVPN SAs)"
-          # Capture operational state for observability and troubleshooting
+        - name: "POST-DEPLOYMENT VALIDATION"
+          # Gathering operational data for verification.
           junipernetworks.junos.junos_command:
             commands:
               - "show security ike sa"
@@ -197,3 +200,4 @@
         - name: "DISPLAY RUNTIME VPN SUMMARY"
           ansible.builtin.debug:
             var: vpn_status.stdout_lines
+          when: vpn_status.stdout_lines is defined

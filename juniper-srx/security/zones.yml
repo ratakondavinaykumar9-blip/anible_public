@@ -1,0 +1,152 @@
+---
+# ==============================================================================
+# Playbook: Configure Security Zones (Juniper SRX 300 Series)
+# ==============================================================================
+# Author: NetLearner (OpenClaw)
+# Version: 1.2.0 (Improved)
+# Description: Hardened configuration of security zones with idempotency checks,
+#              comprehensive observability, and automated rollback logic.
+# ==============================================================================
+
+- name: Configure Security Zones
+  hosts: srx300
+  gather_facts: false
+  connection: junipernetworks.junos.junos
+  
+  vars:
+    # Default rollback timer in minutes if not provided via extra-vars
+    commit_confirm: 5
+    
+    security_zones:
+      - name: trust
+        interfaces:
+          - name: st0.0
+            host_inbound_traffic:
+              protocols: [bgp, ospf, lldp]
+              services: [ssh, ping, https, snmp]
+      - name: untrust
+        interfaces:
+          - name: ge-0/0/0.0
+            host_inbound_traffic:
+              protocols: []
+              services: [ping]
+        screen: untrust-screen
+      - name: dmz
+        interfaces:
+          - name: ge-0/0/1.0
+            host_inbound_traffic:
+              protocols: []
+              services: [ssh, https]
+      - name: vpn
+        interfaces:
+          - name: st0.0
+            host_inbound_traffic:
+              protocols: [ospf, bgp]
+              services: [ike, ping]
+
+    screens:
+      - name: untrust-screen
+        description: "Screen for untrust zone - aggressive protection"
+        alarm_without_drop: false
+        icmp_ping: true
+        icmp_ping_flood_threshold: 100
+        ip_spoofing: true
+        ip_source_route: true
+        tcp_syn_flood_threshold: 1024
+        tcp_port_scan_threshold: 256
+
+  tasks:
+    - name: 1.0 PRE-FLIGHT | Validate configuration data
+      ansible.builtin.assert:
+        that:
+          - security_zones is defined
+          - security_zones | length > 0
+          - commit_confirm | int >= 1
+        fail_msg: "Invalid variable configuration detected. Check security_zones and commit_confirm."
+        success_msg: "Configuration schema validated for {{ security_zones | length }} zones."
+
+    - name: 2.0 CONFIGURATION | Apply security changes
+      block:
+        - name: 2.1 ORCHESTRATION | Build and apply candidate configuration
+          junipernetworks.junos.junos_config:
+            update: merge
+            lines: |
+              {# Configure Security Screens #}
+              {% for screen in screens | default([]) %}
+              set security screen {{ screen.name }} description "{{ screen.description }}"
+              {% if screen.icmp_ping %}
+              set security screen {{ screen.name }} ids-option {{ screen.name }}-options icmp ping-death
+              set security screen {{ screen.name }} ids-option {{ screen.name }}-options icmp flood threshold {{ screen.icmp_ping_flood_threshold }}
+              {% endif %}
+              {% if screen.ip_spoofing %}
+              set security screen {{ screen.name }} ids-option {{ screen.name }}-options ip spoofing
+              {% endif %}
+              {% endfor %}
+
+              {# Configure Security Zones and Bindings #}
+              {% for zone in security_zones %}
+              set security zones security-zone {{ zone.name }}
+              {% if zone.screen is defined %}
+              set security zones security-zone {{ zone.name }} screen {{ zone.screen }}
+              {% endif %}
+              {% for iface in zone.interfaces %}
+              set security zones security-zone {{ zone.name }} interfaces {{ iface.name }}
+              {% for proto in iface.host_inbound_traffic.protocols | default([]) %}
+              set security zones security-zone {{ zone.name }} interfaces {{ iface.name }} host-inbound-traffic protocols {{ proto }}
+              {% endfor %}
+              {% for svc in iface.host_inbound_traffic.services | default([]) %}
+              set security zones security-zone {{ zone.name }} interfaces {{ iface.name }} host-inbound-traffic system-services {{ svc }}
+              {% endfor %}
+              {% endfor %}
+              {% endfor %}
+            comment: "Ansible-driven security zone update"
+            confirm: "{{ commit_confirm }}"
+          register: config_result
+          # Idempotency is handled by Junos candidate-to-running diff logic
+
+        - name: 2.2 OBSERVABILITY | Verify candidate configuration was accepted
+          ansible.builtin.assert:
+            that:
+              - config_result.failed == false
+            fail_msg: "Configuration failed to load into candidate buffer."
+
+        - name: 2.3 FINALIZATION | Confirm commit to make changes permanent
+          junipernetworks.junos.junos_config:
+            check_commit: yes
+            comment: "Confirmed: Security zones automation successful"
+          when: config_result.changed
+          register: confirm_result
+
+        - name: 2.4 AUDIT | Capture current zone state for verification
+          junipernetworks.junos.junos_command:
+            commands:
+              - show security zones
+          register: zone_state
+          changed_when: false
+
+      rescue:
+        - name: 3.1 ERROR HANDLING | Rollback failed configuration
+          junipernetworks.junos.junos_config:
+            rollback: 0
+          failed_when: false
+          # Ensure we clear the candidate buffer even if the error was in a non-config task
+
+        - name: 3.2 ERROR HANDLING | Report failure details
+          ansible.builtin.fail:
+            msg: |
+              FAILED on {{ inventory_hostname }}. 
+              Reason: {{ ansible_failed_result.msg | default('Unknown execution error') }}
+              The configuration has been rolled back to protect network integrity.
+
+    - name: 4.0 SUMMARY | Display operational status
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          DEPLOYMENT SUMMARY: {{ inventory_hostname }}
+          ============================================================
+          Status: {{ 'SUCCESS - Changes Applied' if config_result.changed else 'SUCCESS - No Changes Needed' }}
+          Zones Managed: {{ security_zones | map(attribute='name') | list }}
+          Commit Confirmation: {{ commit_confirm }} minutes
+          Log Message: {{ config_result.request_id | default('N/A') }}
+          ============================================================
+---

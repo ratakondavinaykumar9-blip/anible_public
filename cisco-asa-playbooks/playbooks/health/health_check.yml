@@ -1,69 +1,79 @@
 ---
 # ASA Health Check - CPU, Memory, Connections
-# This playbook performs non-disruptive health monitoring on Cisco ASA devices.
-# It captures telemetry for CPU, Memory, and Connections, providing reports in text or JSON.
+# This playbook performs comprehensive health monitoring on Cisco ASA/Firepower devices.
+# It captures resource usage, connection counts, CPU, and memory statistics for observability.
 - name: ASA Health Check
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Supported formats: 'text' (default) or 'json' (for external ingestion)
     output_format: text
 
   tasks:
-    # Gather timing data from localhost since ASA devices do not support standard Ansible facts
-    - name: Gather local system information for timestamping
-      ansible.builtin.setup:
-        filter: "ansible_date_time"
-      delegate_to: localhost
-      run_once: true
-
-    - name: Retrieve system resource usage
+    - name: Get system resources
+      # Captures resource usage limits and current consumption (XLATE, Conn, etc.)
       ansible.netcommon.cli_command:
         command: show resource usage
       register: resource_output
-      # Error Handling: Ensure command succeeded and output is not empty or invalid
       failed_when: 
-        - resource_output.failed or "Invalid" in resource_output.stdout or resource_output.stdout | length == 0
+        - resource_output.failed or "Invalid input" in resource_output.stdout
 
-    - name: Retrieve connection statistics
+    - name: Verify resource usage capture
+      ansible.builtin.assert:
+        that:
+          - resource_output.stdout is defined
+          - resource_output.stdout | length > 0
+        fail_msg: "Failed to retrieve valid resource usage from {{ inventory_hostname }}"
+
+    - name: Get connection stats
+      # Captures current, maximum, and peak connection counts
       ansible.netcommon.cli_command:
         command: show conn count
       register: conn_output
       failed_when: 
-        - conn_output.failed or conn_output.stdout | length == 0
+        - conn_output.failed or "Invalid input" in conn_output.stdout
 
-    - name: Retrieve CPU usage statistics
+    - name: Verify connection stats capture
+      ansible.builtin.assert:
+        that:
+          - conn_output.stdout is defined
+        fail_msg: "Failed to retrieve valid connection stats from {{ inventory_hostname }}"
+
+    - name: Get CPU usage
+      # Captures CPU utilization averages for 5-second, 1-minute, and 5-minute intervals
       ansible.netcommon.cli_command:
         command: show cpu usage
       register: cpu_output
       failed_when: 
-        - cpu_output.failed or cpu_output.stdout | length == 0
+        - cpu_output.failed or "Invalid input" in cpu_output.stdout
 
-    - name: Retrieve memory utilization info
+    - name: Verify CPU usage capture
+      ansible.builtin.assert:
+        that:
+          - cpu_output.stdout is defined
+        fail_msg: "Failed to retrieve valid CPU usage from {{ inventory_hostname }}"
+
+    - name: Get memory info
+      # Captures allocated, free, and total system memory
       ansible.netcommon.cli_command:
         command: show memory
       register: mem_output
       failed_when: 
-        - mem_output.failed or mem_output.stdout | length == 0
+        - mem_output.failed or "Invalid input" in mem_output.stdout
 
-    # Observability: Assert that all telemetry data points were successfully captured
-    - name: Verify telemetry data integrity
+    - name: Verify memory info capture
       ansible.builtin.assert:
         that:
-          - cpu_output.stdout is defined
           - mem_output.stdout is defined
-          - conn_output.stdout is defined
-          - resource_output.stdout is defined
-        fail_msg: "Health check telemetry capture failed for {{ inventory_hostname }}. One or more data points are missing."
-        quiet: true
+        fail_msg: "Failed to retrieve valid memory info from {{ inventory_hostname }}"
 
-    # Idempotency: The 'copy' module ensures the destination file is updated only if data has changed
-    - name: Generate JSON telemetry report
+    - name: Output JSON for SolarWinds
+      # Generates a machine-readable JSON report for external monitoring ingestion.
+      # Idempotency: Overwrites the destination file with the latest state, ensuring consistent reporting.
       ansible.builtin.copy:
         content: |
           {
             "device": "{{ inventory_hostname }}",
-            "timestamp": "{{ hostvars['localhost']['ansible_date_time']['iso8601'] }}",
+            "timestamp": "{{ now(fmt='%Y-%m-%dT%H:%M:%SZ', utc=true) }}",
             "resources": {{ resource_output.stdout | to_json }},
             "connections": {{ conn_output.stdout | to_json }},
             "cpu": {{ cpu_output.stdout | to_json }},
@@ -71,25 +81,25 @@
           }
         dest: "/tmp/asa_health_{{ inventory_hostname }}.json"
         mode: '0644'
-      when: output_format == 'json'
+      when: output_format | default('text') == 'json'
 
-    # Human-readable summary for console-based auditing
-    - name: Display health check summary
+    - name: Human readable summary
+      # Provides a formatted summary in the terminal for real-time administrator review.
       ansible.builtin.debug:
         msg: |
-          ==========================================================
-          ASA HEALTH SUMMARY: {{ inventory_hostname }}
-          TIMESTAMP: {{ hostvars['localhost']['ansible_date_time']['iso8601'] }}
-          ==========================================================
-          [CPU USAGE]
+          =======================
+          Health Check: {{ inventory_hostname }}
+          Timestamp: {{ now(fmt='%Y-%m-%d %H:%M:%S') }}
+          =======================
+          CPU Usage:
           {{ cpu_output.stdout }}
 
-          [MEMORY INFO]
+          Memory:
           {{ mem_output.stdout }}
 
-          [CONNECTION STATS]
+          Connections:
           {{ conn_output.stdout }}
 
-          [RESOURCE USAGE]
+          Resource Usage:
           {{ resource_output.stdout }}
-      when: output_format == 'text'
+      when: output_format | default('text') == 'text'
