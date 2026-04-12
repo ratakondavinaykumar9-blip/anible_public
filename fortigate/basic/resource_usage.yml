@@ -1,39 +1,31 @@
 ---
-# FortiGate Resource Usage - Improved for industry standards
-# This playbook retrieves and validates system resource statistics for operational monitoring.
-# Standards Applied: Idempotency (Read-only), Observability (Assert), Documentation, Error Handling, FQCN.
+# FortiGate Resource Usage - Production Grade
+# This playbook retrieves system performance statistics (CPU/Memory) from FortiGate firewalls.
+# Standard: Idempotency is maintained as this is a read-only diagnostic operation.
 - name: Get FortiGate Resource Usage
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Optimization: Device facts are not required for this diagnostic task
 
   tasks:
-    - name: Retrieve system resource usage statistics
-      # Using FQCN for network command execution. 
-      # Diagnostic commands are read-only and inherently idempotent.
+    - name: Execute diagnostic command on FortiGate
+      # FQCN (Fully Qualified Collection Name) used to ensure module resolution across various execution environments.
       ansible.netcommon.cli_command:
         command: diagnose system resource usage
       register: resource_output
-      # Error Handling: Ensure we capture failure if the command is unrecognized or connection fails.
-      failed_when: 
-        - resource_output.failed | default(false)
-        - "'Command fail' in resource_output.stdout"
+      # Error Handling: Explicitly fail if the output is empty, indicating a potential connectivity or privilege issue.
+      failed_when: resource_output.stdout | length == 0
 
-    - name: Validate captured resource data
-      # Observability: Assert ensures the output contains expected performance metrics (CPU/Load).
+    - name: Verify diagnostic data integrity
+      # Observability: Validate that the output contains expected performance metrics before displaying.
       ansible.builtin.assert:
         that:
-          - resource_output.stdout is defined
-          - resource_output.stdout | length > 0
-          - "'CPU' in resource_output.stdout or 'load' in resource_output.stdout | lower"
-        fail_msg: "Resource usage data is empty or malformed. Check device state."
-        success_msg: "Resource usage data successfully retrieved and verified."
+          - "resource_output.stdout is defined"
+          - "'CPU' in resource_output.stdout"
+        fail_msg: "The diagnostic output did not contain expected resource data."
+        success_msg: "Diagnostic data successfully captured and validated."
 
-    - name: Display Resource Usage Report
-      # Formatted output for clear observability in the Ansible controller logs.
+    - name: Display Resource Usage Summary
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE RESOURCE USAGE =======================
-          Host: {{ inventory_hostname }}
-          
+          ======================= RESOURCE USAGE ({{ inventory_hostname }}) =======================
           {{ resource_output.stdout }}
-          ========================================================================

@@ -1,38 +1,34 @@
 ---
-# Failover Interface
-# Auto-improved: 2026-03-08 12:00
-# Author: Analyst (OpenClaw)
-#
----
-# Show Failover Interface Status
+# Failover Interface Status Audit
+# This playbook retrieves and validates the status of failover interfaces on Cisco ASA/Firepower devices.
+# It is designed to be idempotent (read-only) and provides high observability for network operations.
 - name: Get Failover Interfaces
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Facts are not required for command execution, reducing execution time
 
   tasks:
-    - name: Get interface status
-      # Best Practice: Use Fully Qualified Collection Name (FQCN) for the cli_command module.
-      # Idempotency: Read-only 'show' commands are safe to execute repeatedly without device state change.
-      ansible.netcommon.cli_command:
-        command: show failover interface
-      register: intf
-      # Error Handling: Fail the task if the command returns no output to avoid empty processing.
+    - name: Retrieve failover interface status from device
+      # Use FQCN for specific ASA command module to ensure compatibility and leverage ASA-specific parsing
+      cisco.asa.asa_command:
+        commands:
+          - show failover interface
+      register: failover_status
+      # Error Handling: Fail explicitly if the command is unrecognized or the device returns an error
       failed_when: 
-        - intf.stdout is not defined or intf.stdout | length == 0
+        - failover_status.failed or "Invalid input" in failover_status.stdout[0]
 
-    - name: Verify failover interface output
-      # Observability: Use assert to verify the output contains expected failover status keywords.
+    - name: Validate retrieval of failover data
+      # Observability: Assert that the command returned data and contains expected failover context
       ansible.builtin.assert:
         that:
-          - "'Interface' in intf.stdout or 'Failover' in intf.stdout"
-        fail_msg: "The command 'show failover interface' returned unexpected or empty results on {{ inventory_hostname }}."
-        quiet: true
+          - failover_status.stdout[0] | length > 0
+          - "'failover' in failover_status.stdout[0].lower()"
+        fail_msg: "Failover information was not found or the command output was empty."
+        success_msg: "Failover interface status successfully retrieved and verified."
 
-    - name: Display Failover Interfaces
-      # Observability: Provide a formatted view of the captured failover interface status.
+    - name: Display Failover Interface Status
+      # Documentation: Providing a clean, formatted output for human operators
       ansible.builtin.debug:
         msg: |
           ======================= FAILOVER INTERFACES =======================
-          {{ intf.stdout }}
-
----
+          {{ failover_status.stdout[0] }}

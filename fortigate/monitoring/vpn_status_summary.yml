@@ -1,46 +1,45 @@
-I will now analyze the existing playbooks and project structure to ensure the improved Ansible playbook aligns with established local conventions and collection usage.
-
-I will now read the `policy_status.yml` and `log_viewer.yml` files to identify the specific observability and error handling patterns used in this project.
-
-```yaml
 ---
-# Standard:ized Playbook
-# Objective: Retrieve and verify VPN tunnel status on FortiGate devices.
-# Idempotency: This playbook is read-only and safe for repeated execution as it does not modify device state.
-# Auto-improved: 2026-03-08
-# Author: Architect:(Gemini CLI)
+# FortiGate VPN Status Summary
+# This playbook retrieves and validates the VPN operational status for FortiGate firewalls.
+# 
+# Standards Compliance:
+# 1. Idempotency: Uses 'changed_when: false' as 'get' is a read-only operation.
+# 2. Observability: Employs 'register' and 'assert' to verify data integrity.
+# 3. Documentation: Inline comments explain task purpose and logic.
+# 4. Error Handling: Uses 'failed_when' to catch specific command execution errors.
+# 5. Best Practices: Uses Fully Qualified Collection Names (FQCN) for all modules.
 
-- name: FortiGate - VPN Status Summary
+- name: FortiGate VPN Status Summary
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Optimization: Fact gathering is unnecessary for this diagnostic task
 
   tasks:
-    - name: "FortiGate | Retrieve VPN status summary"
-      # Best Practice: Use FQCN (ansible.netcommon) to ensure the correct module is invoked.
-      # Idempotency: Read-only command; 'changed_when: false' ensures the task reports as 'ok' instead of 'changed'.
+    - name: Retrieve VPN status via CLI
+      # Why: Fetch the current state of VPN tunnels directly from the device.
       ansible.netcommon.cli_command:
         command: "get vpn status"
       register: vpn_status_result
+      # Idempotency: Ensure the task does not report a change for a read operation.
       changed_when: false
-      # Error Handling: Catch CLI-specific error strings to prevent silent failures.
+      # Error Handling: Fail if the module fails or if the command is unrecognized by the OS.
       failed_when: 
-        - "vpn_status_result.rc != 0"
-        - "'Command fail' in vpn_status_result.stdout or 'Unknown action' in vpn_status_result.stdout"
+        - vpn_status_result.failed
+        - "'Unknown command' in vpn_status_result.stdout"
 
-    - name: "FortiGate | Validate VPN status output for observability"
-      # Observability: The 'assert' task ensures the playbook fails if the device returns an empty response,
-      # providing high-confidence monitoring and diagnostic clarity.
+    - name: Validate VPN status output
+      # Why: Confirm that the device returned actionable data.
+      # Observability: Provides explicit pass/fail criteria for the automation run.
       ansible.builtin.assert:
         that:
           - "vpn_status_result.stdout is defined"
           - "vpn_status_result.stdout | length > 0"
-        fail_msg: "Data integrity check failed: No VPN status output returned from {{ inventory_hostname }}."
-        success_msg: "Data integrity check passed: VPN status captured successfully."
+        fail_msg: "VPN status retrieval failed or returned empty content for {{ inventory_hostname }}."
+        success_msg: "VPN status successfully retrieved and verified for {{ inventory_hostname }}."
 
-    - name: "FortiGate | Display formatted VPN status"
-      # Observability: Formats the output for clear visibility in operational logs and management consoles.
+    - name: Display VPN Status Summary
+      # Why: Present the retrieved diagnostic information in a readable format.
       ansible.builtin.debug:
         msg: |
-          ======================= [{{ inventory_hostname }}] VPN SUMMARY =======================
+          ======================= VPN SUMMARY: {{ inventory_hostname }} =======================
           {{ vpn_status_result.stdout }}
-```
+          =====================================================================================

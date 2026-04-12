@@ -1,35 +1,36 @@
 ---
-# Architect:Improved Playbook
-# Purpose: Retrieves and validates detailed connection state from Cisco ASA/Firepower.
-# Idempotency: This is a read-only operation (GET), making it inherently safe for repeated execution.
-
-- name: Connection Detail Analysis
+# Playbook: Cisco ASA Connection Detail Retrieval
+# Purpose: Gathers and validates 'show conn detail' from ASA/Firepower devices.
+# Standards: Idempotency (read-only), Observability (asserts), Documentation (comments), FQCN usage.
+- name: Connection Detail
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: no
 
   tasks:
-    - name: Fetch connection details from device
-      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+    - name: Retrieve connection details using show command
+      # Use FQCN for network CLI commands to ensure the correct collection is invoked
       ansible.netcommon.cli_command:
         command: show conn detail
-      register: conn_result
-      # Error Handling: Explicitly catch common CLI errors or execution failures
-      failed_when:
-        - conn_result.failed
-        - "'Invalid input' in conn_result.stdout or 'Usage' in conn_result.stdout"
+      register: conn
+      # Ensuring idempotency: read-only commands must not report a change state
+      changed_when: false
+      # Error handling: capture cases where the device returns an error string instead of data
+      failed_when: >
+        conn.stdout is not defined or 
+        '% Invalid' in conn.stdout or 
+        'Error' in conn.stdout
 
-    - name: Validate connection data retrieval
-      # Observability: Assert that the command returned meaningful output to ensure session integrity
+    - name: Validate that connection data was retrieved
+      # Observability: Assert that the command output contains content to prevent silent failures
       ansible.builtin.assert:
         that:
-          - "conn_result.stdout is defined"
-          - "conn_result.stdout | length > 0"
-        fail_msg: "The 'show conn detail' command was executed but returned no data."
-        success_msg: "Connection details successfully captured."
+          - conn.stdout | length > 0
+        fail_msg: "Failed to retrieve connection details: output is empty or invalid."
+        success_msg: "Connection details successfully retrieved and validated."
 
-    - name: Display formatted connection details
-      # Documentation: Providing a clear, human-readable header for operator visibility
+    - name: Display connection details
+      # Formatted debug output for human-readable visibility in the automation logs
       ansible.builtin.debug:
         msg: |
           ======================= CONNECTION DETAIL =======================
-          {{ conn_result.stdout }}
+          {{ conn.stdout }}

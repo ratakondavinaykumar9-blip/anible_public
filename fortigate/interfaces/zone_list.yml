@@ -1,36 +1,37 @@
 ---
-# FortiGate Zone List Retrieval
-# This playbook retrieves the current security zone configuration from FortiGate devices.
-# It is designed to be idempotent, observable, and follows Ansible best practices.
-
-- name: Get Zone List
+# FortiGate Zone List - Production Grade
+# Purpose: Safely retrieve and validate the list of security zones from FortiGate firewalls.
+# This playbook is idempotent (read-only), observable, and follows Ansible best practices.
+- name: FortiGate Zone Retrieval
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve system zones via CLI command
-      # Use Fully Qualified Collection Name (FQCN). 
-      # This operation is idempotent as 'get' is a read-only command.
+    - name: Retrieve system zone status from CLI
+      # Use the Fully Qualified Collection Name (FQCN) to ensure compatibility and clarity.
+      # 'get system zone' captures the current operational state and interface-to-zone mappings.
       ansible.netcommon.cli_command:
         command: get system zone
-      register: zone_result
-      # Error Handling: Fail explicitly if the command is unrecognized or returns an error string
-      failed_when: 
-        - zone_result.failed or "Unknown action" in zone_result.stdout or "Command fail" in zone_result.stdout
+      register: zone_data
+      # Error Handling: Explicitly fail if the command execution fails or if the FortiOS CLI returns an error message.
+      failed_when: >
+        zone_data.failed or 
+        "Unknown action" in zone_data.stdout or 
+        "item not found" in zone_data.stdout or
+        "Command fail" in zone_data.stdout
 
-    - name: Verify successful retrieval of zone data
-      # Observability: Assert that the command returned actual data to the stdout buffer
+    - name: Validate that zone data was successfully captured
+      # Observability: Assert that the output is not empty to verify the operation's utility in automation pipelines.
       ansible.builtin.assert:
         that:
-          - zone_result.stdout is defined
-          - zone_result.stdout | length > 0
-        fail_msg: "The zone retrieval command returned empty output. Check device state or permissions."
-        success_msg: "Zone configuration successfully captured."
+          - zone_data.stdout is defined
+          - zone_data.stdout | length > 0
+        fail_msg: "Critical Error: Zone retrieval returned empty or undefined results."
+        success_msg: "Success: Zone information successfully retrieved and validated."
 
-    - name: Display formatted zone information
-      # Documentation: Provides a human-readable summary of the retrieved configuration
+    - name: Display the formatted zone list
+      # Observability: Provide a structured debug message for human operators and logging systems.
       ansible.builtin.debug:
         msg: |
-          ======================= ZONES =======================
-          {{ zone_result.stdout }}
-          =====================================================
+          ======================= FORTIGATE ZONES =======================
+          {{ zone_data.stdout }}

@@ -1,34 +1,40 @@
 ---
-# FortiGate UTM Statistics Retrieval
-# Improved by Architect:# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: Get FortiGate UTM Statistics
+# FortiGate UTM Statistics Improvement
+# This playbook retrieves operational UTM (Unified Threat Management) site results.
+# It is designed to be idempotent, observable, and includes robust error handling.
+
+- name: Get UTM Stats
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute UTM statistics retrieval command
-      # This task uses a read-only 'get' command, making it idempotent by nature.
-      # FQCN (Fully Qualified Collection Name) is used for standard compliance.
+    - name: Retrieve UTM site results from device
+      # Use FQCN: ansible.netcommon.cli_command for standardized network interaction
       ansible.netcommon.cli_command:
         command: get system siteresult
-      register: utm_stats_output
-      # Error Handling: Ensure the task fails if the command result is undefined or returns an error string.
-      failed_when: 
-        - utm_stats_output.failed or "Unknown action" in utm_stats_output.stdout
+      register: utm_capture
+      # Idempotency: Operational 'get' commands are read-only; they must never report 'changed'
+      changed_when: false
+      # Error Handling: Explicitly fail if the command execution fails or returns an error string
+      failed_when:
+        - utm_capture.stdout is undefined
+        - "'Command fail' in utm_capture.stdout"
+        - "'Unknown action' in utm_capture.stdout"
 
-    - name: Validate UTM statistics response
-      # Observability: Verify that the command returned actual data before proceeding.
+    - name: Validate UTM data integrity
+      # Observability: Ensure that the captured output contains data before proceeding
       ansible.builtin.assert:
         that:
-          - utm_stats_output.stdout is defined
-          - utm_stats_output.stdout | length > 0
-        fail_msg: "The UTM statistics command returned no data or the response was empty."
-        success_msg: "UTM statistics successfully captured."
-        quiet: true
+          - utm_capture.stdout | length > 0
+        fail_msg: "The UTM statistics command returned an empty result for {{ inventory_hostname }}."
+        success_msg: "UTM statistics successfully retrieved and validated."
 
-    - name: Display captured UTM statistics
-      # Provides formatted visibility into the retrieved operational data for the operator.
+    - name: Display UTM Statistics
+      # Observability: Formatted debug output for human-readable monitoring
       ansible.builtin.debug:
         msg: |
           ======================= UTM STATS =======================
-          {{ utm_stats_output.stdout }}
+          Host: {{ inventory_hostname }}
+          ---------------------------------------------------------
+          {{ utm_capture.stdout }}
+          =========================================================

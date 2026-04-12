@@ -1,34 +1,41 @@
 ---
-# FortiGate VIP (DNAT) List Retrieval
-# This playbook retrieves and validates Virtual IP (DNAT) configurations from FortiGate devices.
-# Standards: Idempotent (Read-only), Observable (Assert), Documented, Error Handled, FQCN.
+# FortiGate VIP (DNAT) List
+# Improved on 2026-03-15 by NetLearner Architect
+#
+# Standards Adherence:
+# 1. Idempotency: Read-only operation; safe to execute repeatedly without state modification.
+# 2. Observability: Uses 'register' for output capture and 'assert' for outcome verification.
+# 3. Documentation: Comments explain the rationale for task configuration and module selection.
+# 4. Error Handling: Uses 'failed_when' to catch specific FortiOS CLI-level error strings.
+# 5. Best Practices: Strict use of Fully Qualified Collection Names (FQCN).
+---
 - name: Get VIP List
   hosts: fortigate
+  # Best Practice: Disable fact gathering for network-specific CLI tasks to optimize performance
   gather_facts: false
 
   tasks:
-    - name: Retrieve Virtual IP configurations via CLI
-      # Use FQCN for cross-platform network CLI execution
+    - name: Retrieve Virtual IP (VIP) configuration via CLI
+      # Use FQCN for the network-common collection to execute raw CLI commands
       ansible.netcommon.cli_command:
-        command: "get firewall vip"
-      register: vip_output
-      # Error Handling: Fail if the command is unrecognized or the execution fails
+        command: get firewall vip
+      register: vip_result
+      # Error Handling: Catch cases where the command is unrecognized or explicitly rejected by FortiOS
       failed_when:
-        - vip_output.failed | default(false)
-        - "'unknown command' in vip_output.stdout | lower"
+        - vip_result.failed or "Unknown action" in vip_result.stdout or "Command fail" in vip_result.stdout
 
-    - name: Validate VIP retrieval success
-      # Observability: Ensure the command returned content to verify operational state
+    - name: Verify VIP data retrieval success
+      # Observability: Assert that we received a non-empty response from the device to ensure actionable data
       ansible.builtin.assert:
         that:
-          - vip_output.stdout is defined
-          - vip_output.stdout | length > 0
-        fail_msg: "Failed to retrieve VIP list or no VIPs are configured on the device."
-        success_msg: "Successfully retrieved VIP configurations."
+          - vip_result.stdout is defined
+          - vip_result.stdout | length > 0
+        fail_msg: "Failed to retrieve VIP list or no VIPs are currently configured on the device."
+        success_msg: "Successfully retrieved VIP configuration from FortiGate."
 
-    - name: Display VIP (DNAT) Details
-      # Documentation: Provide clear, formatted output for the operator
+    - name: Display VIP (DNAT) information
+      # Documentation: Present the retrieved data in a structured, readable format for audit logs
       ansible.builtin.debug:
         msg: |
           ======================= VIPs (DNAT) =======================
-          {{ vip_output.stdout }}
+          {{ vip_result.stdout }}

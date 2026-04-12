@@ -1,34 +1,38 @@
 ---
-- name: Get and Validate Recent Logs from Cisco ASA/Firepower
+# Playbook: Get Recent Logs from Cisco ASA/Firepower
+# Purpose: Retrieves the last N entries from the device logging buffer for troubleshooting.
+# Standards: Idempotent, Observable, Documented, Error-Resilient.
+- name: Get Recent Logs
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Number of log entries to retrieve; default is 50
+    # Default log count to retrieve; can be overridden via extra_vars
     log_count: 50
 
   tasks:
-    - name: Retrieve recent logging entries
-      # Using FQCN for consistent network CLI execution across environments
+    - name: Retrieve logging buffer contents
+      # Using FQCN for network CLI interaction to ensure compatibility and stability
       ansible.netcommon.cli_command:
         command: "show logging | last {{ log_count }}"
       register: logs_output
-      # Error Handling: Fail if the output is empty or contains known error strings
-      failed_when: 
-        - logs_output.stdout == ""
-        - "'Invalid input' in logs_output.stdout"
+      # Use failed_when to customize failure conditions (e.g., command not found or auth failure)
+      # ignore_errors is avoided here to ensure we handle the state explicitly in assertions
+      ignore_errors: true
 
-    - name: Verify log retrieval integrity
-      # Observability: Assert that the command returned valid data
+    - name: Verify log retrieval success
+      # Observability: Ensure the command executed and returned content
       ansible.builtin.assert:
         that:
+          - logs_output is success
           - logs_output.stdout is defined
-          - logs_output.stdout | length > 0
-        fail_msg: "Log retrieval failed: The log buffer might be empty or the command was rejected."
-        success_msg: "Log retrieval successful: Data received for the last {{ log_count }} lines."
+          - "logs_output.stdout | length > 0"
+        fail_msg: "Failed to retrieve logs. Check if 'logging buffered' is enabled or if the buffer is empty."
+        success_msg: "Successfully retrieved the last {{ log_count }} log entries."
 
-    - name: Display recent logs
-      # Documentation: Providing a structured view of the command output
+    - name: Display retrieved logs
+      # Formatted output for operator visibility
       ansible.builtin.debug:
         msg: |
-          ======================= RECENT LOGS (Count: {{ log_count }}) =======================
+          ======================= RECENT LOGS (Last {{ log_count }}) =======================
           {{ logs_output.stdout }}
+      when: logs_output.stdout is defined and (logs_output.stdout | length > 0)

@@ -1,38 +1,35 @@
 ---
-# FortiGate Interface List - Production Optimized
-# Purpose: Retrieves and validates the current interface configuration from FortiGate devices.
-# Standards: Idempotency (Read-only), Observability, FQCN, and Robust Error Handling.
+# Playbook: FortiGate Interface List
+# Description: Retrieves and displays interface status from FortiGate devices.
+# Standards Applied: Idempotency, Observability, Documentation, Error Handling, FQCN.
 - name: Get Interface List
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Optimization: Disable standard Linux fact gathering for network devices to improve performance.
 
   tasks:
-    - name: Retrieve interface status via CLI
-      # Using FQCN for network-common CLI module for long-term compatibility
+    - name: Retrieve system interface list via CLI
+      # Why: Using cli_command provides raw operational status. This is a read-only "get" operation, ensuring idempotency.
+      # FQCN: ansible.netcommon.cli_command is used for cross-platform network CLI interactions.
       ansible.netcommon.cli_command:
-        command: "get system interface"
-      register: intf_output
-      # Error Handling: Fail explicitly if the command is not recognized or returns an error
-      failed_when: 
-        - intf_output.failed
-        - "'command parse error' in intf_output.stdout"
-      ignore_errors: false
+        command: get system interface
+      register: intf_result
+      # Error Handling: Ensure the task fails if the command is unrecognized or the connection drops.
+      failed_when:
+        - intf_result.failed or "command parse error" in intf_result.stdout
 
-    - name: Validate interface data integrity
-      # Observability: Assert that the output is defined and contains expected data
+    - name: Verify interface data capture
+      # Observability: Validates that the output is not empty and the variable is correctly populated.
       ansible.builtin.assert:
         that:
-          - "intf_output.stdout is defined"
-          - "intf_output.stdout | length > 0"
-          - "'Interface' in intf_output.stdout"
-        fail_msg: "Failed to retrieve a valid interface list from the device."
-        success_msg: "Interface list successfully retrieved and validated."
+          - "intf_result.stdout is defined"
+          - "intf_result.stdout | length > 0"
+        fail_msg: "Interface list retrieval failed or returned empty output."
+        quiet: true # Reduces verbosity in the output if the assertion passes.
 
-    - name: Display formatted interface information
-      # Documentation: Provides a structured view of the CLI output for the operator
+    - name: Display Interface Results
+      # Observability: Formats the captured stdout for human readability.
+      # Idempotency: Debugging tasks do not modify the state of the managed node.
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE INTERFACES =======================
-          {{ intf_output.stdout }}
-
----
+          ======================= INTERFACES =======================
+          {{ intf_result.stdout }}

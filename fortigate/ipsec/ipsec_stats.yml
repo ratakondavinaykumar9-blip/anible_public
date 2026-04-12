@@ -1,39 +1,39 @@
 ---
-# Ipsec Stats
-# Auto-improved: 2026-03-08 12:00
-# Author: Architect:(OpenClaw)
-#
+# IPSec Statistics Retrieval Playbook
+# Auto-improved: 2026-03-15
+# Author: NetLearner Architect (OpenClaw)
+# Description: Retrieves, validates, and displays IPSec VPN statistics from FortiGate devices.
 ---
-# FortiGate IPSec Statistics Collection
-- name: Get IPSec Stats
+- name: Retrieve FortiGate IPSec Statistics
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve IPSec VPN statistics via CLI
-      # FQCN: Using ansible.netcommon.cli_command for standardized CLI interaction.
-      # Idempotency: 'get' commands are read-only and inherently idempotent.
+    - name: Fetch IPSec stats from device
+      # Best Practices: Using FQCN for network CLI operations.
+      # Idempotency: "get" commands are inherently idempotent as they do not modify device state.
       ansible.netcommon.cli_command:
         command: get vpn ipsec stats
-      register: ipsec_stats
-      # Error Handling: Catch potential CLI-level errors that do not return a non-zero exit code.
-      failed_when:
-        - ipsec_stats.failed | default(false)
-        - "'error' in ipsec_stats.stdout | lower"
-        - "'unknown command' in ipsec_stats.stdout | lower"
+      register: stats
+      # Error Handling: Catch cases where the command might be unsupported or fail silently.
+      failed_when: 
+        - stats.failed | default(false)
+        - "'Unknown action' in stats.stdout"
+        - "'Command fail' in stats.stdout"
 
-    - name: Verify IPSec statistics retrieval
-      # Observability: Assert that the command returned data to prevent silent failures.
+    - name: Validate IPSec statistics response
+      # Observability: Ensure the command returned data before proceeding.
       ansible.builtin.assert:
         that:
-          - ipsec_stats.stdout is defined
-          - ipsec_stats.stdout | trim | length > 0
-        fail_msg: "Failed to retrieve IPSec statistics from {{ inventory_hostname }} or output was empty."
-        success_msg: "IPSec statistics successfully retrieved from {{ inventory_hostname }}."
+          - stats.stdout is defined
+          - stats.stdout | length > 0
+        fail_msg: "The IPSec statistics command returned no data on {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved IPSec statistics for {{ inventory_hostname }}."
 
-    - name: Display IPSec Tunnel Statistics
-      # Observability: Provide clear, formatted visibility of the operational state.
+    - name: Display IPSec statistics output
+      # Documentation: Providing a clear, formatted view of the captured data.
       ansible.builtin.debug:
         msg: |
           ======================= IPSEC STATS: {{ inventory_hostname }} =======================
-          {{ ipsec_stats.stdout }}
+          {{ stats.stdout }}
+          ===================================================================================

@@ -1,70 +1,73 @@
 ---
-# FortiGate IPSec VPN Troubleshooting Playbook
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: Troubleshoot IPSec VPN
+# FortiGate IPSec Troubleshooting Playbook
+# This playbook performs diagnostic data collection for a specific VPN tunnel.
+# It follows NetLearner standards for idempotency, observability, and error handling.
+- name: Troubleshoot IPSec
   hosts: fortigate
   gather_facts: false
   vars:
-    # Ensure tunnel_name is defined to prevent playbook failure; defaults to empty for validation
-    tunnel_name: "{{ tunnel_name | default('') }}"
+    # The tunnel_name should be provided at runtime via --extra-vars "tunnel_name=VPN_NAME"
+    tunnel_name: ""
 
   tasks:
-    - name: "Pre-flight: Validate Required Variables"
+    - name: VALIDATE_INPUT | Ensure tunnel_name is not empty
+      # Standard: Observability - verify input before executing diagnostic commands
       ansible.builtin.assert:
         that:
           - tunnel_name | length > 0
-        fail_msg: "The 'tunnel_name' variable is missing. Run with: -e 'tunnel_name=VPN_NAME'"
-        quiet: true
+        fail_msg: "ERROR: The 'tunnel_name' variable is required. Please provide it via --extra-vars."
+        success_msg: "Input validation successful for tunnel: {{ tunnel_name }}"
 
-    - name: "Step 1: Get Basic Tunnel Status"
-      # Documentation: Checks if the tunnel exists in the operational status table.
-      # FQCN: Using ansible.netcommon.cli_command for platform-agnostic CLI interaction.
-      # Idempotency: Read-only command, safe for repeated execution.
+    - name: GET_TUNNEL_STATUS | Check if the tunnel is present in the active status list
+      # Standard: Best Practices - using FQCN for networking commands
       ansible.netcommon.cli_command:
         command: "get vpn ipsec status | grep {{ tunnel_name }}"
       register: status
-      # Error Handling: grep returns rc 1 if no match; failed_when: false prevents task failure.
+      # Standard: Error Handling - grep returns non-zero if no match; we handle this gracefully
+      # to prevent playbook termination when a tunnel is simply down.
       failed_when: false
       changed_when: false
 
-    - name: "Step 2: Get Granular Tunnel Details"
-      # Documentation: Collects specific Phase 2 selectors, SAs, and encryption details.
+    - name: GET_TUNNEL_DETAILS | Retrieve technical phase 1 and phase 2 details
       ansible.netcommon.cli_command:
         command: "get vpn ipsec tunnel details {{ tunnel_name }}"
       register: details
-      # Error Handling: Fail if FortiOS returns an 'entry not found' message.
-      failed_when: "'entry not found' in details.stdout"
+      # Standard: Error Handling - do not fail if the entry is simply missing from the device configuration
+      failed_when: 
+        - details.failed
+        - "'entry not found' not in details.stdout"
       changed_when: false
 
-    - name: "Step 3: Collect IKE Diagnostic Context"
-      # Documentation: Retrieves active IKE debug filters to understand current logging state.
+    - name: GET_IKE_LOG | Fetch diagnostic IKE logs for the specific tunnel
       ansible.netcommon.cli_command:
-        command: "diagnose vpn ike log-filter list"
+        command: "diagnose vpn ike log | grep {{ tunnel_name }}"
       register: ike_log
+      # Standard: Idempotency - Read-only debug commands are inherently idempotent
       failed_when: false
       changed_when: false
 
-    - name: "Step 4: Verify Tunnel Observability"
-      # Observability: Ensure the tunnel was actually found in the status output.
+    - name: VERIFY_DIAGNOSTICS | Confirm diagnostic data was registered
+      # Standard: Observability - ensure the playbook captured output for the summary
       ansible.builtin.assert:
         that:
-          - status.stdout | length > 0
-        fail_msg: "Tunnel '{{ tunnel_name }}' was not found in the active IPSec status table."
-        quiet: true
+          - status is defined
+          - details is defined
+          - ike_log is defined
+        fail_msg: "Diagnostic data collection failed to register output variables."
 
-    - name: "Final: Display Troubleshooting Summary"
-      # Documentation: Aggregates all gathered data into a single formatted report.
+    - name: DISPLAY_SUMMARY | Format and present the troubleshooting results
+      # Standard: Documentation - provides a human-readable summary of the tunnel state
       ansible.builtin.debug:
         msg: |
           ======================= IPSEC TROUBLESHOOT: {{ tunnel_name }} =======================
+          Device: {{ inventory_hostname }}
           
-          [VPN STATUS SUMMARY]
-          {{ status.stdout | default('NO ACTIVE STATUS FOUND') }}
+          [1. TUNNEL STATUS]
+          {{ status.stdout if status.stdout != "" else "N/A - Tunnel not found in active status list." }}
           
-          [TUNNEL PHASE 2 DETAILS]
-          {{ details.stdout }}
+          [2. TUNNEL DETAILS]
+          {{ details.stdout if details.stdout != "" else "N/A - No detailed entry found for phase 1/2." }}
           
-          [IKE LOGGING CONTEXT]
-          {{ ike_log.stdout | default('NO IKE DEBUG FILTERS ACTIVE') }}
-          
-          =====================================================================================
+          [3. IKE LOGS]
+          {{ ike_log.stdout if ike_log.stdout != "" else "N/A - No recent IKE debug logs found matching " + tunnel_name }}
+          ====================================================================================

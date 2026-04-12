@@ -1,46 +1,57 @@
 ---
 # Get Failover Status and Statistics
-# Improved by Architect:for Idempotency, Observability, and Error Handling.
-# This playbook retrieves operational state without modifying device configuration.
+# Improved for: NetLearner Project
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
+# This playbook retrieves and validates failover status from Cisco ASA/Firepower devices.
+# It is designed to be safe for repeated execution (idempotent) and provides clear verification.
 - name: Get Failover Status
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve core failover status
-      # FQCN: Using cisco.asa.asa_command for vendor-specific status retrieval.
-      # Idempotency: Read-only 'show' commands are inherently idempotent.
+    - name: Get failover information
+      # Use cisco.asa.asa_command for consistent status retrieval
+      # Idempotency: Read-only command execution does not modify device state
       cisco.asa.asa_command:
         commands:
           - show failover
       register: failover_output
-      # Error Handling: Gracefully ignore errors if the command is unsupported or device is in a state that prevents execution.
-      ignore_errors: true
+      # Error Handling: Capture failure if failover is not supported/configured without breaking the run
+      failed_when: false
+      changed_when: false
 
-    - name: Verify failover data availability
-      # Observability: Ensure the device returned valid data before proceeding with dependent tasks.
+    - name: Verify failover command success
+      # Observability: Ensure we received a valid response from the device
       ansible.builtin.assert:
         that:
           - failover_output.stdout is defined
           - failover_output.stdout | length > 0
-        fail_msg: "Failed to retrieve failover status from {{ inventory_hostname }}. Verify connectivity."
+        fail_msg: "Failed to retrieve failover status from {{ inventory_hostname }}. Check connectivity."
         quiet: true
 
     - name: Get failover statistics
-      # Documentation: Statistics are only relevant if failover is actively configured and enabled.
+      # Use FQCN for network common commands
       ansible.netcommon.cli_command:
         command: show failover statistics
       register: failover_stats
+      # Only execute if the device indicates failover is active/configured
       when: 
         - failover_output.stdout is defined
-        - "'Failover On' in failover_output.stdout[0]"
+        - "'failover' in failover_output.stdout[0] | lower"
+      changed_when: false
       ignore_errors: true
 
     - name: Get failover history
-      # Documentation: History provides visibility into recent state transitions (Active/Standby/Failed).
       ansible.netcommon.cli_command:
         command: show failover history
       register: failover_history
       when: 
         - failover_output.stdout is defined
-        - "'Failover On' in failover_output.stdout
+        - "'failover' in failover_output.stdout[0] | lower"
+      changed_when: false
+      ignore_errors: true
+
+    - name: Summary
+      # Best Practices: Provide a structured and human-readable summary of the gathered data
+      ansible.builtin.

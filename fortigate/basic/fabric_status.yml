@@ -1,37 +1,40 @@
 ---
-# FortiGate Security Fabric Status Monitoring
-# This playbook retrieves the Security Fabric status from FortiGate devices.
-# It adheres to industry standards: Idempotency, Observability, FQCN, and Error Handling.
-# Auto-improved: 2026-03-08
-# Author: Architect: name: FortiGate Fabric Status
+# Fabric Status
+# Improved: 2026-03-15 (NetLearner Architect)
+# Standards: Idempotency, Observability, FQCN, Error Handling
+#
+---
+- name: FortiGate Fabric Status Collection
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve Security Fabric status from CLI
-      # Use FQCN for portability and best practices
-      # Idempotency: This is a read-only command; changed_when: false ensures no false 'changed' state
+    - name: Execute 'get fabric status' on FortiGate
+      # FQCN: Using ansible.netcommon.cli_command to ensure compatibility and best practice.
       ansible.netcommon.cli_command:
         command: get fabric status
-      register: fabric_output
+      register: fabric_result
+      # Idempotency: This is a read-only 'get' command. We set changed_when to false 
+      # to ensure the playbook remains idempotent and doesn't report false changes.
       changed_when: false
-      # Error Handling: Catch cases where the command is unsupported or fails on the device
+      # Error Handling: Explicitly fail if the command returns empty output, 
+      # indicating a potential communication or execution issue.
       failed_when: 
-        - "'Command fail' in fabric_output.stdout"
-        - "'Unknown action' in fabric_output.stdout"
+        - fabric_result.stdout is not defined 
+        - fabric_result.stdout | length == 0
 
-    - name: Validate Security Fabric status retrieval
-      # Observability: Ensure the registered variable contains expected data before proceeding
+    - name: Validate Fabric status output
+      # Observability: Assert that the command returned meaningful fabric information.
+      # This verifies that the device is responding with the expected data structure.
       ansible.builtin.assert:
         that:
-          - fabric_output.stdout is defined
-          - fabric_output.stdout | length > 0
-        fail_msg: "Security Fabric status could not be retrieved or the output is empty."
-        success_msg: "Security Fabric status successfully captured."
+          - "'Fabric' in fabric_result.stdout"
+        fail_msg: "The command output did not contain expected 'Fabric' keywords. Check device configuration."
+        success_msg: "Fabric status successfully retrieved and validated."
 
-    - name: Display Security Fabric Status
-      # Observability: Formatted output for operator review
+    - name: Display Fabric Status
+      # Documentation: Providing a clear, formatted output for administrative review.
       ansible.builtin.debug:
         msg: |
           ======================= FABRIC STATUS =======================
-          {{ fabric_output.stdout }}
+          {{ fabric_result.stdout }}

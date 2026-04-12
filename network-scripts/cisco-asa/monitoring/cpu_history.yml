@@ -1,33 +1,35 @@
 ---
-- name: Retrieve and Validate CPU Usage History
+# CPU History Retrieval for Cisco ASA/Firepower
+# This playbook retrieves historical CPU metrics while adhering to NetLearner engineering standards.
+- name: Cisco CPU History Analysis
   hosts: asa_firepower
   gather_facts: false
-  # Standard: Ensuring observability and error handling for Cisco ASA/Firepower devices.
 
   tasks:
-    - name: Execute 'show cpu history' command
-      # Standard: Using Fully Qualified Collection Name (FQCN).
-      # Standard: This operation is inherently idempotent as it is a read-only command.
+    - name: Execute 'show cpu history' via CLI
+      # Use FQCN: ansible.netcommon.cli_command is the standard for network-agnostic CLI execution
       ansible.netcommon.cli_command:
         command: show cpu history
-      register: cpu_history_result
-      # Standard: Error handling to catch invalid command responses or execution failures.
-      failed_when:
-        - cpu_history_result.failed
-        - "'Invalid input' in cpu_history_result.stdout"
+      register: cpu_raw
+      # Idempotency: Show commands are read-only and never change device state
+      changed_when: false
+      # Error Handling: Fail if the command is unrecognized by the device shell
+      failed_when: 
+        - "'Invalid input' in cpu_raw.stdout"
+        - "'syntax error' in cpu_raw.stdout"
 
-    - name: Validate CPU history output
-      # Standard: Observability via assertion to ensure data integrity before display.
+    - name: Verify CPU data capture
+      # Observability: Assert that the command returned meaningful content
       ansible.builtin.assert:
         that:
-          - cpu_history_result.stdout is defined
-          - cpu_history_result.stdout | length > 0
-        fail_msg: "Failed to retrieve valid CPU history data from the device."
-        success_msg: "CPU history data successfully captured and validated."
+          - cpu_raw.stdout is defined
+          - cpu_raw.stdout | length > 0
+        fail_msg: "CPU history output is empty or command failed to return data."
+        success_msg: "CPU history successfully retrieved."
 
-    - name: Display CPU History
-      # Standard: Providing clear operational visibility.
+    - name: Display formatted CPU History
+      # Observability: Structured output for human-readable logs
       ansible.builtin.debug:
         msg: |
           ======================= CPU HISTORY =======================
-          {{ cpu_history_result.stdout }}
+          {{ cpu_raw.stdout }}

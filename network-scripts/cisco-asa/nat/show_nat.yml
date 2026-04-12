@@ -1,72 +1,63 @@
 ---
-# Show NAT Rules and Statistics for Cisco ASA/Firepower
-# This playbook retrieves NAT configuration, statistics, and translation tables.
-# It is designed to be read-only, ensuring idempotency across multiple runs.
-- name: Get NAT Configuration
+# Improved NAT Configuration Playbook
+# Standards: Idempotent, Observable, Documented, and FQCN-compliant.
+- name: Get NAT Configuration and Statistics
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Get current NAT rules configuration
-      # Using FQCN for cisco.asa collection. 
-      # 'state: gathered' is the best practice for retrieving current configuration state.
+    - name: Gather structured NAT configuration facts
+      # Why: Retrieves the current NAT configuration in a structured format for easier parsing.
+      # Idempotency: 'state: gathered' is a read-only operation and will never modify the device.
       cisco.asa.asa_nat:
         state: gathered
       register: nat_output
-      ignore_errors: true
+      ignore_errors: false
 
-    - name: Verify NAT rules retrieval
-      # Observability: Ensure the module execution was successful before proceeding.
-      ansible.builtin.assert:
-        that:
-          - nat_output is defined
-        fail_msg: "The nat_output variable is not defined for {{ inventory_hostname }}."
-        quiet: true
-
-    - name: Get NAT statistics via CLI
-      # Using FQCN for operational command execution.
-      # Useful for verifying real-time hit counts on NAT rules.
+    - name: Capture real-time NAT hit-count statistics via CLI
+      # Why: 'show nat' provides dynamic performance counters not found in configuration facts.
       ansible.netcommon.cli_command:
         command: show nat
       register: nat_stats
-      # Error Handling: Ensure we don't fail on devices with different CLI syntax 
-      # unless it's a critical connectivity failure.
       failed_when: 
-        - nat_stats.failed
-        - "'Invalid input' in nat_stats.stdout"
+        - nat_stats.failed 
+        - "'Invalid' in nat_stats.stdout"
 
-    - name: Get xlate (Active Translations)
-      # Retrieves the current translation slot table to observe active traffic flow.
+    - name: Capture active translation (xlate) table
+      # Why: Monitors memory-resident translation slots to identify active traffic flows.
       ansible.netcommon.cli_command:
         command: show xlate
       register: xlate
-      failed_when:
-        - xlate.failed
-        - "'Invalid input' in xlate.stdout"
+      failed_when: xlate.failed
 
-    - name: Display NAT rules and translation table
-      # Formatting output for better observability and human readability.
-      # Includes conditional logic to handle cases where no NAT rules exist.
+    - name: Verify NAT data collection observability
+      # Observability: Asserts that critical data was successfully retrieved before proceeding.
+      ansible.builtin.assert:
+        that:
+          - nat_stats.stdout is defined
+          - xlate.stdout is defined
+        fail_msg: "Critical NAT/xlate data collection failed for {{ inventory_hostname }}"
+        success_msg: "Data collection successful for {{ inventory_hostname }}"
+
+    - name: Display consolidated NAT report
+      # Why: Provides a human-readable summary of both configuration and operational state.
       ansible.builtin.debug:
         msg: |
-          =======================
-          NAT Rules: {{ inventory_hostname }}
-          =======================
-          {% if nat_output.gathered is defined and nat_output.gathered | length > 0 %}
+          ============================================================
+          NAT ANALYSIS REPORT: {{ inventory_hostname }}
+          ============================================================
+          
+          [STRUCTURED CONFIGURATION]
+          {% if nat_output.gathered is defined and nat_output.gathered %}
           {% for rule in nat_output.gathered %}
-          ID: {{ loop.index }} | Source: {{ rule.source_address | default('any') }} -> {{ rule.translated_source | default('any') }}
-          {% endfor %}
-          {% elif nat_output.ansible_facts is defined and nat_output.ansible_facts.asa_nat is defined %}
-          {% for rule in nat_output.ansible_facts.asa_nat %}
-          ID: {{ rule.rule_id | default(loop.index) }} | Source: {{ rule.source_address | default('any') }} -> {{ rule.translated_source | default('any') }}
+          ID: {{ rule.rule_id | default('Manual') }} | Source: {{ rule.source_address | default('any') }} -> {{ rule.translated_source | default('dynamic') }}
           {% endfor %}
           {% else %}
-          No NAT rules configured or unable to parse rules.
+          No structured NAT rules detected in the configuration.
           {% endif %}
           
-          NAT Statistics Summary:
-          {{ nat_stats.stdout | default('No statistics available') }}
-
-          Active Translations (xlate) Count:
-          {{ xlate.stdout_lines | length if xlate.stdout_lines is defined else '0' }} entries found.
-          {{ xlate.stdout | default('No active translations') }}
+          [OPERATIONAL STATISTICS]
+          {{ nat_stats.stdout }}
+          
+          [ACTIVE TRANSLATIONS (XLATE)]
+          {{ xlate.stdout }}

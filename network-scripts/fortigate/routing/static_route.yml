@@ -1,36 +1,39 @@
 ---
-# Network Automation Framework Architect: FortiGate Static Route Retrieval
-# This playbook retrieves operational static route data from FortiGate units.
-# It ensures idempotency, observability, and adheres to FQCN standards.
-
-- name: Get FortiGate Static Routes
+# FortiGate Static Routes Retrieval
+# Purpose: This playbook performs a read-only retrieval of the static routing table
+# to ensure visibility into the network state. As a "get" operation, it is 
+# inherently idempotent as it does not modify device configuration.
+- name: Audit FortiGate Static Routes
   hosts: fortigate
-  gather_facts: false # Optimization: Facts are not required for read-only CLI operations.
+  gather_facts: false
 
   tasks:
-    - name: Retrieve static routes via CLI
-      # FQCN: Utilizing the netcommon collection for standardized network CLI execution.
+    - name: Execute CLI command to retrieve static routes
+      # Use FQCN for consistent cross-platform execution and compliance with modern standards.
       ansible.netcommon.cli_command:
-        command: get router static
-      register: static_output
-      # Idempotency: Mark as 'changed: false' to ensure multiple runs do not falsely report state changes.
-      changed_when: false
-      # Error Handling: Validate that the command was recognized and executed without error.
-      failed_when: 
-        - static_output.failed or "unknown command" in static_output.stdout | lower
+        command: "get router static"
+      register: static_result
+      # Error Handling: Define explicit failure conditions based on CLI error messages
+      # and the module's execution status to prevent silent failures.
+      failed_when:
+        - static_result.failed or "error" in static_result.stdout | lower
+        - "'command parse error' in static_result.stdout | lower"
 
-    - name: Verify data observability
-      # Observability: Assert that the command returned content to ensure monitoring visibility.
+    - name: Verify static route data observability
+      # Observability: Assert that the command returned non-empty data.
+      # This ensures the playbook fails early if the device returns an unexpected null response.
       ansible.builtin.assert:
         that:
-          - static_output.stdout is defined
-          - (static_output.stdout | length) > 0
-        fail_msg: "Observability Error: No static route data was retrieved from the device."
-        success_msg: "Observability Success: Static route data successfully captured."
+          - "static_result.stdout is defined"
+          - "static_result.stdout | length > 0"
+        fail_msg: "Static route retrieval returned empty or undefined data from {{ inventory_hostname }}."
+        success_msg: "Static route data successfully captured and validated for {{ inventory_hostname }}."
 
-    - name: Display static route report
-      # Documentation: Providing a clear, human-readable summary of the current operational state.
+    - name: Display formatted static routes
+      # Documentation/Observability: Output the results in a structured format for easy review.
       ansible.builtin.debug:
         msg: |
-          ======================= [ FORTIGATE STATIC ROUTES ] =======================
-          {{ static_output.stdout }}
+          ======================= FORTIGATE STATIC ROUTES =======================
+          DEVICE: {{ inventory_hostname }}
+          -----------------------------------------------------------------------
+          {{ static_result.stdout }}

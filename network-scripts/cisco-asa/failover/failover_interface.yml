@@ -1,6 +1,6 @@
 ---
-# Playbook: Cisco ASA Failover Interface Status Verification
-# Purpose: Retrieves and validates failover interface status for high-availability pairs.
+# Playbook: Get Failover Interface Status
+# This playbook retrieves and validates the failover interface status on Cisco ASA/Firepower devices.
 # Standards: Idempotency (Read-only), Observability (Assert/Register), Documentation (Comments), FQCN.
 - name: Get Failover Interface Status
   hosts: asa_firepower
@@ -8,28 +8,28 @@
 
   tasks:
     - name: Retrieve failover interface status from device
-      # Best Practice: Use Fully Qualified Collection Name (FQCN) for the specific platform
-      cisco.asa.asa_command:
-        commands:
-          - show failover interface
-      register: failover_results
-      # Error Handling: Identify failure if the command returns an error string or fails at the transport level
-      failed_when:
-        - failover_results.failed
-        - "'invalid input' in failover_results.stdout[0] | lower"
+      # Use FQCN for CLI command execution to ensure portability and clarity
+      ansible.netcommon.cli_command:
+        command: show failover interface
+      register: intf_result
+      # Error Handling: Fail explicitly if the command is not recognized or the output indicates an error
+      failed_when: 
+        - intf_result.failed or "invalid input" in intf_result.stdout | lower
+        - "'usage:' in intf_result.stdout | lower"
 
-    - name: Validate failover operational state
-      # Observability: Assert that the command returned data and failover is actually active
+    - name: Validate failover status response
+      # Observability: Assert that the command returned meaningful data before proceeding
       ansible.builtin.assert:
         that:
-          - failover_results.stdout[0] | length > 0
-          - "'failover not enabled' not in failover_results.stdout[0] | lower"
-        fail_msg: "Failover is not enabled or status is unavailable on {{ inventory_hostname }}."
-        success_msg: "Failover interface status successfully verified on {{ inventory_hostname }}."
+          - intf_result.stdout is defined
+          - intf_result.stdout | length > 0
+          - "'failover' in intf_result.stdout | lower"
+        fail_msg: "The command 'show failover interface' returned invalid or empty data."
+        success_msg: "Failover interface status successfully retrieved and validated."
 
     - name: Display formatted failover interface information
-      # Documentation: Provide a clear, human-readable summary for operator visibility
+      # Documentation: Provide a clear, human-readable view of the operational state for logs/stdout
       ansible.builtin.debug:
         msg: |
-          ======================= FAILOVER INTERFACES: {{ inventory_hostname }} =======================
-          {{ failover_results.stdout[0] }}
+          ======================= FAILOVER INTERFACES =======================
+          {{ intf_

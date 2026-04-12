@@ -1,54 +1,51 @@
 ---
-# Playbook to retrieve and verify SSL VPN status on Cisco ASA/Firepower devices.
-# This playbook follows Standard:s for idempotency, observability, and best practices.
+# SSL VPN Status Monitoring Playbook
+# This playbook retrieves operational state data from Cisco ASA/Firepower devices.
+# It follows NetLearner standards for idempotency, observability, and error handling.
 - name: Get SSL VPN Status
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve SSL VPN session database information
-      # FQCN: Using fully qualified collection name for network CLI commands.
-      # Idempotency: 'show' commands are read-only and inherently idempotent.
+    - name: Get SSL VPN sessions
+      # Using cli_command for raw output retrieval; safe and idempotent for read-only operations.
       ansible.netcommon.cli_command:
         command: show vpn-sessiondb ssl
       register: ssl_sessions
-      # Error Handling: Ensure we catch cases where the CLI might return an error string without a non-zero exit code.
-      failed_when: 
-        - ssl_sessions.failed
-        - "'Invalid input' in ssl_sessions.stdout or 'ERROR' in ssl_sessions.stdout"
+      # We allow failure here in case SSL VPN is not configured, preventing playbook termination.
+      ignore_errors: true
 
-    - name: Verify SSL VPN session retrieval success
-      # Observability: Assert that the command returned valid session data or a confirmed 'no sessions' state.
+    - name: Verify SSL VPN session command execution
+      # Observability: Ensure the command was accepted by the device.
       ansible.builtin.assert:
         that:
-          - ssl_sessions.stdout is defined
-          - "'Session' in ssl_sessions.stdout or 'No sessions' in ssl_sessions.stdout"
-        fail_msg: "Failed to retrieve a valid response for SSL VPN sessions."
-        success_msg: "SSL VPN session data retrieved successfully."
+          - ssl_sessions.failed is false
+        fail_msg: "Failed to retrieve SSL VPN sessions. Check if the command is supported in the current context."
+        success_msg: "Successfully retrieved SSL VPN session data."
 
-    - name: Retrieve SSL protocol statistics and configuration
+    - name: Get SSL VPN statistics
+      # Retrieves global SSL statistics to monitor handshake performance and cipher usage.
       ansible.netcommon.cli_command:
         command: show ssl
       register: ssl_stats
-      failed_when:
+      failed_when: 
         - ssl_stats.failed
-        - "'Invalid input' in ssl_stats.stdout or 'ERROR' in ssl_stats.stdout"
+        - "'Invalid input' in ssl_stats.stderr"
 
-    - name: Verify SSL statistics retrieval success
-      # Observability: Validate that protocol statistics were returned.
+    - name: Verify SSL VPN statistics retrieval
+      # Observability: Validate that the statistics output is not empty.
       ansible.builtin.assert:
         that:
           - ssl_stats.stdout is defined
-          - "'SSL' in ssl_stats.stdout or 'stats' in ssl_stats.stdout"
-        fail_msg: "Failed to retrieve a valid response for SSL statistics."
-        success_msg: "SSL statistics retrieved successfully."
+          - ssl_stats.stdout | length > 0
+        fail_msg: "SSL statistics output is empty or undefined."
 
-    - name: Display formatted SSL VPN status and statistics
-      # Documentation: Providing clear visibility of the gathered operational state.
+    - name: Display SSL VPN Operational State
+      # Formatted output for human operators or logging systems.
       ansible.builtin.debug:
         msg: |
-          ======================= SSL VPN SESSIONS =======================
-          {{ ssl_sessions.stdout }}
+          ======================= SSL VPN SESSION SUMMARY =======================
+          {{ ssl_sessions.stdout | default('No session data available') }}
 
-          ======================= SSL STATISTICS =======================
+          ======================= SSL PROTOCOL STATISTICS =======================
           {{ ssl_stats.stdout }}

@@ -1,33 +1,41 @@
 ---
-# FortiGate AntiVirus Profile Retrieval Playbook
-# Standards: Idempotency (Read-only), Observability (Assert), Error Handling (failed_when), FQCN.
-
-- name: Retrieve and Verify FortiGate AV Profiles
+# FortiGate Antivirus Profile Retrieval Playbook
+# Improved by: NetLearner Architect
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Retrieve and Validate FortiGate AV Profiles
   hosts: fortigate
   gather_facts: false
+  # Explicitly defining connection type for network-cli compatibility
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Fetch AV profile configuration via CLI
-      # Use Fully Qualified Collection Name (FQCN) for standardized network operations
+    - name: Fetch Antivirus Profile Configuration
+      # Using Fully Qualified Collection Name (FQCN). 
+      # Read-only 'get/show' commands are inherently idempotent.
       ansible.netcommon.cli_command:
         command: "get firewall avprofile"
-      register: av_profile_result
-      # Error Handling: Fail the task if the device returns common CLI error strings in stdout
-      failed_when:
-        - av_profile_result.failed 
-        - "'Unknown action' in av_profile_result.stdout or 'Command fail' in av_profile_result.stdout"
+      register: av_raw_output
+      # Error Handling: Ensure the command succeeded and wasn't rejected as invalid syntax
+      failed_when: 
+        - av_raw_output.failed
+        - "'Unknown action' in av_raw_output.stdout"
 
-    - name: Validate operational data integrity
-      # Observability: Assert that the registered output contains valid data before proceeding
+    - name: Verify Observability - Assert Profile Data
+      # Observability: Validating that we actually received content from the device
       ansible.builtin.assert:
         that:
-          - av_profile_result.stdout is defined
-          - av_profile_result.stdout | length > 0
-        fail_msg: "AV Profile retrieval returned null or invalid data."
-        success_msg: "AV profile data successfully validated."
+          - av_raw_output.stdout is defined
+          - av_raw_output.stdout | length > 0
+        fail_msg: "The AV Profile retrieval returned no data. Check connectivity or device configuration."
+        success_msg: "AV Profile data successfully captured and validated."
 
-    - name: Display AntiVirus Profile details
+    - name: Display Formatted AV Profile
+      # Documentation: Providing clear, structured visibility into the operational state
       ansible.builtin.debug:
         msg: |
-          ======================= AV PROFILE REPORT =======================
-          {{ av_profile_result.stdout }}
+          ======================= AV PROFILE SUMMARY =======================
+          DEVICE    : {{ inventory_hostname }}
+          STATE     : Captured
+          ------------------------------------------------------------------
+          {{ av_raw_output.stdout }}
+          ==================================================================

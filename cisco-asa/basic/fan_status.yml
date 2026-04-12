@@ -1,47 +1,52 @@
 ---
-# Fan Status
-# Improved by Architect:# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Fan Status Audit Playbook
+# Improved for NetLearner Infrastructure Standards
 #
----
-- name: Get Fan Status
+# This playbook retrieves fan status from Cisco ASA/Firepower devices.
+# It ensures observability through assertions and maintains idempotency by using read-only commands.
+
+- name: Retrieve and Validate Fan Status
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve fan status from the device
-      # Using FQCN (ansible.netcommon.cli_command) for best practices.
-      # This task is idempotent as it performs a read-only operation.
+    - name: "Fan Status: Execute 'show fan' command"
+      # Best Practice: Using Fully Qualified Collection Name (FQCN).
+      # Idempotency: 'show' commands are non-mutating and safe for multiple runs.
       ansible.netcommon.cli_command:
         command: show fan
       register: fan_result
-      # Error Handling: Fail the task if the command is unrecognized or the output is null.
+      # Error Handling: Catch common CLI errors that might not trigger a standard failure.
       failed_when:
-        - fan_result.stdout is not defined
-        - "'Invalid' in fan_result.stdout"
+        - fan_result.failed or "Invalid input" in fan_result.stdout
 
-    - name: Assert fan status output integrity
-      # Observability: Verify that the command returned a valid response containing expected keywords.
+    - name: "Fan Status: Verify operational success"
+      # Observability: Confirm the command returned valid data to ensure the connection was healthy.
       ansible.builtin.assert:
         that:
+          - fan_result.stdout is defined
           - fan_result.stdout | length > 0
-          - "'Fan' in fan_result.stdout"
-        fail_msg: "Fan status output is empty or invalid. Check device connectivity and command support."
-        success_msg: "Fan status output retrieved and validated."
+        fail_msg: "The command 'show fan' returned no data on {{ inventory_hostname }}."
+        success_msg: "Fan status successfully retrieved from {{ inventory_hostname }}."
 
-    - name: Display Fan Status Information
-      # Providing visibility into the raw output for the operator.
-      ansible.builtin.debug:
-        msg: |
-          ======================= FAN HARDWARE STATUS =======================
-          {{ fan_result.stdout }}
-          ===================================================================
-
-    - name: Verify all fans are in an operational state
-      # Error Handling: Specifically check for hardware failure indicators in the output.
+    - name: "Fan Status: Health Check"
+      # Observability: Scan the output for common failure keywords.
+      # ignore_errors is used to prevent the playbook from halting if hardware issues are found,
+      # ensuring the operator still sees the full report in the debug task.
       ansible.builtin.assert:
         that:
           - "'Failed' not in fan_result.stdout"
-          - "'Critical' not in fan_result.stdout"
-          - "'OFF' not in fan_result.stdout"
-        fail_msg: "CRITICAL: A fan failure or hardware warning has been detected!"
-        quiet: true
+          - "'CRITICAL' not in fan_result.stdout"
+          - "'Down' not in fan_result.stdout"
+        fail_msg: "Warning: Potential fan hardware failure detected on {{ inventory_hostname }}."
+      ignore_errors: true
+
+    - name: "Fan Status: Display Results"
+      # Documentation: Provide a formatted and labeled view of the command output for the operator.
+      ansible.builtin.debug:
+        msg: |
+          DEVICE: {{ inventory_hostname }}
+          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          ======================= FANS =======================
+          {{ fan_result.stdout }}
+          ====================================================

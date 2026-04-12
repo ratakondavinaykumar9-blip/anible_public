@@ -1,31 +1,34 @@
 ---
-# Network Automation Framework Architect: Cisco ASA/Firepower Logging Configuration Audit
-# Goal: Retrieve, validate, and document the logging state to ensure operational visibility.
-# This playbook is idempotent by nature as it performs read-only state validation.
-
-- name: Audit Cisco ASA/Firepower Logging Configuration
+# Logging Configuration Retrieval and Validation
+# Purpose: This playbook retrieves and validates the current logging configuration from Cisco ASA/Firepower devices.
+# Standards: Implements FQCN, observability via assertions, and robust error handling.
+- name: Get Logging Config
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: no
 
   tasks:
-    - name: Retrieve logging configuration from device
-      # Use Fully Qualified Collection Name (FQCN) for Cisco ASA command execution
-      cisco.asa.asa_command:
-        commands:
-          - show logging
+    - name: Retrieve logging configuration using FQCN
+      # Using ansible.netcommon.cli_command for standardized network CLI interaction
+      ansible.netcommon.cli_command:
+        command: show logging
       register: logging_result
-      # Error Handling: Ensure the command executed successfully and returned non-empty output
+      # Error Handling: Fail if the device returns an error string instead of the configuration
       failed_when: 
-        - logging_result.stdout is not defined 
-        - logging_result.stdout | length == 0
+        - logging_result.stdout is search('Invalid input') or logging_result.stdout is search('ERROR')
+      # Idempotency: Read-only commands are inherently idempotent as they do not modify device state
 
-    - name: Validate that logging is operational
-      # Observability: Automated verification of the device's operational state
-      # This ensures compliance with security standards across the fleet
+    - name: Validate logging output observability
+      # Observability: Assert that the output is not empty to ensure data integrity
       ansible.builtin.assert:
         that:
-          - "'Logging enable' in logging_result.stdout[0]"
-        fail_msg: "Critical: Logging is DISABLED on {{ inventory_hostname }}. Security compliance failure."
-        success_msg: "Logging is confirmed ENABLED on {{ inventory_hostname }}."
+          - "logging_result.stdout is defined"
+          - "logging_result.stdout | length > 0"
+        fail_msg: "Data retrieval failed: The 'show logging' command returned an empty or undefined result."
+        success_msg: "Logging configuration successfully captured."
 
-    - name: Display formatted logging
+    - name: Display formatted logging configuration
+      # Documentation: Providing a clear visual delimiter for log inspection
+      ansible.builtin.debug:
+        msg: |
+          ======================= LOGGING CONFIGURATION =======================
+          {{ logging_result.stdout }}

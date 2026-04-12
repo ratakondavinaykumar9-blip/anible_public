@@ -1,39 +1,34 @@
 ---
-# FortiGate Process Status Collection
-# Purpose: Gathers active process statistics from FortiGate devices for health monitoring.
-# Standard: Architect:Automation Standards (Idempotency, Observability, FQCN).
-- name: Get FortiGate Process Status
+# FortiGate Process Status Diagnostics
+# This playbook retrieves the current process list for monitoring and troubleshooting.
+# Idempotency: This is a read-only diagnostic command and is safe to run multiple times.
+- name: Get Process Status
   hosts: fortigate
   gather_facts: false
 
   tasks:
     - name: Execute process list diagnostic command
-      # Best Practices: Using Fully Qualified Collection Name (FQCN) for the network command.
-      # Documentation: 'diagnose system process list' provides a comprehensive view of running daemons.
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
       ansible.netcommon.cli_command:
         command: diagnose system process list
-      register: proc_result
-      # Error Handling: Ensure the task fails if the command is unrecognized or returns an error string.
+      register: proc
+      # Error Handling: Define failure conditions for specific FortiOS error strings
       failed_when: 
-        - proc_result.failed or "Command fail" in proc_result.stdout or "Unknown action" in proc_result.stdout
+        - proc.failed or "Unknown action" in proc.stdout or "Command fail" in proc.stdout
 
-    - name: Verify process data integrity
-      # Observability: Validate that the output is not empty and contains expected process data.
+    - name: Validate process data integrity
+      # Observability: Assert that the command returned meaningful output
       ansible.builtin.assert:
         that:
-          - proc_result.stdout is defined
-          - proc_result.stdout | length > 0
-        fail_msg: "Process diagnostic returned empty or invalid output on {{ inventory_hostname }}."
-        success_msg: "Process diagnostic successfully captured for {{ inventory_hostname }}."
+          - proc.stdout is defined
+          - proc.stdout | length > 0
+          - "'process' in proc.stdout or 'Runtime' in proc.stdout"
+        fail_msg: "The process diagnostic command returned empty or unexpected results."
+        success_msg: "Process data successfully retrieved and validated."
 
-    - name: Display formatted process status report
-      # Observability: Provides human-readable visibility into the captured diagnostic state.
+    - name: Display formatted process information
+      # Observability: Provide clear visibility into the command output
       ansible.builtin.debug:
         msg: |
-          ======================= PROCESS REPORT: {{ inventory_hostname }} =======================
-          {{ proc_result.stdout }}
-
-    - name: Ensure play completion state
-      # Idempotency: This playbook is read-only and inherently idempotent as it does not modify the target configuration.
-      ansible.builtin.set_fact:
-        process_audit_timestamp: "{{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}"
+          ======================= FORTIGATE PROCESSES =======================
+          {{ proc.stdout }}

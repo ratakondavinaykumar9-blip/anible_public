@@ -1,38 +1,39 @@
 ---
-# Protocol Objects Retrieval and Audit
-# This playbook adheres to Standard:s for Cisco ASA/Firepower.
-# Standards: Idempotency, Observability, FQCN, Error Handling.
+# Protocol Objects Inspection Playbook
+# Improved for NetLearner Architecture standards.
+# 1. Idempotency: Read-only operation ensures safe re-runs without state modification.
+# 2. Observability: Registration and Assertions verify execution success and data integrity.
+# 3. Documentation: Detailed comments explaining the purpose of each task.
+# 4. Error Handling: 'failed_when' logic catches CLI-specific error strings.
+# 5. Best Practices: Full usage of Fully Qualified Collection Names (FQCN).
 
-- name: Protocol Objects
+- name: Protocol Objects Audit
   hosts: asa_firepower
   gather_facts: false
-  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve protocol objects from the device
-      # FQCN: Using ansible.netcommon.cli_command for standard CLI interaction.
-      # Idempotency: 'show' commands are read-only and inherently idempotent.
+    - name: Fetch protocol objects from device via CLI
+      # Using FQCN for the cli_command module.
+      # This task retrieves the current configuration of protocol objects.
       ansible.netcommon.cli_command:
         command: show object protocol
-      register: proto
-      # Error Handling: Explicitly fail if the command is unrecognized or execution fails.
+      register: proto_result
+      # Handle cases where the device might accept the command but return an error message.
       failed_when: 
-        - proto.failed or "Invalid" in proto.stdout
+        - proto_result.failed or "Invalid input" in proto_result.stdout or "ERROR" in proto_result.stdout
 
-    - name: Validate protocol object response
-      # Observability: Ensure the command returned a valid stdout stream.
+    - name: Verify protocol object data integrity
+      # Observability: Assert that the command returned meaningful data to prevent silent failures.
       ansible.builtin.assert:
         that:
-          - proto.stdout is defined
-          - proto.stdout | length >= 0
-        fail_msg: "Data retrieval failed for protocol objects on {{ inventory_hostname }}."
-        success_msg: "Protocol objects successfully registered for {{ inventory_hostname }}."
+          - proto_result.stdout is defined
+          - proto_result.stdout | length > 0
+        fail_msg: "The command 'show object protocol' returned no data on {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display Protocol Objects Summary
-      # Observability: Provide a structured view of the retrieved configuration.
+    - name: Display retrieved protocol objects
+      # Provide a structured view for operator review or automated logging.
       ansible.builtin.debug:
         msg: |
-          ======================= PROTOCOL OBJECTS =======================
-          DEVICE: {{ inventory_hostname }}
-          RESULT:
-          {{ proto.stdout }}
+          ======================= PROTOCOL OBJECTS: {{ inventory_hostname }} =======================
+          {{ proto_result.stdout }}

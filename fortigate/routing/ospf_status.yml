@@ -1,52 +1,49 @@
 ---
-# FortiGate OSPF Status Diagnostic Playbook
-# This playbook retrieves OSPF neighbor and database information.
-# Improved for: Idempotency, Observability, Documentation, Error Handling, and FQCN.
-
+# FortiGate OSPF Operational Status
+# This playbook retrieves OSPF neighbors and database information for monitoring and troubleshooting.
+# It is designed to be idempotent (read-only) and includes observability through assertions.
 - name: Get OSPF Status
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: Skipping fact gathering as it is not required for CLI command execution.
 
   tasks:
     - name: Retrieve OSPF neighbor status
-      # FQCN: Using ansible.netcommon.cli_command for standardized CLI interaction
+      # FQCN: Using ansible.netcommon.cli_command for standardized network command execution.
       ansible.netcommon.cli_command:
         command: get router info ospf neighbor
       register: ospf_neighbors
-      # Error Handling: Use ignore_errors to prevent playbook termination if OSPF is not configured
-      ignore_errors: true
+      # Error Handling: Catch device-level execution failures or CLI-specific error strings.
+      failed_when: 
+        - ospf_neighbors.failed or "Command fail" in ospf_neighbors.stdout
 
-    - name: Validate OSPF neighbor retrieval
-      # Observability: Ensure the command was successful before proceeding
+    - name: Verify OSPF neighbor data retrieval
+      # Observability: Assert that the command returned a valid response to ensure state visibility.
       ansible.builtin.assert:
         that:
-          - "ospf_neighbors.failed == false"
-          - "'stdout' in ospf_neighbors"
-        fail_msg: "Failed to retrieve OSPF neighbor status. Ensure OSPF is enabled on the device."
+          - "ospf_neighbors.stdout is defined"
+        fail_msg: "Failed to retrieve OSPF neighbor status from the device."
         quiet: true
 
-    - name: Retrieve OSPF database state
-      # Documentation: Fetching full OSPF LSDB for complete diagnostic visibility
+    - name: Retrieve OSPF database information
       ansible.netcommon.cli_command:
         command: get router info ospf database
-      register: ospf_database
-      ignore_errors: true
+      register: ospf_db
+      failed_when: 
+        - ospf_db.failed or "Command fail" in ospf_db.stdout
 
-    - name: Validate OSPF database retrieval
-      # Observability: Assert task captures failures for operational awareness
+    - name: Verify OSPF database data retrieval
       ansible.builtin.assert:
         that:
-          - "ospf_database.failed == false"
-          - "'stdout' in ospf_database"
-        fail_msg: "Failed to retrieve OSPF database information."
+          - "ospf_db.stdout is defined"
+        fail_msg: "Failed to retrieve OSPF database information from the device."
         quiet: true
 
-    - name: Display OSPF Diagnostics
-      # Documentation: Structured output for human-readable review
+    - name: Display OSPF Operational State
+      # Documentation: Formatted output for easy consumption by operators and automation logs.
       ansible.builtin.debug:
         msg: |
           ======================= OSPF NEIGHBORS =======================
-          {{ ospf_neighbors.stdout | default('No data retrieved') }}
+          {{ ospf_neighbors.stdout }}
 
-          ======================== OSPF DATABASE =======================
-          {{ ospf_database.stdout | default('No data retrieved') }}
+          ======================= OSPF DATABASE =======================
+          {{ ospf_db.stdout }}

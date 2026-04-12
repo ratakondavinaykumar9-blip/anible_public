@@ -1,34 +1,40 @@
 ---
-# Playbook: Retrieve FortiGate System Metadata
-# Standards: Idempotency (Read-only), Observability (Assert), Best Practices (FQCN)
-- name: Get FortiGate System Information
+# FortiGate System Information Retrieval
+# Purpose: Gathers and validates device-specific system metadata for audit and inventory.
+# Compliance: Adheres to Idempotency, Observability, and FQCN standards.
+
+- name: Get System Info
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve system status from FortiGate
-      # FQCN: Using ansible.netcommon.cli_command for standardized CLI interaction.
-      # Idempotency: This is a read-only 'get' operation, inherently safe for repeated execution.
+    - name: Retrieve system status via CLI
+      # Use FQCN for cross-version compatibility and stability
       ansible.netcommon.cli_command:
-        command: get system status
-      register: system_status_output
-      # Error Handling: Explicitly fail if the command returns common FortiOS error strings.
-      failed_when: 
-        - system_status_output.failed or "Command fail" in system_status_output.stdout
+        command: get system info
+      register: info_output
+      # Idempotency: Mark as unchanged as this is a read-only telemetry operation
+      changed_when: false
+      # Error Handling: Fail if the command is unrecognized or returns a non-zero exit code
+      failed_when:
+        - info_output.rc is defined and info_output.rc != 0
+        - "'command parse error' in info_output.stdout"
+        - "'Unknown action' in info_output.stdout"
 
-    - name: Validate system status response integrity
-      # Observability: Ensure the output is populated and contains core keywords to verify a successful poll.
+    - name: Validate system information integrity
+      # Observability: Assert that the device returned a valid schema with key identifiers
       ansible.builtin.assert:
         that:
-          - system_status_output.stdout is defined
-          - "system_status_output.stdout | length > 0"
-          - "'Version' in system_status_output.stdout"
-        fail_msg: "The system status output was empty or failed to return version information."
-        success_msg: "Successfully retrieved and validated FortiGate system status."
+          - info_output.stdout is defined
+          - "'Hostname' in info_output.stdout"
+          - "'Version' in info_output.stdout"
+          - "'Serial-Number' in info_output.stdout"
+        fail_msg: "Critical system attributes are missing from the FortiGate response."
+        quiet: true
 
-    - name: Display retrieved system information
-      # Provides visibility into the collected metadata for administrative review.
+    - name: Display formatted system information
+      # Provide structured output for administrative visibility and logging
       ansible.builtin.debug:
         msg: |
           ======================= SYSTEM INFO =======================
-          {{ system_status_output.stdout }}
+          {{ info_output.stdout }}

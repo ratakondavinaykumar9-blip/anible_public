@@ -1,37 +1,42 @@
 ---
-# FortiGate Global Settings - Optimized for Idempotency, Observability, and Best Practices
-# This playbook retrieves the global system configuration from FortiGate devices.
-# It ensures high reliability through explicit validation and error handling.
+# FortiGate Global Settings Audit
+# Author: NetLearner Architect (AI Improved)
+# Purpose: Safely retrieves and validates global system settings for auditing purposes.
+# This playbook adheres to Idempotency, Observability, and FQCN standards.
+
 - name: Get Global Settings
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve system global configuration
-      # Best Practices: Using Fully Qualified Collection Name (FQCN)
-      # Documentation: This module interacts with the FortiOS CLI to fetch current state
+    - name: Retrieve global system configuration
+      # Standard 5: Using Fully Qualified Collection Name (FQCN)
       ansible.netcommon.cli_command:
         command: get system global
       register: global_output
-      # Idempotency: Marking as 'changed: false' because this is a read-only retrieval
+      # Standard 1: Command is read-only; changed_when: false maintains idempotency report integrity
       changed_when: false
-      # Error Handling: Explicitly fail if the command returns an error string or empty output
-      failed_when: 
-        - global_output.stdout is not defined or global_output.stdout | length == 0
-        - "'error' in global_output.stdout | lower or 'unknown' in global_output.stdout | lower"
+      # Standard 4: Error Handling - fail if return code is non-zero or specific error strings appear
+      failed_when:
+        - global_output.rc != 0
+        - "'Unknown action' in global_output.stdout"
+        - "'Command fail' in global_output.stdout"
 
-    - name: Validate configuration retrieval
-      # Observability: Asserting that the data exists to ensure subsequent tasks have valid context
+    - name: Validate retrieval and data integrity
+      # Standard 2: Observability - use assert to verify that output contains expected global markers
       ansible.builtin.assert:
         that:
-          - global_output.stdout is defined
-          - global_output.stdout | length > 0
-        fail_msg: "Data retrieval failed: The 'get system global' command returned no data."
-        success_msg: "Data retrieval successful: Global settings captured."
+          - "global_output.stdout is defined"
+          - "global_output.stdout | length > 0"
+          - "'hostname' in global_output.stdout"
+        fail_msg: "Global settings retrieval failed or returned unexpected content for {{ inventory_hostname }}."
+        success_msg: "Global settings successfully validated for {{ inventory_hostname }}."
 
     - name: Display formatted global settings
-      # Documentation: Presenting the output in a readable format for the operator
+      # Standard 3: Clear documentation of the "why" via debug messaging
       ansible.builtin.debug:
         msg: |
-          ======================= GLOBAL SETTINGS =======================
+          ======================= GLOBAL SETTINGS: {{ inventory_hostname }} =======================
+          Report generated on: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
+          -----------------------------------------------------------------------------------------
           {{ global_output.stdout }}

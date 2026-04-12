@@ -1,36 +1,38 @@
 ---
-# NAT Translation Hits Analysis
-# Purpose: This playbook retrieves and verifies NAT translation hitcounts on Cisco ASA/Firepower devices.
-# Standards: Idempotency (read-only), Observability (asserts), Error Handling (fail logic).
-
-- name: Retrieve and Validate NAT Translation Hits
+# NAT Translation Hits Monitoring
+# Improved: 2026-03-15 (NetLearner Architect Standard)
+#
+# WHY: Monitoring NAT hitcounts is critical for identifying active vs stale NAT rules.
+# This playbook uses non-disruptive commands to gather operational data safely.
+---
+- name: Get NAT Hits
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Fetch NAT hitcounts from the device
-      # Documentation: Using FQCN to execute a show command for auditing NAT usage.
+    - name: "Retrieve NAT hitcounts via CLI"
+      # FQCN: Using ansible.netcommon for standardized network CLI interaction
       ansible.netcommon.cli_command:
-        command: show nat | include hitcount
+        command: "show nat | include hitcount"
       register: nat_hits
-      # Idempotency: Read-only operations are marked with changed_when: false to ensure state stability.
+      # Idempotency: Read-only operations must report 'ok' (changed=false) to ensure safe re-runs
       changed_when: false
-      # Error Handling: Ensure the task fails if the command is unrecognized or the connection fails.
-      failed_when: 
-        - nat_hits.failed or "Invalid input" in nat_hits.stdout
+      # Error Handling: Catch device-specific CLI errors while allowing empty search results
+      failed_when:
+        - nat_hits.failed == true
+        - "'Invalid input' in nat_hits.stdout or 'Usage' in nat_hits.stdout"
 
-    - name: Validate retrieval of NAT hitcount data
-      # Observability: Using assertions to verify that the output contains expected information.
+    - name: "Verify retrieval observability"
+      # Observability: Assertion confirms that the response was captured before proceeding
       ansible.builtin.assert:
         that:
-          - nat_hits.stdout is defined
-          - nat_hits.stdout | length > 0
-        fail_msg: "Data collection failed: No NAT hitcount information was returned from {{ inventory_hostname }}."
-        success_msg: "Data collection successful: NAT hitcounts retrieved from {{ inventory_hostname }}."
+          - "nat_hits.stdout is defined"
+        fail_msg: "The NAT hitcount retrieval failed to produce a valid response on {{ inventory_hostname }}"
+        quiet: true
 
-    - name: Display NAT Translation Results
-      # Documentation: Formatted output for human readability during execution.
+    - name: "Display formatted NAT hits report"
+      # Documentation: Providing a clear, human-readable summary of the retrieved hitcounts
       ansible.builtin.debug:
         msg: |
           ======================= NAT HITS: {{ inventory_hostname }} =======================
-          {{ nat_hits.stdout }}
+          {{ nat_hits.stdout | default('No active NAT hitcounts found on this device.') }}

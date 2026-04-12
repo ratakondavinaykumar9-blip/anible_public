@@ -1,35 +1,29 @@
 ---
-# Playbook: Routing Protocols Audit
-# Purpose: Retrieves and validates routing protocol configurations on Cisco ASA/Firepower devices.
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
 - name: Routing Protocols Analysis
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve routing protocol configuration from running-config
-      # Best Practices: Using Fully Qualified Collection Name (FQCN) for Cisco ASA
-      cisco.asa.asa_command:
-        commands:
-          - show running-config | include router
-      register: protocols_result
-      # Error Handling: Ensure the task fails explicitly if the command execution fails
-      failed_when: protocols_result.failed | default(false)
+    - name: Retrieve active routing protocol configuration
+      # Use FQCN (Best Practice). Retrieval tasks are idempotent as they do not modify the device state.
+      # Output is registered to provide visibility into the command result for observability.
+      ansible.netcommon.cli_command:
+        command: show running-config | include router
+      register: routing_info
+      # Error Handling: Explicitly fail the task if the command execution encounters an error.
+      failed_when: routing_info.failed
 
-    - name: Validate routing configuration retrieval
-      # Observability: Assert that the command returned a valid response to ensure data integrity
+    - name: Validate command success
+      # Observability: Assert that the command returned a valid response to ensure data integrity.
       ansible.builtin.assert:
         that:
-          - protocols_result.stdout is defined
-          - protocols_result.stdout | length > 0
-        fail_msg: "The command 'show running-config' failed to return data or the device is unreachable."
-        success_msg: "Routing configuration data successfully captured."
+          - routing_info.stdout is defined
+        fail_msg: "Failed to retrieve data from {{ inventory_hostname }}. Check connectivity and credentials."
         quiet: true
 
-    - name: Display Routing Protocol Details
-      # Documentation: Formatted debug output for engineering visibility
-      # Idempotency: This task is a "get" operation and is inherently safe to run multiple times
+    - name: Display Routing Protocol Configuration
+      # Observability: Provide clear, formatted output to the console for operator review.
       ansible.builtin.debug:
         msg: |
-          ======================= ROUTING PROTOCOLS =======================
-          {{ protocols_result.stdout[0] if protocols_result.stdout[0] | length > 0 else "No routing protocols configured on this host." }}
+          ======================= ROUTING PROTOCOLS: {{ inventory_hostname }} =======================
+          {{ routing_info.stdout if routing_info.stdout | length > 0 else 'No active routing protocols detected.' }}

@@ -1,35 +1,37 @@
 ---
-# FortiGate SSL VPN Configuration Retrieval
-# Improved by Architect:# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# FortiGate SSL VPN Configuration Audit
+# Purpose: Retrieves and validates SSL VPN settings for security auditing.
+# Standards: FQCN, Idempotency, Observability, and Error Handling.
 
-- name: Get SSL VPN Config
+- name: Audit SSL VPN Configuration
   hosts: fortigate
-  gather_facts: false # Performance: Fact gathering is disabled as it is not required for CLI command execution
+  gather_facts: false
 
   tasks:
-    - name: Retrieve SSL VPN settings from device
-      # FQCN: Using fully qualified collection name for the network CLI module
-      # Idempotency: This operation is read-only and safe to execute multiple times without state change
+    - name: Fetch SSL VPN settings via CLI
+      # Using FQCN to ensure compatibility and adhere to Ansible standards
       ansible.netcommon.cli_command:
         command: "get sslvpn settings"
-      register: vpn_config
-      # Error Handling: Explicitly check for command failures or parse errors in the device response
+      register: sslvpn_output
+      # Error Handling: Ensure the command was recognized by the FortiOS parser and didn't fail
       failed_when: 
-        - vpn_config.failed or "command parse error" in vpn_config.stdout.lower()
-        - "'unknown command' in vpn_config.stdout.lower()"
+        - sslvpn_output.failed or "Unknown action" in sslvpn_output.stdout
+      # Idempotency: Read-only operations must always report 'ok' and never 'changed'
+      changed_when: false
 
-    - name: Validate configuration capture success
-      # Observability: Use assert to verify that the retrieved configuration data is not empty
+    - name: Validate configuration response
+      # Observability: Assert that the response is not empty to verify data integrity
       ansible.builtin.assert:
         that:
-          - vpn_config.stdout is defined
-          - vpn_config.stdout | length > 0
-        fail_msg: "Failed to capture SSL VPN settings. The device output was empty or undefined."
-        quiet: true # Reduces verbosity for successful validation runs
+          - "sslvpn_output.stdout is defined"
+          - "sslvpn_output.stdout | length > 0"
+        fail_msg: "Received an empty or invalid response for SSL VPN settings."
+        success_msg: "Successfully retrieved SSL VPN configuration."
 
     - name: Display SSL VPN Configuration
-      # Documentation: Providing a clear, formatted view of the current operational state
+      # Documentation: Provides a formatted header/footer for clear visibility in logs
       ansible.builtin.debug:
         msg: |
           ======================= SSL VPN CONFIG =======================
-          {{ vpn_config.stdout }}
+          {{ sslvpn_output.stdout }}
+          ==============================================================

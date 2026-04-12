@@ -1,39 +1,36 @@
 ---
-# Failover Config Check
-# Improved to follow Standard:s (Idempotency, Observability, Documentation, Error Handling, FQCN)
-# Date: 2026-03-08
-- name: Failover Config Check
+# Failover Configuration and Health Verification Playbook
+# Purpose: Validates High-Availability (HA) status on Cisco ASA/Firepower security appliances.
+# Standards: Idempotent (Read-only), Observability (Assertions), FQCN usage.
+- name: Cisco ASA/Firepower Failover Audit
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve current failover status from the security appliance
-      # FQCN: Using ansible.netcommon to ensure consistent module resolution
-      # Documentation: This task is read-only and inherently idempotent.
+    - name: Retrieve Failover state from device
+      # Best Practice: Using FQCN. This operation is idempotent as it is a read-only command.
       ansible.netcommon.cli_command:
         command: show failover
-      register: failover_output
-      # Error Handling: Ensure we catch both transport failures and CLI syntax errors
-      failed_when: 
-        - failover_output.failed or "Invalid" in failover_output.stdout
+      register: fo_result
+      # Error Handling: Ensure the task fails if the command cannot be executed.
+      failed_when: fo_result.failed | default(false)
 
-    - name: Verify failover is active and operational
-      # Observability: Using assertions to programmatically validate the operational state
+    - name: Assert Failover is Active and Enabled
+      # Observability: Programmatic verification of the expected operational state.
       ansible.builtin.assert:
         that:
-          - "'Failover On' in failover_output.stdout"
-        fail_msg: "CRITICAL: Failover is NOT enabled or is misconfigured on {{ inventory_hostname }}"
-        success_msg: "SUCCESS: Failover is active on {{ inventory_hostname }}"
-      # Error Handling: Continue execution to allow status reporting for all devices
-      ignore_errors: true
+          - "'Failover On' in fo_result.stdout"
+        fail_msg: "CRITICAL: Failover is NOT enabled on {{ inventory_hostname }}."
+        success_msg: "HEALTH CHECK PASSED: Failover is enabled on {{ inventory_hostname }}."
 
-    - name: Display formatted failover details
-      # Documentation: Provides human-readable output for troubleshooting and auditing
+    - name: Output Detailed Failover Report
+      # Documentation: Provide structured visibility into the current HA state for audit logs.
       ansible.builtin.debug:
         msg: |
-          ======================================================================
-          DEVICE: {{ inventory_hostname }}
-          FAILOVER STATUS REPORT:
-          ======================================================================
-          {{ failover_output.stdout }}
-          ======================================================================
+          ===========================================================
+          FAILOVER AUDIT REPORT: {{ inventory_hostname }}
+          ===========================================================
+          Current Status: {{ 'ENABLED/ACTIVE' if 'Failover On' in fo_result.stdout else 'DISABLED/INACTIVE' }}
+          
+          Device Output:
+          {{ fo_result.stdout }}

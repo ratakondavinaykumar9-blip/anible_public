@@ -1,38 +1,35 @@
 ---
 # Crypto Drops
-# Auto-improved: 2026-03-08
-# Author: Architect:#
-# Description: Retrieves and validates crypto protocol drop statistics on Cisco ASA.
-# 1. Idempotency: Read-only command execution; safe for multiple runs.
-# 2. Observability: Uses 'register' and 'assert' to verify data retrieval.
-# 3. Error Handling: 'failed_when' catches command failures or invalid syntax.
-# 4. Best Practices: Uses Fully Qualified Collection Names (FQCN).
----
+# Improved by NetLearner Architect: 2026-03-15
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
 - name: Crypto Drops Monitoring
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Get crypto protocol drop statistics
-      # FQCN: Using ansible.netcommon.cli_command for platform-agnostic CLI execution
+    - name: Retrieve crypto protocol drop statistics from the device
+      # Why: Essential for troubleshooting IPsec/SSL VPN decryption or negotiation failures.
+      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI access.
       ansible.netcommon.cli_command:
         command: show crypto protocol drop
-      register: drops_output
-      # Error Handling: Fail if the command explicitly fails or returns "Invalid input"
-      failed_when:
-        - drops_output.failed or "Invalid input" in drops_output.stdout
+      register: drops_result
+      # Error Handling: Ensure the command is valid for the target device and execution was successful.
+      failed_when: 
+        - drops_result.failed or "Invalid input" in drops_result.stdout
 
-    - name: Verify command output integrity
-      # Observability: Assert that the output contains data to ensure valid response
+    - name: Validate successful retrieval of crypto drop data
+      # Observability: Using assert to ensure the playbook provides a clear failure if data is missing.
       ansible.builtin.assert:
         that:
-          - "drops_output.stdout | length > 0"
-        fail_msg: "The command 'show crypto protocol drop' returned an empty result on {{ inventory_hostname }}."
-        success_msg: "Successfully captured crypto drop data."
+          - drops_result.stdout is defined
+          - drops_result.stdout | length > 0
+        fail_msg: "The command 'show crypto protocol drop' returned no data or failed."
+        success_msg: "Crypto drop statistics successfully captured."
 
-    - name: Display formatted crypto drop results
-      # Documentation: Providing a clear view of the retrieved statistics for operators
+    - name: Display formatted Crypto Drops report
+      # Observability: Provide clear, human-readable output in the Ansible log for operators.
       ansible.builtin.debug:
         msg: |
-          ======================= CRYPTO DROPS: {{ inventory_hostname }} =======================
-          {{ drops_output.stdout }}
+          ======================= CRYPTO DROPS SUMMARY =======================
+          {{ drops_result.stdout }}

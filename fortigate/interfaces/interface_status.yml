@@ -1,40 +1,33 @@
 ---
-# FortiGate Interface Status - Improved Version
-# This playbook retrieves NIC hardware information using standard best practices.
-# Idempotency: Read-only operation with 'changed_when: false'.
-# Observability: Includes validation asserts and registered result checks.
-# Error Handling: Uses 'failed_when' to catch CLI-specific execution errors.
-
-- name: FortiGate Network Interface Status Retrieval
+# FortiGate Interface Status - Standardized for Production
+# This playbook retrieves low-level hardware NIC information from a FortiGate device.
+# Idempotency: The 'diagnose' command is read-only, making this playbook safe for repeated execution.
+- name: Get Interface Status
   hosts: fortigate
   gather_facts: false
-  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Execute NIC hardware diagnostic command
-      # Using FQCN for network common collection
+    - name: Execute hardware NIC diagnostic command
+      # FQCN: Using the standard netcommon collection for CLI-based status retrieval
       ansible.netcommon.cli_command:
         command: diagnose hardware deviceinfo nic
-      register: status
-      # Error Handling: Fail if command execution is unsuccessful or output indicates failure
+      register: interface_status
+      # Error Handling: Ensure we fail if the command is unrecognized or execution fails
       failed_when: 
-        - status.failed
-        - "unknown command" in status.stdout | lower
-      # Idempotency: Explicitly state this task does not change device state
-      changed_when: false
+        - interface_status.failed or "Command fail" in interface_status.stdout or "Unknown action" in interface_status.stdout
 
-    - name: Validate command response integrity
-      # Observability: Ensure the returned data is not empty and valid
+    - name: Verify interface data integrity
+      # Observability: Use assert to validate that the device returned meaningful data
       ansible.builtin.assert:
         that:
-          - status.stdout is defined
-          - status.stdout | length > 0
-        fail_msg: "Data retrieval failed: The device returned an empty or invalid response."
-        success_msg: "Successfully validated interface status data."
+          - "interface_status.stdout is defined"
+          - "interface_status.stdout | length > 0"
+        fail_msg: "Diagnostic output is empty. Verify connectivity and administrative privileges."
+        quiet: true
 
-    - name: Display formatted interface status report
+    - name: Display formatted Interface Status
+      # Documentation: Present the captured hardware state in a readable format
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACE STATUS REPORT =======================
-          Host: {{ inventory_hostname }}
-          Timestamp: {{ ansible_date_time.iso8601 if ansible_date
+          ======================= INTERFACE STATUS =======================
+          {{ interface_status.stdout }}

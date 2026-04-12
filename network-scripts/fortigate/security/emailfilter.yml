@@ -1,34 +1,36 @@
 ---
-- name: FortiGate Email Filter Profile Retrieval
+# Playbook: FortiGate Email Filter Configuration Retrieval
+# Purpose: Safely fetches the email filter profile for state verification and auditing.
+# Standards: Idempotency (Read-only), Observability (Assert), FQCN, and Robust Error Handling.
+
+- name: Retrieve and Validate FortiGate Email Filter
   hosts: fortigate
   gather_facts: false
-  # This playbook retrieves the firewall email filter profile configuration.
-  # It is designed to be idempotent (read-only) and includes validation checks.
 
   tasks:
-    - name: Retrieve email filter profile configuration via CLI
-      # Use FQCN (Fully Qualified Collection Name) for the cli_command module.
-      # This task captures the current state without modification, ensuring idempotency.
+    - name: Fetch email filter profile configuration via CLI
+      # Best Practice: Use Fully Qualified Collection Names (FQCN) for consistency
       ansible.netcommon.cli_command:
-        command: "get firewall emailfilter-profile"
-      register: email_profile_output
-      # Error Handling: Ensure the command was accepted and did not return a CLI error.
-      failed_when:
-        - email_profile_output.failed or "Command fail" in email_profile_output.stdout
-        - "'Unknown action' in email_profile_output.stdout"
+        command: get firewall emailfilter-profile
+      register: email_output
+      # Idempotency: This is a read-only command and does not modify device state.
+      # Error Handling: Fail explicitly if the CLI returns an error or unknown command message.
+      failed_when: 
+        - email_output.failed | default(false)
+        - "'unknown' in email_output.stdout | lower or 'error' in email_output.stdout | lower"
 
-    - name: Validate configuration retrieval success
-      # Observability: Verify that the output is populated and contains expected data.
+    - name: Validate successful retrieval of configuration
+      # Observability: Use assertions to verify that the response contains valid data.
       ansible.builtin.assert:
         that:
-          - email_profile_output.stdout is defined
-          - email_profile_output.stdout | length > 0
-        fail_msg: "Failed to retrieve the email filter profile or the output was empty."
-        success_msg: "Successfully retrieved and validated the email filter profile configuration."
+          - "email_output.stdout is defined"
+          - "email_output.stdout | length > 0"
+        fail_msg: "The email filter profile could not be retrieved or the output is empty."
+        success_msg: "Email filter profile successfully retrieved and validated."
 
-    - name: Display email filter configuration
-      # Documentation: Output the results for audit and visibility purposes.
+    - name: Display formatted Email Filter Details
+      # Documentation: Provide a clear, human-readable view of the retrieved state.
       ansible.builtin.debug:
         msg: |
           ======================= EMAIL FILTER PROFILE =======================
-          {{ email_profile_output.stdout }}
+          {{ email_output.stdout }}

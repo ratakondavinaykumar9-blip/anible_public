@@ -1,37 +1,35 @@
 ---
-# Architect:Improved Playbook
-# Standard: Idempotency, Observability, Documentation, Error Handling, Best Practices
-# Purpose: Securely retrieve and verify MAC addresses from Cisco ASA/Firepower interfaces.
-
-- name: Interface MAC Addresses Retrieval
+# Improved Interface MAC Retrieval Playbook
+# Standardized by NetLearner Architect
+#
+- name: Retrieve and Verify Interface MAC Addresses
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute show command to retrieve MAC addresses
-      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interaction
+    - name: Get interface MAC details using CLI command
+      # Using FQCN (Best Practice) and capturing output for validation (Observability)
+      # Documentation: Captures both hardware MAC and burned-in addresses (BIA) for auditing and inventory.
       ansible.netcommon.cli_command:
         command: "show interface | include (address|MAC)"
-      register: mac_result
-      # IDEMPOTENCY: Read-only 'show' commands must never report a 'changed' status
-      changed_when: false
-      # ERROR HANDLING: Ensure the task fails if the device returns an error or command fails
+      register: mac_output
+      # Error Handling: Explicitly fail if the command is unrecognized or returns no data
       failed_when: 
-        - mac_result.failed | default(false)
-        - "'Invalid input' in mac_result.stdout"
+        - mac_output.failed
+        - "mac_output.stdout | length == 0"
+      # Idempotency: Mark as 'changed: false' since this is a read-only state inspection
+      changed_when: false
 
-    - name: Verify capture of interface data
-      # OBSERVABILITY: Assert that the command returned meaningful output to ensure data integrity
+    - name: Validate that MAC address information is present in the output
+      # Observability: Assert that the device returned the expected data patterns
       ansible.builtin.assert:
         that:
-          - mac_result.stdout is defined
-          - mac_result.stdout | length > 0
-        fail_msg: "Interface MAC address information was not found or is empty."
-        success_msg: "Interface MAC address information successfully retrieved."
+          - "'address' in mac_output.stdout or 'MAC' in mac_output.stdout"
+        fail_msg: "The command output did not contain expected MAC address information."
+        quiet: true
 
-    - name: Display Interface MAC Report
-      # DOCUMENTATION: Formatted debug output for human-readable audit trails and observability
+    - name: Display formatted MAC address output
       ansible.builtin.debug:
         msg: |
           ======================= INTERFACE MAC REPORT =======================
-          {{ mac_result.stdout }}
+          {{ mac_output.stdout }}

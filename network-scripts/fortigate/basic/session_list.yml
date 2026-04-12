@@ -1,34 +1,37 @@
 ---
-# Playbook to retrieve and validate the active session list from FortiGate devices.
-# This follows industry standards for observability, idempotency, and best practices.
-- name: FortiGate Session List Retrieval
+# FortiGate Session List - NetLearner Architect Optimized
+# This playbook retrieves and validates the current session table from a FortiGate device.
+# Standards: Idempotency (Read-only), Observability (Asserts), FQCN usage, Error Handling.
+
+- name: Get Session List
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: Facts not required for CLI execution.
 
   tasks:
-    - name: Execute CLI command to retrieve sessions
-      # Use FQCN for the network command module.
-      # This is a read-only operation and is inherently idempotent.
+    - name: Retrieve session table from FortiGate
+      # FQCN: ansible.netcommon.cli_command is used for direct CLI execution.
+      # Idempotency: Read-only command is explicitly set to changed_when: false.
       ansible.netcommon.cli_command:
-        command: "get system session list"
-      register: sessions_result
-      # Ensure the task fails if the connection is dropped or the command is rejected.
-      failed_when:
-        - sessions_result.failed or "Unknown command" in sessions_result.stdout
+        command: get system session list
+      register: sessions
+      # Error Handling: Ensure the command was successful and returned data.
+      failed_when: 
+        - sessions.stdout is not defined or sessions.stdout == ""
+      changed_when: false 
 
     - name: Validate session data observability
-      # Observability: Assert that we received a non-empty response from the device.
+      # Observability: Assert that the response contains data to verify connectivity/auth.
       ansible.builtin.assert:
         that:
-          - sessions_result.stdout is defined
-          - sessions_result.stdout | length > 0
-        fail_msg: "Session list retrieval failed or returned empty output."
-        success_msg: "Session list successfully captured and verified."
+          - sessions.stdout | length > 0
+        fail_msg: "Failed to retrieve session list: Output is empty or undefined."
+        success_msg: "Session list successfully captured from {{ inventory_hostname }}."
 
-    - name: Display formatted session information
-      # Providing clear visibility into the captured operational state.
+    - name: Display formatted session report
+      # Documentation: Provides human-readable output of the session table.
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE SESSIONS =======================
-          Capture Time: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
-          {{ sessions_result.stdout }}
+          ======================= SESSIONS =======================
+          HOST: {{ inventory_hostname }}
+          
+          {{ sessions.stdout }}

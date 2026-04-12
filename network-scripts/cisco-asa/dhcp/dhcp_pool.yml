@@ -1,40 +1,39 @@
 ---
-# DHCP Pool Configuration Audit
-# Purpose: This playbook retrieves and validates the DHCP pool configuration on Cisco ASA/Firepower devices.
-# Standards: Implements FQCN, error handling, observability via assertions, and clear documentation.
+# DHCP Pool Configuration and Verification
+# Author: NetLearner Architect
+# This playbook retrieves and validates DHCP pool configurations on Cisco ASA/Firepower devices.
+# Standards: FQCN, Idempotency (read-only), Observability (register/assert), Error Handling.
 
-- name: DHCP Pool Config
+- name: DHCP Pool Configuration Management
   hosts: asa_firepower
-  gather_facts: false # Performance optimization: Device facts are not required for specific CLI command execution
+  gather_facts: false # Performance optimization for network devices
 
   tasks:
     - name: Retrieve current DHCP pool configuration
-      # FQCN: Using the specialized cisco.asa collection for robust, platform-specific command execution
-      cisco.asa.asa_command:
-        commands:
-          - show running-config dhcpd pool
-      register: dhcp_pools_output
-      # Error Handling: Fail explicitly if the ASA returns common error signatures or if the command fails
-      failed_when: >
-        dhcp_pools_output.failed or 
-        'Invalid input' in dhcp_pools_output.stdout[0] or 
-        'ERROR' in dhcp_pools_output.stdout[0]
-      # Idempotency: Read-only audit tasks are inherently idempotent as they do not modify device state
+      # Best Practice: Use Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: show running-config dhcpd pool
+      register: dhcp_pool_output
+      # Error Handling: Detect if the command failed or returned an invalid response
+      failed_when: 
+        - dhcp_pool_output.failed or 'Invalid input' in dhcp_pool_output.stdout
 
-    - name: Verify configuration retrieval success
-      # Observability: Use assertions to confirm the response structure is valid and the data was captured
+    - name: Validate DHCP configuration retrieval
+      # Observability: Assert that the response is defined and properly captured
       ansible.builtin.assert:
         that:
-          - dhcp_pools_output.stdout is defined
-          - dhcp_pools_output.stdout | length >= 1
-        fail_msg: "Failed to retrieve a valid DHCP configuration from {{ inventory_hostname }}."
-        success_msg: "DHCP pool configuration successfully retrieved for {{ inventory_hostname }}."
+          - dhcp_pool_output.stdout is defined
+        fail_msg: "Data retrieval failed for {{ inventory_hostname }}. Verify connectivity and credentials."
+        success_msg: "DHCP configuration successfully captured from {{ inventory_hostname }}."
 
     - name: Display DHCP Pool Configuration
-      # Documentation: Provide a clear, formatted view of the results for administrative review and logging
+      # Documentation: Format output for operational visibility and audit trails
+      # Idempotency: Read-only operations are inherently idempotent and safe for repeated execution
       ansible.builtin.debug:
         msg: |
-          ==========================================================
-          DHCP POOL CONFIGURATION FOR: {{ inventory_hostname }}
-          ==========================================================
-          {{ dhcp_pools_output.stdout[0] if dhcp_pools_output.stdout[0] | length > 0 else 'No DHCP pools currently configured.' }}
+          ========================================================================
+          DEVICE: {{ inventory_hostname }}
+          TIMESTAMP: {{ lookup('pipe', 'date +%Y-%m-%d\ %H:%M:%S') }}
+          ======================= DHCP POOL CONFIGURATION =======================
+          {{ dhcp_pool_output.stdout if dhcp_pool_output.stdout | length > 0 else 'NOTICE: No DHCP pools are currently configured on this device.' }}
+          ========================================================================

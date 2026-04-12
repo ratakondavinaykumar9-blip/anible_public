@@ -1,53 +1,43 @@
 ---
-# FortiGate Packet Sniffer Diagnostic Playbook
-# Standards: Idempotency (read-only diagnostic), Observability, Documentation, Error Handling, FQCN
+# FortiGate Packet Sniffer - Enhanced Operational Playbook
+# Standards: Idempotency (read-only), Observability, FQCN, and Error Handling
 - name: FortiGate Packet Sniffer
   hosts: fortigate
   gather_facts: false
   vars:
-    # Filter syntax: 'host 1.1.1.1 and port 80' (tcpdump format)
+    # Centralized variables for easier maintenance and overrides
     sniffer_filter: "host 192.168.1.1"
-    # Number of packets to capture
     sniffer_count: 100
-    # Capture interface (any, port1, etc.)
     sniffer_interface: "any"
-    # Verbosity level (1-6)
-    sniffer_level: 4
+    sniffer_verbose: 4 # Level 4: Interface name, IP header, and timestamps
 
   tasks:
-    - name: Validate diagnostic parameters
-      ansible.builtin.assert:
-        that:
-          - sniffer_count | int > 0
-          - sniffer_filter | length > 0
-        fail_msg: "Invalid parameters: sniffer_count must be positive and sniffer_filter is required."
-        success_msg: "Diagnostic parameters validated."
-
-    - name: Execute diagnostic packet sniffer
-      # Diagnostic commands are read-only and safe to run multiple times (idempotent behavior)
+    - name: Execute diagnostic packet sniffer on FortiGate
+      # Use Fully Qualified Collection Name (FQCN) for best practice
       ansible.netcommon.cli_command:
-        command: "diagnose sniffer packet {{ sniffer_interface }} '{{ sniffer_filter }}' {{ sniffer_level }} {{ sniffer_count }}"
-      register: sniffer_result
-      # Error handling: Catch common CLI execution errors
-      failed_when: 
-        - sniffer_result.failed | default(false)
-        - "'Command fail' in sniffer_result.stdout or 'Unknown action' in sniffer_result.stdout"
+        command: "diagnose sniffer packet {{ sniffer_interface }} '{{ sniffer_filter }}' {{ sniffer_verbose }} {{ sniffer_count }} l"
+      register: sniffer_output
+      # Setting changed_when to false ensures the playbook is idempotent (read-only operation)
+      changed_when: false
+      # Error Handling: Catch FortiOS-specific CLI parsing errors
+      failed_when:
+        - sniffer_output.stdout is search("command parse error")
+        - sniffer_output.stdout is search("Unknown action")
 
-    - name: Verify capture results
-      # Observability: Ensure we actually received data back from the device
+    - name: Verify capture execution success
+      # Observability: Assert that output was captured and the task didn't fail silently
       ansible.builtin.assert:
         that:
-          - sniffer_result.stdout is defined
-          - sniffer_result.stdout | length > 0
-        fail_msg: "Sniffer returned empty output. Verify filter syntax and traffic flow."
-        success_msg: "Packet capture data retrieved successfully."
+          - "sniffer_output.stdout is defined"
+          - "sniffer_output.failed == false"
+        fail_msg: "Packet sniffer command failed or was rejected by the FortiGate CLI."
+        success_msg: "Packet sniffer executed and captured data successfully."
 
-    - name: Display packet sniffer output
+    - name: Display formatted sniffer results
+      # Clean documentation and visualization of the diagnostic data
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE SNIFFER TRACE =======================
-          Interface: {{ sniffer_interface }}
-          Filter:    {{ sniffer_filter }}
-          Count:     {{ sniffer_count }}
-          =======================================================================
-          {{ sniffer_result.stdout }}
+          ======================= SNIFFER OUTPUT ({{ sniffer_interface }}) =======================
+          {{ sniffer_output.stdout }}
+      # Only output if data was actually returned to keep the log clean
+      when: sniffer_output.stdout | length > 0

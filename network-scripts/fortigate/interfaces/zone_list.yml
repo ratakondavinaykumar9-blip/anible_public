@@ -1,35 +1,36 @@
 ---
-# FortiGate Zone List
-# Improved by Architect:for Idempotency, Observability, and Best Practices
+# FortiGate Zone List Retrieval
+# This playbook retrieves the security zone configuration from FortiGate devices.
+# Standards: Idempotent (Read-only), Observably verified, FQCN compliant.
 - name: Get Zone List
   hosts: fortigate
-  gather_facts: false # Performance: Facts are not required for CLI-based configuration retrieval
+  gather_facts: false # Performance optimization: Device facts are not required for CLI tasks
 
   tasks:
-    - name: Retrieve system zone configuration via CLI
-      # Best Practice: Using Fully Qualified Collection Name (FQCN)
-      # Idempotency: Read-only CLI commands are inherently idempotent
+    - name: Retrieve system zone information via CLI
+      # Use FQCN for the network common CLI module
       ansible.netcommon.cli_command:
         command: get system zone
-      register: zone_output
-      # Error Handling: Catch non-zero return codes and FortiOS-specific error messages in stdout
+      register: zone_result
+      # Idempotency: 'get' is a read-only operation and safe for repeated execution.
+      # Error Handling: Fail if the output indicates a command error or is undefined.
       failed_when: 
-        - zone_output.rc != 0
-        - "'Command fail' in zone_output.stdout"
+        - zone_result.stdout is not defined
+        - "'Unknown' in zone_result.stdout"
+        - "'Command fail' in zone_result.stdout"
 
-    - name: Validate that zone information was successfully retrieved
-      # Observability: Ensure that the captured output contains data before proceeding
+    - name: Validate zone data integrity
+      # Observability: Assert that the output contains expected data patterns
       ansible.builtin.assert:
         that:
-          - zone_output.stdout is defined
-          - zone_output.stdout | length > 0
-        fail_msg: "Data retrieval error: Zone output is empty or undefined."
-        success_msg: "Zone configuration successfully captured and validated."
+          - "zone_result.stdout | length > 0"
+          - "'name' in zone_result.stdout"
+        fail_msg: "The retrieved zone data is empty or invalid."
+        success_msg: "Zone data successfully retrieved and verified."
 
-    - name: Display formatted zone list for operator visibility
-      # Documentation: Providing clear, structured output headers for audit logs
+    - name: Display formatted zone list
+      # Observability: Provide clear output of the current state for the operator
       ansible.builtin.debug:
         msg: |
           ======================= FORTIGATE ZONES =======================
-          {{ zone_output.stdout }}
-          ===============================================================
+          {{ zone_result.stdout }}

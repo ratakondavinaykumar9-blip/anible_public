@@ -1,51 +1,43 @@
 ---
-# Playbook: Get ASA Interface Status and Details
-# Purpose: Gathers and displays ASA interface configuration in a safe, observable manner.
-# Standards: FQCN used throughout, idempotency via 'gathered' state, and clear observability via assertions.
+# Playbook: Get Interface Status and Details
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
 - name: Get Interface Status
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Default output format set to 'text' for summary; can be overridden to 'json' for file export
-    output_format: "text"
+    # Default output format; can be overridden at runtime via --extra-vars
+    output_format: text
 
   tasks:
-    - name: Gather current interface configuration using resource module
-      # Idempotency: Using 'state: gathered' ensures we only read the current configuration without making changes
+    - name: Gather current ASA interface configuration
+      # Why: Retrieve the current state of all interfaces for visibility and audit.
+      # FQCN: cisco.asa.asa_interfaces with 'state: gathered' is a read-only idempotent operation.
       cisco.asa.asa_interfaces:
         state: gathered
       register: interfaces_output
-      # Error Handling: Explicitly fail if the module does not return gathered data
+      # Error Handling: Ensure the playbook fails gracefully with a clear message if retrieval fails.
       failed_when: 
         - interfaces_output.failed | default(false)
-        - interfaces_output.gathered is not defined
+        - "'ansible_facts' not in interfaces_output"
 
-    - name: Validate that interface data was successfully retrieved
-      # Observability: Ensure we have actionable data before proceeding to display/save tasks
+    - name: Verify interface data integrity
+      # Observability: Assert that the required facts were populated before proceeding.
       ansible.builtin.assert:
         that:
-          - interfaces_output.gathered is defined
-          - interfaces_output.gathered | length > 0
-        fail_msg: "Data retrieval failed for {{ inventory_hostname }}: No interface configuration found."
-        success_msg: "Successfully gathered status for {{ interfaces_output.gathered | length }} interfaces."
+          - interfaces_output.ansible_facts.asa_interfaces is defined
+          - interfaces_output.ansible_facts.asa_interfaces | type_debug == 'list'
+        fail_msg: "Interface facts retrieval failed or returned an invalid format for {{ inventory_hostname }}."
+        success_msg: "Successfully validated interface facts for {{ inventory_hostname }}."
 
-    - name: Export interface configuration to JSON file
-      # Idempotency: The copy module ensures the file is only updated if the content has changed
+    - name: Persist interface state to JSON
+      # Documentation: Save the gathered state to a file for external auditing or post-processing.
+      # Idempotency: The copy module ensures the file is only updated if the content has changed.
       ansible.builtin.copy:
-        content: "{{ interfaces_output.gathered | to_nice_json }}"
+        content: "{{ interfaces_output.ansible_facts.asa_interfaces | to_nice_json }}"
         dest: "/tmp/asa_interfaces_{{ inventory_hostname }}.json"
         mode: '0644'
-      # Documentation: This task executes only when the user requests JSON file output
-      when: output_format == 'json'
+      when: output_format | default('text') == 'json'
 
-    - name: Display formatted summary of interface status
-      # Observability: Provides a human-readable table of the operational and configuration state
-      ansible.builtin.debug:
-        msg: |
-          ======================================================================
-          Interface Status Summary: {{ inventory_hostname }}
-          ======================================================================
-          {% for iface in interfaces_output.gathered %}
-          {{ "%-20s" | format(iface.name) }}: Link: {{ iface.link_status | default('N/A') }} | IP: {{ (iface.ipv4 | default({})).address | default('N/A') }} | Mode: {{ iface.mode | default('N/A') }}
-          {% endfor %}
-      when: output_format == 'text'
+    - name: Display human-readable interface summary
+      # Observability: Provide a structured summary table for immediate operator feedback.
+      ans

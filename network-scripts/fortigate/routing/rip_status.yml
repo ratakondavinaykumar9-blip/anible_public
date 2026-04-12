@@ -1,37 +1,37 @@
 ---
-# FortiGate RIP Status Retrieval
-# Purpose: Fetches the current RIP routing table and operational status from FortiGate.
-# Standards: Implements idempotency, observability, explicit error handling, and FQCN.
+# FortiGate RIP Status - Network Automation Improvement
+# Purpose: Retrieve and verify RIP status from FortiGate firewalls.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
 
-- name: Get FortiGate RIP Status
+- name: FortiGate RIP Status
   hosts: fortigate
   gather_facts: false
+  # Connection: Using network_cli for standardized CLI access to FortiOS.
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Execute 'get router info rip' command
-      # Using Fully Qualified Collection Name (FQCN) for the network CLI module
+    - name: Retrieve RIP information from router
+      # FQCN: Using ansible.netcommon.cli_command for direct command execution.
+      # Idempotency: Read-only 'get' command ensures the playbook is safe for repeated runs.
       ansible.netcommon.cli_command:
         command: get router info rip
-      register: rip_result
-      # Idempotency: Read-only 'get' commands are inherently idempotent as they do not modify device state.
-      # Error Handling: Catch specific FortiOS error strings that might not trigger a non-zero return code.
-      failed_when: >
-        rip_result.failed or
-        "Command fail" in rip_result.stdout or
-        "Unknown action" in rip_result.stdout
+      register: rip_status
+      # Error Handling: Fail if output indicates a command failure or an unrecognized operation.
+      failed_when:
+        - rip_status.failed or "Unknown action" in rip_status.stdout or "Command fail" in rip_status.stdout
 
-    - name: Verify RIP status output validity
-      # Observability: Assert that the command returned meaningful data before proceeding.
+    - name: Verify RIP status retrieval integrity
+      # Observability: Assert that the command returned a valid, non-empty response.
       ansible.builtin.assert:
         that:
-          - "rip_result.stdout is defined"
-          - "rip_result.stdout | length > 0"
-        fail_msg: "RIP status retrieval failed or returned empty output. Verify RIP is configured."
-        success_msg: "RIP status successfully retrieved and validated."
+          - rip_status.stdout is defined
+          - rip_status.stdout | length > 0
+        fail_msg: "CRITICAL: RIP status output is empty or the command failed to execute."
+        success_msg: "SUCCESS: RIP routing information captured successfully."
 
-    - name: Display RIP operational status
-      # Documentation: Providing a clear, formatted view of the operational routing state for the operator.
+    - name: Display RIP Status
+      # Documentation: Formatted output for network operator visibility and logging.
       ansible.builtin.debug:
         msg: |
           ======================= RIP STATUS =======================
-          {{ rip_result.stdout }}
+          {{ rip_status.stdout }}

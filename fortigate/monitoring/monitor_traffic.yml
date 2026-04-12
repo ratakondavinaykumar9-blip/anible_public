@@ -1,34 +1,39 @@
 ---
-# Monitor Traffic
-# Auto-improved: 2026-03-08
-# Author: Analyst (OpenClaw) / Improved by Architect:#
----
-# FortiGate Traffic Monitoring
+# FortiGate Traffic Monitoring - Enhanced Version
+# Purpose: This playbook retrieves and displays real-time interface traffic statistics from FortiGate devices.
+# Standards: Idempotent, Observable, Documented, and FQCN-compliant.
+
 - name: Monitor Traffic
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Fact gathering is disabled to speed up execution on network devices
 
   tasks:
-    - name: Get system interface traffic statistics
-      # FQCN: Using ansible.netcommon.cli_command for standardized interaction.
-      # Idempotency: 'get' commands are read-only and inherently idempotent.
+    - name: Retrieve interface traffic statistics via CLI
+      # Using FQCN for cross-platform network CLI execution. 
+      # This task is idempotent as it performs a read-only operation.
       ansible.netcommon.cli_command:
         command: get system interface traffic
-      register: traffic
-      # Error Handling: Explicitly fail if the command is not recognized or returns an error.
+      register: traffic_output
+      # Error Handling: Ensure the task fails if the output is missing or contains error keywords
       failed_when: 
-        - traffic.failed or "Command fail" in traffic.stdout or "Unknown action" in traffic.stdout
+        - traffic_output.stdout is not defined or traffic_output.stdout | length == 0
+        - "'command parse error' in traffic_output.stdout"
 
-    - name: Validate traffic data capture
-      # Observability: Assert that the command returned content to ensure the monitor is effective.
+    - name: Verify that traffic data was successfully captured
+      # Observability: Assert that the command returned the expected structural data
       ansible.builtin.assert:
         that:
-          - traffic.stdout is defined
-          - traffic.stdout | length > 0
-        fail_msg: "Traffic statistics could not be retrieved from the device."
-        success_msg: "Traffic statistics successfully captured."
+          - "'Interface' in traffic_output.stdout or 'traffic' in traffic_output.stdout"
+        fail_msg: "The retrieved data does not appear to be a valid traffic report."
+        success_msg: "Traffic statistics successfully captured and validated."
 
-    - name: Display Traffic Monitoring Report
-      # Documentation: Providing a clear, formatted view of the captured data for observability.
+    - name: Display traffic monitoring results
+      # Provides structured visibility into the captured operational state
       ansible.builtin.debug:
-        msg
+        msg: |
+          ==================================================================
+          FORTIGATE TRAFFIC MONITORING REPORT
+          Timestamp: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          ==================================================================
+          {{ traffic_output.stdout }}
+          ==================================================================

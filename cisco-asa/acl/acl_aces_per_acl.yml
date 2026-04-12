@@ -1,38 +1,35 @@
 ---
 # ACL ACE Count Analysis
-# This playbook retrieves and displays the Access Control Entry (ACE) counts for each ACL
-# on Cisco ASA/Firepower devices. This is essential for monitoring resource limits
-# and ensuring security policies are correctly applied.
+# This playbook retrieves the number of Access Control Entries (ACEs) per Access Control List (ACL)
+# on Cisco ASA/Firepower devices. It is designed for idempotency, observability, and robust error handling.
+
 - name: Get ACL ACE Count
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false  # Facts are not required for this operational data gathering task, reducing overhead.
 
   tasks:
-    - name: Retrieve ACL information from device
-      # Using FQCN (Fully Qualified Collection Name) for stability and clarity
-      ansible.netcommon.cli_command:
-        command: show access-list | include (access-list|entries)
+    - name: Fetch ACL information from the device
+      # Using Fully Qualified Collection Name (FQCN) for the platform-specific module.
+      # The command filters for lines containing 'access-list' or 'entries' to provide a concise summary.
+      cisco.asa.asa_command:
+        commands:
+          - show access-list | include (access-list|entries)
       register: acl_info
-      # Idempotency: show commands do not modify state; changed_when: false prevents false change reports
-      changed_when: false
-      # Error Handling: Fail if the command is unrecognized or if the connection fails
-      failed_when:
-        - acl_info.failed or "Invalid input" in acl_info.stdout
+      # Error Handling: Explicitly check for CLI-specific error strings to ensure the task fails correctly.
+      failed_when: 
+        - acl_info.failed or "Invalid input" in acl_info.stdout[0]
 
-    - name: Verify ACL data retrieval
-      # Observability: Assert that we received a valid response before attempting to display it
+    - name: Validate that ACL data was successfully captured
+      # Observability: Assert that the command returned non-empty output to verify device response.
       ansible.builtin.assert:
         that:
-          - acl_info.stdout is defined
-          - acl_info.stdout | length > 0
-        fail_msg: "The command returned no data. Ensure ACLs are configured on the target device."
-        success_msg: "ACL ACE information successfully retrieved."
+          - acl_info.stdout[0] | length > 0
+        fail_msg: "Failed to retrieve ACL information or no ACLs are configured on the device."
+        success_msg: "Successfully retrieved ACL ACE counts."
 
-    - name: Display ACL ACE count summary
-      # Documentation: Providing a clear, formatted summary of the gathered data
+    - name: Display ACL ACE counts
+      # Documentation: Provides a human-readable summary of the operational state.
       ansible.builtin.debug:
         msg: |
-          ======================= ACL ACE COUNT SUMMARY =======================
-          Device: {{ inventory_hostname }}
-          Output:
-          {{ acl_info.stdout }}
+          ======================= ACL ACE COUNT =======================
+          {{ acl_info.stdout[0] }}

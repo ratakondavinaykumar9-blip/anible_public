@@ -1,36 +1,34 @@
 ---
-# Playbook: FortiGate VDOM List
-# Author: Architect:# Standards: Idempotent, Observable, Documented, and FQCN compliant.
-
-- name: Get VDOM List from FortiGate
+# FortiGate VDOM List - Improved for Production Standards
+# This playbook retrieves the list of Virtual Domains (VDOMs) from a FortiGate device.
+- name: Get FortiGate VDOM List
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Facts are not required for this CLI-based operation
 
   tasks:
-    - name: Fetch system VDOM information using CLI
-      # Use Fully Qualified Collection Name (FQCN) for cross-platform compatibility
+    - name: Retrieve VDOM configuration via CLI
+      # Use Fully Qualified Collection Name (FQCN) for reliability
       ansible.netcommon.cli_command:
         command: get system vdom
-      register: vdom_result
-      # Idempotency: Mark as changed: false because this is a read-only operation
-      changed_when: false
-      # Error Handling: Catch specific FortiOS error strings or execution failures
+      register: vdom_output
+      # Error Handling: Catch common FortiOS CLI error strings that might not trigger a non-zero exit code
       failed_when: 
-        - vdom_result.failed or "Unknown action" in vdom_result.stdout
+        - vdom_output.rc | default(0) != 0
+        - "'Command fail' in vdom_output.stdout"
+        - "'Unknown action' in vdom_output.stdout"
 
-    - name: Validate VDOM output integrity
-      # Observability: Verify that the command returned expected data
+    - name: Validate VDOM retrieval integrity
+      # Observability: Assert that the output is not empty and contains expected VDOM keywords
       ansible.builtin.assert:
         that:
-          - vdom_result.stdout is defined
-          - vdom_result.stdout | length > 0
-          - "'vdom' in vdom_result.stdout"
-        fail_msg: "The VDOM retrieval returned empty or invalid data from the device."
+          - vdom_output.stdout | length > 0
+          - "'vdom' in vdom_output.stdout or 'root' in vdom_output.stdout"
+        fail_msg: "The VDOM list could not be retrieved or the output was unexpected."
         success_msg: "VDOM list successfully retrieved and validated."
 
-    - name: Display formatted VDOM information
-      # Documentation: Provide a clear, human-readable view of the retrieved state
+    - name: Display VDOM list for operator visibility
+      # This task is idempotent as it only performs a read/display operation
       ansible.builtin.debug:
         msg: |
           ======================= VDOMs =======================
-          {{ vdom_result.stdout }}
+          {{ vdom_output.stdout }}

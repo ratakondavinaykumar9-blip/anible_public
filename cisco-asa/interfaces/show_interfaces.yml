@@ -1,68 +1,58 @@
 ---
-# Name: Get ASA Interface Details
-# Purpose: Gathers and displays interface status, IP addresses, and statistics for ASA/Firepower devices.
-# Standards Compliance: Idempotency, Observability, Documentation, Error Handling, and FQCN.
-
-- name: Get Interface Status
+# Improved Cisco ASA Interface Audit Playbook
+# Standards: FQCN, Idempotency, Observability, Error Handling
+- name: Audit Interface Status and IP Addressing
   hosts: asa_firepower
   gather_facts: false
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Gather ASA interface configuration facts
-      # Why: Retrieves structured data about physical and logical interfaces using the resource module.
-      # Idempotency: 'state: gathered' is a read-only operation that does not modify device state.
+    - name: Gather structured interface configuration facts
+      # Using 'state: gathered' ensures idempotency by only reading current device state.
+      # FQCN used to ensure the correct collection version is invoked.
       cisco.asa.asa_interfaces:
         state: gathered
       register: interfaces_output
-      failed_when: interfaces_output is failed
 
-    - name: Verify interface facts were gathered successfully
-      # Why: Observability check to ensure the device returned valid interface data before proceeding.
+    - name: Verify interface data retrieval success
+      # Observability: Assert that the module successfully returned structured data.
       ansible.builtin.assert:
         that:
-          - interfaces_output.ansible_facts.asa_interfaces is defined
-        fail_msg: "Failed to gather interface facts from {{ inventory_hostname }}. Check connectivity or credentials."
-        quiet: true
+          - "interfaces_output.gathered is defined"
+        fail_msg: "Interface facts could not be retrieved from {{ inventory_hostname }}. Check network_cli connectivity."
 
-    - name: Get interface IP brief via CLI
-      # Why: Captures the 'show ip address' command output for human-readable cross-reference.
-      # Error Handling: Use failed_when to detect command execution issues or invalid syntax responses.
-      ansible.netcommon.cli_command:
-        command: show ip address
+    - name: Execute 'show ip address' for summary verification
+      # cisco.asa.asa_command is preferred over netcommon for ASA-specific parsing.
+      cisco.asa.asa_command:
+        commands:
+          - show ip address
       register: ip_addr_output
+      # Error Handling: Fail if the output indicates a syntax error or is empty.
       failed_when: 
-        - ip_addr_output is failed or "Invalid input" in ip_addr_output.stdout
+        - ip_addr_output.failed or ip_addr_output.stdout | length == 0
+        - "'Invalid' in ip_addr_output.stdout[0]"
 
-    - name: Get detailed interface statistics
-      # Why: Provides low-level details like input/output errors, drops, and bandwidth utilization.
-      ansible.netcommon.cli_command:
-        command: show interface
+    - name: Execute 'show interface' for hardware statistics
+      # Captures interface-level counters and physical layer status.
+      cisco.asa.asa_command:
+        commands:
+          - show interface
       register: interface_stats
-      failed_when: interface_stats is failed
+      failed_when: "interface_stats.stdout is not defined"
 
-    - name: Validate CLI command responses
-      # Why: Ensures that the CLI commands actually returned data to satisfy observability standards.
+    - name: Validate command responses are non-empty
+      # Observability: Ensure that critical operational commands returned data.
       ansible.builtin.assert:
         that:
-          - ip_addr_output.stdout != ""
-          - interface_stats.stdout != ""
-        msg: "One or more CLI commands returned empty output for {{ inventory_hostname }}."
-        quiet: true
+          - "ip_addr_output.stdout[0] | length > 0"
+          - "interface_stats.stdout[0] | length > 0"
+        fail_msg: "CLI command execution returned empty results on {{ inventory_hostname }}."
 
     - name: Display structured interface facts
-      # Why: Allows for detailed inspection of gathered facts when running in verbose mode (-v).
+      # Providing visibility into the object model for troubleshooting (enabled at -v level).
       ansible.builtin.debug:
-        var: interfaces_output.ansible_facts.asa_interfaces
+        var: interfaces_output.gathered
         verbosity: 1
 
-    - name: Generate summary table
-      # Why: Renders a concise, human-readable summary of interface status and IP addressing.
-      ansible.builtin.debug:
-        msg: |
-          ==============================================================================
-          INTERFACE SUMMARY: {{ inventory_hostname }}
-          ==============================================================================
-          {% for iface in interfaces_output.ansible_facts.asa_interfaces %}
-          {{ iface.name | rjust(25) }}: {{ (iface.link_status | default('N/A')) | rjust(10) }} | IP: {{ (iface.ipv4[0].address | default('Unassigned')) if iface.ipv4 is defined else 'Unassigned' }}
-          {% endfor %}
-          ==============================================================================
+    - name: Generate formatted interface summary report
+      # Documentation: This summary provides a human-readable audit trail of the interface state.

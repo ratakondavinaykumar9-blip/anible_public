@@ -1,40 +1,36 @@
 ---
-# Standard:ized FortiGate Playbook
-# Purpose: Retrieve and verify SSL VPN tunnel status on FortiGate devices.
-# Standards: FQCN, Observability, Error Handling, and Idempotency.
-
-- name: FortiGate SSL VPN Tunnel Monitoring
+# NetLearner Architect Standardized Playbook: FortiGate SSL VPN Tunnel Status
+# This playbook retrieves operational status for SSL VPN tunnels. 
+# It is idempotent as it performs a read-only operation.
+- name: Get SSL VPN Tunnel
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve SSL VPN tunnel status from FortiGate CLI
-      # Use FQCN for network CLI operations.
-      # This 'get' command is a monitor operation and is inherently idempotent.
+    - name: Retrieve SSL VPN tunnel information via CLI
+      # Using FQCN ansible.netcommon.cli_command for reliable execution across environments.
+      # Output is registered to enable observability and automated validation.
       ansible.netcommon.cli_command:
         command: get sslvpn tunnel
       register: tunnel_output
-      # Error Handling: Catch FortiOS-specific command errors that might not trigger a non-zero exit code.
-      failed_when:
-        - tunnel_output.stdout is not defined
+      # Ensures the task fails if the command returns a non-zero exit code or specific error messages.
+      failed_when: 
+        - tunnel_output.rc != 0
         - "'Unknown action' in tunnel_output.stdout"
-        - "'Command fail' in tunnel_output.stdout"
 
-    - name: Verify successful retrieval of tunnel data
-      # Observability: Ensure that the command returned data to prevent silent failures in automation pipelines.
+    - name: Validate tunnel data retrieval
+      # Asserting that the response contains data to verify successful state capture.
+      # This provides an observability gate before proceeding with dependent logic.
       ansible.builtin.assert:
         that:
+          - tunnel_output.stdout is defined
           - tunnel_output.stdout | length > 0
-        fail_msg: "The FortiGate returned an empty response for the SSL VPN tunnel status."
-        success_msg: "SSL VPN tunnel status successfully captured."
+        fail_msg: "The 'get sslvpn tunnel' command returned no data or is not supported."
+        success_msg: "SSL VPN tunnel data successfully retrieved."
 
-    - name: Display formatted SSL VPN tunnel status
-      # Observability: Provide a clear summary for human operators.
+    - name: Display SSL VPN Tunnel Details
+      # Formatting output for human-readable visibility into the operational state.
       ansible.builtin.debug:
         msg: |
-          ======================= SSL VPN TUNNEL REPORT =======================
-          DEVICE: {{ inventory_hostname }}
-          TIMESTAMP: {{ ansible_date_time.iso8601 | default('N/A') }}
-          
+          ======================= SSL VPN TUNNEL STATUS =======================
           {{ tunnel_output.stdout }}
-          =====================================================================

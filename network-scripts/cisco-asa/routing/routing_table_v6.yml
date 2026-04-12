@@ -1,32 +1,39 @@
 ---
-- name: IPv6 Routing Table Audit
+# NetLearner Architect Improved Playbook
+# Purpose: Audit and verify IPv6 routing state on Cisco ASA/Firepower devices.
+# Standards: FQCN, Idempotency, Observability, Error Handling.
+
+- name: Audit IPv6 Routing Table
   hosts: asa_firepower
-  gather_facts: false
-  # WHY: This playbook performs a non-intrusive audit of the IPv6 routing table to verify network state.
-  # IDEMPOTENCY: Inherently idempotent as it uses read-only commands that do not modify the device configuration.
+  gather_facts: false # Performance: Fact gathering is disabled as it's not required for this audit.
 
   tasks:
-    - name: Retrieve current IPv6 routing table
-      # FQCN: Using the dedicated Cisco ASA collection for improved platform-specific handling
-      cisco.asa.asa_command:
-        commands:
-          - show route ipv6
-      register: v6_routes
-      # ERROR HANDLING: Ensure the playbook fails if the command returns no output or is undefined
+    - name: Retrieve IPv6 routing table from device
+      # FQCN used for long-term maintainability and to avoid module name conflicts.
+      ansible.netcommon.cli_command:
+        command: show route ipv6
+      register: ipv6_route_output
+      # Error Handling: Explicitly fail if the CLI returns an error message or fails to execute.
       failed_when: 
-        - v6_routes.stdout is not defined or v6_routes.stdout | length == 0
+        - ipv6_route_output.failed
+        - "'Invalid input' in ipv6_route_output.stdout or 'Usage' in ipv6_route_output.stdout"
 
-    - name: Validate routing table integrity
-      # OBSERVABILITY: Verifies that the device returned a valid IPv6 routing table header
+    - name: Verify routing table retrieval success
+      # Observability: Use assertions to validate that we received a non-empty response from the control plane.
       ansible.builtin.assert:
         that:
-          - "'IPv6 Routing Table' in v6_routes.stdout[0]"
-        fail_msg: "The device did not return a valid IPv6 routing table. Verify IPv6 is configured and enabled."
-        success_msg: "IPv6 routing table successfully retrieved and validated."
+          - ipv6_route_output.stdout is defined
+          - ipv6_route_output.stdout | length > 0
+        fail_msg: "Data integrity check failed: IPv6 routing table is empty or could not be read."
+        success_msg: "Data integrity check passed: IPv6 routing information successfully captured."
 
-    - name: Display IPv6 Routing Information
-      # OBSERVABILITY: Provides clear, formatted visibility for the operator in the automation logs
+    - name: Display formatted IPv6 routing table
+      # Documentation: Providing a clear, human-readable view of the operational state for audit trails.
       ansible.builtin.debug:
         msg: |
+          ===========================================================
+          TARGET DEVICE: {{ inventory_hostname }}
+          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
           ======================= IPv6 ROUTES =======================
-          {{ v6_routes.stdout[0] }}
+          {{ ipv6_route_output.stdout }}
+          ===========================================================

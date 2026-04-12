@@ -1,38 +1,33 @@
 ---
-# Standard: FortiGate Interface Traffic Monitoring
-# Purpose: Retrieves real-time interface traffic statistics using high-reliability patterns.
-# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
-- name: Get FortiGate Interface Traffic
+- name: FortiGate Interface Traffic Analysis
   hosts: fortigate
-  gather_facts: false # Performance: FortiOS devices do not support standard Ansible facts
+  gather_facts: false
 
   tasks:
-    - name: Retrieve interface traffic statistics from the device
-      # Best Practice: Use Fully Qualified Collection Names (FQCN) for consistency
+    - name: "FortiGate: Retrieve interface traffic statistics"
+      # Idempotency: Read-only 'get' command ensures no state changes occur regardless of execution count.
+      # FQCN: Using fully qualified collection name for portability and clarity.
       ansible.netcommon.cli_command:
         command: get system interface traffic
-      register: traffic_capture
-      # Idempotency: This is a read-only query; ensure it never reports a 'changed' status
-      changed_when: false
-      # Error Handling: Fail explicitly if the command returns no data or an error string
-      failed_when:
-        - traffic_capture.stdout is not defined
-        - traffic_capture.stdout | length == 0 or "Unknown command" in traffic_capture.stdout
+      register: interface_traffic
+      # Error Handling: Explicitly fail if the command execution fails or returns an empty string.
+      failed_when: 
+        - interface_traffic.failed or (interface_traffic.stdout | length == 0)
+      # Ensure the data gathering task runs even when the playbook is executed in --check mode.
+      check_mode: false
 
-    - name: Validate traffic data integrity
-      # Observability: Assert that the command returned the expected content
+    - name: "Observability: Validate retrieved traffic data"
+      # Observability: Assert that the output contains expected structural elements to verify operational success.
       ansible.builtin.assert:
         that:
-          - traffic_capture.stdout != ""
-          - "'interface' in traffic_capture.stdout or 'Name' in traffic_capture.stdout"
-        fail_msg: "The traffic data retrieved from {{ inventory_hostname }} is invalid or empty."
-        success_msg: "Successfully verified interface traffic data capture."
+          - "'Interface' in interface_traffic.stdout"
+        fail_msg: "Validation failed: The output from {{ inventory_hostname }} does not contain the expected 'Interface' header."
+        success_msg: "Traffic data successfully retrieved and validated for {{ inventory_hostname }}."
 
-    - name: Display Interface Traffic Report
-      # Observability: Provide a clear, formatted view of the captured data
+    - name: "Output: Display interface traffic report"
+      # Documentation: Providing a clear, formatted view of the results for human operators.
       ansible.builtin.debug:
         msg: |
           ======================= INTERFACE TRAFFIC =======================
           Device: {{ inventory_hostname }}
-          =================================================================
-          {{ traffic_capture.stdout }}
+          {{ interface_traffic.stdout }}

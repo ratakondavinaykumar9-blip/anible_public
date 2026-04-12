@@ -1,37 +1,33 @@
 ---
-# Architect: Improved Interface Summary Playbook
-# This playbook retrieves and validates the interface summary from Cisco ASA/Firepower devices.
-# Standards: Idempotency (Read-only), Observability (Assert), Documentation, FQCN.
-- name: Interface Summary and Validation
+# Playbook to retrieve and validate the interface summary from Cisco ASA/Firepower devices.
+# This playbook ensures observability and follows network automation best practices.
+- name: Cisco ASA Interface Summary
   hosts: asa_firepower
-  gather_facts: false # Facts are disabled to optimize execution time as they aren't required.
+  gather_facts: false
 
   tasks:
-    - name: Retrieve interface summary via CLI
-      # Using Fully Qualified Collection Name (FQCN) for portability and clarity.
-      ansible.netcommon.cli_command:
-        command: show interface summary
-      register: summary_output
-      # Error Handling: Fail if the command is unrecognized or the return code is non-zero.
-      failed_when:
-        - summary_output.rc != 0
-        - "'Invalid input' in summary_output.stdout"
+    - name: Retrieve interface summary
+      # Use the Fully Qualified Collection Name (FQCN) for Cisco ASA
+      cisco.asa.asa_command:
+        commands:
+          - show interface summary
+      register: summary_result
+      # Error Handling: Ensure the task fails if the output is empty or if the CLI returns an error
+      failed_when: 
+        - summary_result.stdout[0] == ""
+        - "'Invalid input' in summary_result.stdout[0]"
 
-    - name: Validate interface summary data
-      # Observability: Assert that the output contains data to ensure the operation was meaningful.
+    - name: Validate interface summary output
+      # Observability: Assert that the command returned the expected structural data
       ansible.builtin.assert:
         that:
-          - summary_output.stdout is defined
-          - summary_output.stdout | length > 0
-        fail_msg: "The 'show interface summary' command returned empty or invalid data."
-        success_msg: "Interface summary successfully retrieved and verified."
+          - "'Interface' in summary_result.stdout[0]"
+        fail_msg: "Interface summary output is invalid or missing expected headers."
+        success_msg: "Interface summary retrieved and verified successfully."
 
-    - name: Display formatted interface summary
-      # Documentation: Provides the operator with a clear visual representation of the state.
+    - name: Display formatted summary
+      # Documentation: Provide clear visibility into the current state of the interfaces
       ansible.builtin.debug:
         msg: |
           ======================= INTERFACE SUMMARY =======================
-          {{ summary_output.stdout }}
-
-    # Note on Idempotency: This playbook is inherently idempotent because it utilizes 
-    # read-only 'show' commands which do not alter the persistent state of the device.
+          {{ summary_result.stdout[0] }}

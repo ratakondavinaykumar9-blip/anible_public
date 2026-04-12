@@ -1,41 +1,35 @@
 ---
-# Playbook: FortiGate Loopback Interface Audit
-# Description: Safely retrieves and validates loopback interface configuration from FortiGate devices.
-# Standards: Idempotent (Read-only), Observable, and uses FQCN.
-
-- name: Get Loopback Interfaces
+- name: FortiGate Loopback Interface Audit
   hosts: fortigate
   gather_facts: false
-  # Ensure the use of network_cli for consistent FortiOS interaction
-  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve loopback configuration via CLI
-      # Using Fully Qualified Collection Name (FQCN) for best practices
-      # This task is idempotent as it only performs a read operation (GET)
+    - name: Fetch loopback interface status via FortiOS CLI
+      # Why: Directly querying the CLI ensures we get the real-time operational state.
+      # Using FQCN (ansible.netcommon.cli_command) to ensure predictable module resolution.
+      # This task is inherently idempotent as it only retrieves information without modifying state.
       ansible.netcommon.cli_command:
-        command: get system loopback
-      register: lb_results
-      # Error Handling: Ensure we fail if the command is unrecognized or execution fails
-      failed_when:
-        - lb_results.rc != 0
-        - "'Unknown action' in lb_results.stdout"
-        - "'Command fail' in lb_results.stdout"
+        command: "get system loopback"
+      register: lb_result
+      # Error Handling: Explicitly check for CLI-specific error strings to catch failures 
+      # that might not trigger a non-zero exit code.
+      failed_when: 
+        - lb_result.failed | default(false)
+        - "'Unknown command' in lb_result.stdout or 'Command fail' in lb_result.stdout"
 
-    - name: Validate loopback data integrity
-      # Observability: Explicitly verify that the command returned meaningful content
+    - name: Validate loopback information retrieval
+      # Observability: Using assertions to verify that the registered variable contains 
+      # meaningful data before proceeding or finishing.
       ansible.builtin.assert:
         that:
-          - lb_results.stdout is defined
-          - lb_results.stdout | length > 0
-        fail_msg: "The 'get system loopback' command returned no data. Verify connectivity or configuration."
-        success_msg: "Loopback interface data successfully captured from {{ inventory_hostname }}."
+          - "lb_result.stdout is defined"
+          - "lb_result.stdout | length > 0"
+        fail_msg: "The 'get system loopback' command returned no data. Check connectivity or device configuration."
+        success_msg: "Successfully retrieved loopback configuration data."
 
-    - name: Display Loopback interface details
-      # Documentation: Provides operational visibility into the retrieved state
+    - name: Output loopback interface details
+      # Why: Provides a formatted, human-readable summary of the retrieved data for operators.
       ansible.builtin.debug:
         msg: |
-          ======================= LOOPBACKS: {{ inventory_hostname }} =======================
-          {{ lb_results.stdout }}
-      # Only execute if data was actually retrieved to keep logs clean
-      when: lb_results.stdout != ""
+          ======================= LOOPBACKS =======================
+          {{ lb_result.stdout }}

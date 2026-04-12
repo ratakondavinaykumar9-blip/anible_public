@@ -1,34 +1,36 @@
 ---
-# FortiGate IPSec Details - Standard:
-# This playbook retrieves IPSec tunnel status. Reading state is inherently idempotent.
+# Playbook: FortiGate IPSec Tunnel Monitoring
+# Purpose: Retrieves and validates operational status of IPSec tunnels.
+# Standards: Idempotency (Read-only), Observability (Assert), FQCN usage.
 - name: Get IPSec Details
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve IPSec tunnel details via CLI
-      # Use FQCN for consistency and future-proofing across environments
+    - name: Execute CLI command to fetch IPSec tunnel details
+      # Using FQCN (ansible.netcommon.cli_command) for standardized network interaction.
+      # This task is inherently idempotent as it performs a read-only 'get' operation.
       ansible.netcommon.cli_command:
         command: get vpn ipsec tunnel details
-      register: ipsec_details
-      # Error Handling: Explicitly fail if the command returns an error string or empty output
-      failed_when: 
-        - ipsec_details.failed == true
-        - "ipsec_details.stdout == ''"
-        - "'Command fail' in ipsec_details.stdout"
+      register: ipsec_details_raw
+      # Error Handling: Fail if the command is unrecognized or the task execution fails.
+      failed_when:
+        - ipsec_details_raw.failed
+        - "'command parse error' in ipsec_details_raw.stdout"
+        - "'Unknown action' in ipsec_details_raw.stdout"
 
-    - name: Validate retrieval of IPSec information
-      # Observability: Confirm the registered variable contains expected data before proceeding
+    - name: Verify command output integrity
+      # Observability: Assert that the command returned data to prevent silent failures in automation pipelines.
       ansible.builtin.assert:
         that:
-          - ipsec_details.stdout is defined
-          - ipsec_details.stdout | length > 0
-        fail_msg: "No IPSec tunnel details were returned from the host."
-        success_msg: "Successfully captured IPSec tunnel state."
+          - ipsec_details_raw.stdout is defined
+          - ipsec_details_raw.stdout | length > 0
+        fail_msg: "The FortiGate returned no IPSec tunnel information. Verify VPN configuration or device state."
+        quiet: true
 
-    - name: Display IPSec Operational Status
-      # Documentation: Provide clear visibility into the operational state for audit logs
+    - name: Display formatted IPSec details
+      # Documentation: Output results to the console for operator visibility.
       ansible.builtin.debug:
         msg: |
           ======================= IPSEC DETAILS =======================
-          {{ ipsec_details.stdout }}
+          {{ ipsec_details_raw.stdout }}

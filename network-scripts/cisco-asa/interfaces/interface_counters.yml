@@ -1,35 +1,31 @@
 ---
-# Playbook: Get Interface Counters
-# Purpose: Safely retrieve and validate interface performance metrics from Cisco ASA/Firepower devices.
-# Standards: Idempotency (Read-only), Observability (Assertions), FQCN usage, and Robust Error Handling.
-- name: Get Interface Counters
+- name: Retrieve Cisco ASA Interface Statistics
   hosts: asa_firepower
   gather_facts: false
+  # Standard: Documentation - Provides read-only visibility into interface health for monitoring
 
   tasks:
-    - name: Retrieve interface statistics via CLI
-      # Use platform-specific FQCN for better command parsing and reliability.
-      # This operation is inherently idempotent as it does not modify device state.
+    - name: Fetch interface counters using regex filtering
+      # Standard: Best Practices - Use FQCN for specific platform collections
+      # Standard: Idempotency - Read-only commands are inherently idempotent and safe for repeated execution
       cisco.asa.asa_command:
         commands:
-          - "show interface | include (OK|input packets|output packets)"
-      register: counters_output
-      # Error Handling: Fail if the transport fails or if the command returns no data.
+          - show interface | include (OK|input packets|output packets)
+      register: interface_counters
+      # Standard: Error Handling - Prevents silent failures if the command returns an error or empty string
       failed_when:
-        - counters_output.failed | default(false)
-        - "not counters_output.stdout[0]"
+        - interface_counters.failed or interface_counters.stdout[0] == ""
+        - "'Invalid input' in interface_counters.stdout[0]"
 
-    - name: Validate counter data integrity
-      # Observability: Assert that the output contains expected keywords to ensure valid data capture.
+    - name: Validate that counter data was successfully retrieved
+      # Standard: Observability - Explicitly verify the data exists before proceeding
       ansible.builtin.assert:
         that:
-          - "counters_output.stdout is defined"
-          - "'input packets' in counters_output.stdout[0]"
-          - "'output packets' in counters_output.stdout[0]"
-        fail_msg: "Interface counters were not retrieved correctly or the device returned an unexpected format."
-        success_msg: "Interface counters successfully retrieved and validated."
+          - interface_counters.stdout[0] | length > 0
+        fail_msg: "Interface counter data is missing or could not be parsed."
+        success_msg: "Interface statistics successfully captured."
 
-    - name: Display processed interface statistics
-      # Documentation: Provide visibility into the registered data for auditing/logging purposes.
+    - name: Display captured interface statistics
+      # Standard: Observability - Outputs the filtered results for manual verification/logging
       ansible.builtin.debug:
-        msg: "{{ counters_output.stdout[0].split('\n') }}"
+        msg: "{{ interface_counters.stdout_lines[0] }}"

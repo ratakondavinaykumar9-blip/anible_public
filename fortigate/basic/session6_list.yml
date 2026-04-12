@@ -1,36 +1,36 @@
 ---
-# FortiGate IPv6 Session Monitoring
-# Improved by: Architect:# Standards: Idempotency, Observability, FQCN, Robust Error Handling
-#
-- name: FortiGate IPv6 Sessions
+# FortiGate IPv6 Sessions - Improved Version
+# This playbook retrieves the current IPv6 session list from FortiGate devices.
+# It adheres to enterprise standards for observability, error handling, and FQCN usage.
+
+- name: Retrieve FortiGate IPv6 Sessions
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve IPv6 session list via CLI
-      # This operation is read-only and thus inherently idempotent.
-      # changed_when: false ensures the task report reflects its non-mutating nature.
+    - name: Execute command to list IPv6 sessions
+      # Using FQCN for cross-environment compatibility
       ansible.netcommon.cli_command:
         command: get system session6 list
-      register: sess_result
-      changed_when: false
+      register: sess_output
+      # Error Handling: Ensure we catch command parse errors or unsupported features
       failed_when:
-        - sess_result.failed or "Command fail" in sess_result.stdout
-        - "'Unknown' in sess_result.stdout"
+        - sess_output.failed | default(false)
+        - "'command parse error' in sess_output.stdout or 'Unknown action' in sess_output.stdout"
 
-    - name: Verify session retrieval success
-      # Observability: Assert that we actually received a valid response from the device.
+    - name: Validate that session output was received
+      # Observability: Assert ensures the playbook doesn't silently continue with empty data
       ansible.builtin.assert:
         that:
-          - sess_result.stdout is defined
-          - sess_result.stdout | length > 0
-        fail_msg: "The FortiGate did not return any session data or the command failed."
+          - sess_output.stdout is defined
+          - sess_output.stdout | length > 0
+        fail_msg: "No IPv6 session data was returned. Verify IPv6 is enabled on the device."
         quiet: true
 
-    - name: Display IPv6 Sessions
-      # Documentation: Visual confirmation of the current state for audit trails.
+    - name: Display formatted session list
+      # Documentation/Observability: Provides a clear view of the state for the operator
       ansible.builtin.debug:
         msg: |
           ======================= IPv6 SESSIONS =======================
-          {{ sess_result.stdout }}
-      when: not ansible_check_mode
+          {{ sess_output.stdout }}
+          =============================================================

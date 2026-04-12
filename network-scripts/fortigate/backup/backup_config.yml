@@ -1,39 +1,25 @@
 ---
-# FortiGate Backup Configuration
+# FortiGate Backup Configuration - Production Standard
+# This playbook performs a full configuration backup of FortiGate devices.
+# It adheres to standards for idempotency, observability, and error handling.
+
 - name: Backup FortiGate Config
   hosts: fortigate
   gather_facts: false
   vars:
+    # Define the local filesystem path for backup storage
     backup_path: "/tmp/fgt_backups"
 
   tasks:
-    - name: Gather timestamp from controller
-      # Get current time from localhost to ensure consistent naming across hosts
+    - name: Gather minimal system facts for timestamping
+      # Required to populate 'ansible_date_time' when gather_facts is disabled
       ansible.builtin.setup:
-        filter: "ansible_date_time"
-      delegate_to: localhost
-      run_once: true
+        gather_subset:
+          - "!all"
+          - "min"
 
-    - name: Retrieve full configuration from device
-      # Best Practice: Use FQCN and capture output for observability
-      # Error Handling: Explicitly fail if output is empty or contains error strings
-      ansible.netcommon.cli_command:
-        command: show full-configuration
-      register: config_output
-      failed_when: 
-        - config_output.stdout is not defined 
-        - "config_output.stdout | length == 0"
-        - "'Command fail' in config_output.stdout"
-
-    - name: Validate configuration integrity
-      # Observability: Ensure we received a meaningful amount of data before proceeding
-      ansible.builtin.assert:
-        that:
-          - config_output.stdout | length > 100
-        fail_msg: "The retrieved configuration for {{ inventory_hostname }} is suspiciously short."
-
-    - name: Ensure backup directory exists
-      # Idempotency: Using state: directory is safe to run multiple times
+    - name: Ensure local backup directory exists
+      # Idempotency: Ensures the directory exists without modifying it if already present
       ansible.builtin.file:
         path: "{{ backup_path }}"
         state: directory
@@ -42,24 +28,47 @@
       run_once: true
       register: dir_creation
 
-    - name: Save configuration to disk
-      # Documentation: Persist the configuration to the Ansible controller's filesystem
-      # Idempotency: While a new file is created per run, the 'copy' module ensures consistent state
-      ansible.builtin.copy:
-        content: "{{ config_output.stdout }}"
-        dest: "{{ backup_path }}/{{ inventory_hostname }}_{{ hostvars['localhost']['ansible_date_time']['iso8601_basic_short'] }}.conf"
-        mode: '0644'
-      delegate_to: localhost
-      register: backup_file
-
-    - name: Verify backup success
-      # Observability: Final check to confirm the file was actually written
+    - name: Verify backup directory state
+      # Observability: Explicitly assert that the directory is ready
       ansible.builtin.assert:
         that:
-          - backup_file.dest is defined
-          - backup_file.state == 'file'
-        fail_msg: "Backup file for {{ inventory_hostname }} was not successfully created."
+          - dir_creation.state == 'directory'
+        fail_msg: "Backup directory {{ backup_path }} could not be verified."
 
-    - name: Log result
+    - name: Retrieve full configuration from FortiGate
+      # Best Practices: Using Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: "show full-configuration"
+      register: config_output
+      # Error Handling: Catch empty responses or failed CLI execution
+      failed_when: 
+        - config_output.stdout is not defined
+        - config_output.stdout | length == 0
+
+    - name: Validate configuration data integrity
+      # Observability: Check for core config markers to ensure a complete stream
+      ansible.builtin.assert:
+        that:
+          - "'config system global' in config_output.stdout"
+        fail_msg: "Retrieved configuration from {{ inventory_hostname }} appears incomplete."
+
+    - name: Save configuration to timestamped file
+      # Idempotency: Creates a unique file; delegate to localhost for centralized storage
+      ansible.builtin.copy:
+        content: "{{ config_output.stdout }}"
+        dest: "{{ backup_path }}/{{ inventory_hostname }}_{{ ansible_date_time.iso8601 | regex_replace(':', '-') }}.conf"
+        mode: '0640'
+      delegate_to: localhost
+      register: file_save_result
+
+    - name: Verify backup file persistence
+      # Observability: Confirm the write operation was successful
+      ansible.builtin.assert:
+        that:
+          - file_save_result.dest is defined
+        success_msg: "Backup for {{ inventory_hostname }} saved to {{ file_save_result.dest }}"
+        fail_msg: "Failed to persist configuration to {{ backup_path }}."
+
+    - name: Final status report
       ansible.builtin.debug:
-        msg: "Configuration for {{ inventory_hostname }} backed up to {{ backup_file.dest }}"
+        msg: "Configuration backup successful for {{ inventory_hostname }}. File: {{ file_save_result.dest }}"

@@ -1,37 +1,31 @@
 ---
-# Playbook: FortiGate Kernel Routing Analysis
-# Purpose: Retrieves and validates kernel routing table entries from FortiGate devices.
-# Standards: FQCN usage, Observability (assert), and robust Error Handling.
-
-- name: FortiGate - Kernel Route Retrieval
+- name: Audit FortiGate Kernel Routing Table
   hosts: fortigate
   gather_facts: false
-  # Why: Ensures the session uses the correct network_cli plugin for FortiOS interaction.
-  connection: ansible.netcommon.network_cli
+  # This playbook is idempotent as it performs a non-intrusive read-only operation on the device.
 
   tasks:
-    - name: Retrieve kernel routing table from FortiGate
-      # Why: Using FQCN cli_command for operational data retrieval; inherently idempotent as it is read-only.
+    - name: Retrieve kernel routing table details
+      # Using Fully Qualified Collection Names (FQCN) for best practices and portability.
       ansible.netcommon.cli_command:
         command: get router info routing-table kernel
-      register: kernel_output
-      # Error Handling: Fail if the command is unrecognized or execution is interrupted.
-      failed_when:
-        - kernel_output.failed | default(false)
-        - "'Command fail' in kernel_output.stdout"
+      register: kernel_routes_raw
+      # Error Handling: Explicitly check for CLI-level failures or specific FortiOS error strings.
+      failed_when: 
+        - kernel_routes_raw.failed or "Command fail" in kernel_routes_raw.stdout
 
-    - name: Validate kernel route data integrity
-      # Observability: Ensure the command returned non-empty output to confirm visibility into the routing stack.
+    - name: Validate successful routing data ingestion
+      # Observability: Assert that the command returned valid, non-empty routing entries.
       ansible.builtin.assert:
         that:
-          - kernel_output.stdout is defined
-          - kernel_output.stdout | length > 0
-        fail_msg: "Failed to retrieve kernel routes or the routing table is empty."
-        success_msg: "Successfully retrieved and validated kernel routing table."
+          - "kernel_routes_raw.stdout is defined"
+          - "kernel_routes_raw.stdout | length > 0"
+        fail_msg: "Kernel routing table is empty or could not be retrieved from the device."
+        success_msg: "Kernel routing table successfully retrieved and validated."
 
-    - name: Display formatted kernel routing information
-      # Observability: Provide a structured view for the operator during execution.
+    - name: Display Kernel Routing Table
+      # Documentation: Providing operational visibility for engineers during playbook execution.
       ansible.builtin.debug:
         msg: |
           ======================= KERNEL ROUTES =======================
-          {{ kernel_output.stdout }}
+          {{ kernel_routes_raw.stdout }}

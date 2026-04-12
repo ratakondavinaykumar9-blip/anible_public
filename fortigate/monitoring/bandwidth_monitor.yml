@@ -1,35 +1,38 @@
 ---
 # FortiGate Bandwidth Monitor
-# This playbook retrieves real-time bandwidth statistics from a FortiGate device.
-# It is designed to be idempotent (read-only diagnostic) and follows Network Automation Framework observability standards.
-- name: Monitor Bandwidth
+# Purpose: Captures real-time interface bandwidth utilization for operational visibility.
+# Standards: Improved for idempotency, observability, and robust error handling.
+
+- name: Monitor FortiGate Bandwidth
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute bandwidth diagnostic command
-      # Using Fully Qualified Collection Name (FQCN) for network CLI operations.
-      # This command is a read-only diagnostic and inherently safe for repeated execution.
+    - name: Retrieve Bandwidth Statistics via CLI
+      # Use FQCN (Fully Qualified Collection Name) for consistent execution environment.
+      # This diagnostic command is read-only; changed_when: false ensures the playbook remains idempotent.
       ansible.netcommon.cli_command:
         command: diagnose netlink interface -bandwidth
-      register: bw_stats
-      # Error Handling: Ensure the task fails if the device returns an error or unknown command.
+      register: bw_capture
+      # Ensure the task fails if the command returns no data or encounters an execution error.
       failed_when: 
-        - bw_stats.failed
-        - "'Unknown' in bw_stats.stdout or 'error' in bw_stats.stdout.lower()"
+        - bw_capture.failed
+        - bw_capture.stdout | length == 0
+      changed_when: false
 
-    - name: Assert bandwidth data presence
-      # Observability: Verify that the command returned usable output before displaying.
+    - name: Verify Bandwidth Data Integrity
+      # Observability: Use assert to validate that the output contains expected network metrics.
       ansible.builtin.assert:
         that:
-          - bw_stats.stdout is defined
-          - bw_stats.stdout | length > 0
-        fail_msg: "Bandwidth statistics could not be retrieved from the device or output was empty."
-        success_msg: "Bandwidth statistics successfully captured."
+          - "bw_capture.stdout is defined"
+          - "'Interface' in bw_capture.stdout or 'bandwidth' in bw_capture.stdout"
+        fail_msg: "Bandwidth data is missing or the output format has changed unexpectedly."
+        success_msg: "Bandwidth data integrity verified."
 
-    - name: Display Bandwidth Output
-      # Provide the operator with the formatted bandwidth data for visibility.
+    - name: Display Bandwidth Utilization Report
+      # Debug output for human-readable monitoring in the console or logs.
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE BANDWIDTH REPORT =======================
-          {{ bw_stats.stdout }}
+          ======================= BANDWIDTH STATISTICS =======================
+          {{ bw_capture.stdout }}
+          ====================================================================

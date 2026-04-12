@@ -1,34 +1,44 @@
 ---
-# FortiGate HA Configuration Verification
-# Improved: 2026-03-08
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-#
-- name: Get HA Configuration
+# FortiGate HA Status Verification Playbook
+# Improved for: Idempotency, Observability, Documentation, Error Handling, and FQCN.
+- name: FortiGate HA Configuration Assessment
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve HA configuration from device
-      # FQCN: Using ansible.netcommon.cli_command for cross-platform compatibility
-      # Observability: Output is registered to 'ha_config' for subsequent validation
+    - name: Retrieve High Availability configuration from FortiGate
+      # Why: Fetches current system HA status to verify cluster membership. 
+      # This 'get' command is inherently idempotent as it performs no state changes.
       ansible.netcommon.cli_command:
         command: get system ha
-      register: ha_config
-      # Error Handling: Ensure the task fails if the return code is non-zero or output indicates failure
+      register: ha_status
+      # Error Handling: Explicitly fail if the command returns a non-zero exit code or FortiOS error string.
       failed_when: 
-        - ha_config.rc | default(0) != 0
-        - "'command parse error' in ha_config.stdout"
+        - ha_status.rc != 0
+        - "'Command fail' in ha_status.stdout"
 
-    - name: Validate HA configuration retrieval
-      # Observability: Asserting that the output is not empty and contains expected HA keywords
-      # This ensures the playbook doesn't proceed with garbage data
+    - name: Validate HA command execution success
+      # Why: Observability - confirms that the device returned a valid, non-empty response.
       ansible.builtin.assert:
         that:
-          - ha_config.stdout is defined
-          - ha_config.stdout | length > 0
-          - "'mode' in ha_config.stdout"
-        fail_msg: "HA configuration retrieval failed or returned unexpected content."
-        success_msg: "HA configuration successfully retrieved and validated."
+          - ha_status.stdout is defined
+          - ha_status.stdout | length > 0
+        fail_msg: "Failed to retrieve HA configuration or device returned empty output."
+        success_msg: "HA configuration successfully retrieved and registered."
 
-    - name: Display formatted HA Configuration
-      # Documentation
+    - name: Verify HA Cluster Operational Mode
+      # Why: Ensures the device is actually part of an HA cluster and not in standalone mode.
+      ansible.builtin.assert:
+        that:
+          - "'mode: standalone' not in ha_status.stdout"
+        fail_msg: "WARNING: Device is in standalone mode! HA cluster may be down or unconfigured."
+        success_msg: "Device is confirmed to be in an HA cluster mode (A-P or A-A)."
+      # ignore_errors: Used here to allow audit plays to continue even if HA is not active.
+      ignore_errors: true
+
+    - name: Display HA Configuration Details
+      # Why: Provides human-readable output for visibility into the HA cluster state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= HA OPERATIONAL STATUS =======================
+          {{ ha_status.stdout }}

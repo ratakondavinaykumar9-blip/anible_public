@@ -1,34 +1,35 @@
 ---
-# FortiGate Aggregate Interfaces
-# Purpose: Retrieve and verify the status of aggregate (LACP) interfaces.
-# Standards: Idempotent (Read-only), FQCN usage, and validated observability.
-- name: Get Aggregate Interfaces
+# Improved FortiGate Aggregate Interfaces Playbook
+# Standardized by NetLearner Architect
+# Focus: Idempotency, Observability, and Robust Error Handling
+- name: Retrieve and Verify FortiGate Aggregate Interface Status
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve aggregate interface status from device
-      # Using FQCN for consistent cross-platform execution
+    - name: Fetch aggregate interface status via CLI
+      # Use FQCN for network command execution; read-only 'get' ensures idempotency
       ansible.netcommon.cli_command:
         command: get system aggregate
       register: agg_result
-      # Error Handling: Ensure the command is recognized by FortiOS and executed successfully
-      failed_when:
-        - agg_result.rc != 0
-        - "'Unknown action' in agg_result.stdout"
+      # Error Handling: Fail if command is unrecognized by the device or transport fails
+      failed_when: 
+        - agg_result.failed or "Unknown action" in agg_result.stdout or "Command fail" in agg_result.stdout
+      # Idempotency: Ensure read-only operations do not report a 'changed' state
+      changed_when: false
 
     - name: Validate aggregate data retrieval
-      # Observability: Assert that the command returned content to verify operational success
+      # Observability: Assert that the output is populated and contains expected content
       ansible.builtin.assert:
         that:
           - agg_result.stdout is defined
           - agg_result.stdout | length > 0
-        fail_msg: "Command 'get system aggregate' failed to return data. Check device configuration."
-        success_msg: "Aggregate interface information successfully retrieved."
+        fail_msg: "Aggregate interface data could not be retrieved or is empty."
+        success_msg: "Aggregate interface data successfully captured."
 
-    - name: Display aggregate interface details
-      # Documentation: Formatted output for visibility into device state
+    - name: Display Aggregate Interface Details
+      # Documentation: Provide a structured view of the command output for audit logs
       ansible.builtin.debug:
         msg: |
-          ======================= AGGREGATE STATUS =======================
+          ======================= FORTIGATE AGGREGATE STATUS =======================
           {{ agg_result.stdout }}

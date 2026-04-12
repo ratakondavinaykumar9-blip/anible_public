@@ -1,34 +1,36 @@
 ---
 # FortiGate IPAM Status Retrieval
-# Purpose: Fetches the current IPAM configuration and state for visibility and auditing.
-# Standards: Idempotent (Read-only), Observable (Asserts), FQCN usage.
-
-- name: FortiGate IPAM Status
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Get FortiGate IPAM Status
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Fetch IPAM status via CLI
-      # Use FQCN to execute the operational command on the network device
+    - name: Fetch IPAM status from system
+      # Why: Retrieves the current IP Address Management (IPAM) configuration and state.
+      # FQCN used for platform-independent CLI interaction.
       ansible.netcommon.cli_command:
         command: get system ipam
       register: ipam_status
-      # Error Handling: Ensure the task fails if the device returns common error strings
-      failed_when:
-        - ipam_status.failed or "Unknown action" in ipam_status.stdout or "Command fail" in ipam_status.stdout
+      # Error Handling: Fail explicitly if the command is unrecognized or execution fails.
+      failed_when: 
+        - ipam_status.failed | default(false)
+        - "'unknown' in ipam_status.stderr or 'error' in ipam_status.stderr"
 
-    - name: Verify IPAM status retrieval
-      # Observability: Assert that the command actually returned data for validation
+    - name: Verify IPAM status data integrity
+      # Observability: Ensure the result is defined and contains data before proceeding.
       ansible.builtin.assert:
         that:
           - ipam_status.stdout is defined
           - ipam_status.stdout | length > 0
-        fail_msg: "IPAM status retrieval failed or returned empty results."
-        success_msg: "IPAM status successfully retrieved."
+        fail_msg: "IPAM status retrieval failed or returned empty output on {{ inventory_hostname }}"
+        success_msg: "IPAM status successfully captured for {{ inventory_hostname }}"
 
     - name: Display IPAM Status
-      # Documentation/Observability: Output the results for the operator
+      # Documentation: Formatted output for operator visibility and audit logging.
       ansible.builtin.debug:
         msg: |
-          ======================= IPAM STATUS =======================
+          ==============================================================================
+          IPAM STATUS REPORT: {{ inventory_hostname }}
+          ==============================================================================
           {{ ipam_status.stdout }}

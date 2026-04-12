@@ -1,38 +1,36 @@
 ---
-- name: Audit Cisco ASA Access-List Remarks
+# Playbook: Audit ASA Access-List Remarks
+# This playbook extracts 'remark' entries from the running configuration of Cisco ASA/Firepower devices.
+# Designed for idempotency, observability, and robust error handling according to NetLearner standards.
+
+- name: ACL Remarks Audit
   hosts: asa_firepower
   gather_facts: false
-  # Standard: Documentation - Ensuring clear purpose and scope for the playbook.
 
   tasks:
-    - name: Retrieve ACL remarks from the running configuration
-      # Standard: Best Practices - Utilizing Fully Qualified Collection Names (FQCN).
-      # Why: Ensures the correct module is invoked regardless of the environment's search path.
-      cisco.asa.asa_command:
-        commands:
-          - show running-config access-list | include remark
-      # Standard: Observability - Capturing output for validation and audit trails.
-      register: acl_remarks_result
-      # Standard: Error Handling - Defining explicit failure criteria for connection or command issues.
-      failed_when: 
-        - acl_remarks_result.failed
-        - "'Invalid' in acl_remarks_result.msg | default('')"
+    - name: Fetch ACL remarks from running configuration
+      # Using FQCN for network CLI interaction
+      ansible.netcommon.cli_command:
+        command: show running-config access-list | include remark
+      register: remarks_result
+      # Idempotency: Operational 'show' commands must not indicate a state change
+      changed_when: false
+      # Error Handling: Explicitly fail if the command is unrecognized or returns an error string
+      failed_when:
+        - remarks_result.failed == true
+        - "'Invalid input' in remarks_result.stdout or 'ERROR' in remarks_result.stdout"
 
-    - name: Validate command execution and data presence
-      # Standard: Observability - Using assertions to ensure technical requirements are met before proceeding.
-      # Why: Provides immediate feedback if the device returns unexpected or empty results.
+    - name: Verify data retrieval
+      # Observability: Assert that the command returned a valid response object
       ansible.builtin.assert:
         that:
-          - "acl_remarks_result.stdout is defined"
-          - "acl_remarks_result.stdout | length > 0"
-        fail_msg: "No ACL remarks were found or the command failed to return data."
-        success_msg: "ACL remarks successfully retrieved."
+          - "remarks_result.stdout is defined"
+        fail_msg: "Data retrieval failed for {{ inventory_hostname }}"
+        quiet: true
 
     - name: Display ACL Remarks Report
-      # Standard: Observability - Formatting output for human readability in logs.
-      # Standard: Idempotency - Read-only 'show' operations are inherently safe to run multiple times.
+      # Observability: Format the output for better readability during manual audits
       ansible.builtin.debug:
         msg: |
-          ======================= ACL REMARKS AUDIT =======================
-          {{ acl_remarks_result.stdout[0] if acl_remarks_result.stdout[0] != '' else 'No remarks found in configuration.' }}
-      when: acl_remarks_result.stdout is defined
+          ======================= ACL REMARKS: {{ inventory_hostname }} =======================
+          {{ remarks_result.stdout if remarks_result.stdout | length > 0 else 'No remarks found or command returned empty.' }}

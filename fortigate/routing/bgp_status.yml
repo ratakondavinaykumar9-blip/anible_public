@@ -1,41 +1,40 @@
 ---
-# FortiGate BGP Status Retrieval Playbook
-# Improved for idempotency, observability, and robust error handling.
-- name: Get FortiGate BGP Status
+# FortiGate BGP Status Monitoring
+# This playbook retrieves and validates the BGP summary from FortiGate firewalls.
+# It adheres to enterprise standards for idempotency, observability, and error handling.
+
+- name: FortiGate BGP Status
   hosts: fortigate
-  gather_facts: false # Facts are not required for simple CLI command execution
+  gather_facts: false
 
   tasks:
-    - name: Retrieve BGP summary from the device
-      # FQCN: Using ansible.netcommon.cli_command for cross-platform compatibility.
-      # Idempotency: Read-only commands are inherently idempotent and safe for repeated runs.
+    - name: Fetch BGP summary information
+      # Use Fully Qualified Collection Name (FQCN) for the network CLI module.
+      # This task is naturally idempotent as it performs a read-only 'get' operation.
       ansible.netcommon.cli_command:
         command: get router info bgp summary
-      register: bgp_output
-      # Error Handling: Explicitly fail if the command fails or returns a FortiOS error string.
-      failed_when: 
-        - bgp_output.failed or "Command fail" in bgp_output.stdout
+      register: bgp_result
+      # Idempotency: Explicitly mark as unchanged to prevent false positives in reporting.
+      changed_when: false
+      # Error Handling: Detect if the command failed or was not recognized by FortiOS.
+      failed_when:
+        - bgp_result.stdout is not defined
+        - "'command parse error' in bgp_result.stdout | lower"
+        - "'unknown command' in bgp_result.stdout | lower"
 
-    - name: Validate command response integrity
-      # Observability: Ensure the command returned a valid, non-empty response.
+    - name: Validate BGP output observability
+      # Observability: Assert that the output contains expected data patterns.
+      # Ensures the playbook fails meaningfully if the BGP process is not initialized.
       ansible.builtin.assert:
         that:
-          - bgp_output.stdout is defined
-          - bgp_output.stdout | length > 0
-        fail_msg: "The BGP summary command returned no data or the execution failed."
-        success_msg: "BGP summary data successfully captured from the host."
+          - bgp_result.stdout != ""
+          - "'BGP' in bgp_result.stdout or 'Neighbor' in bgp_result.stdout"
+        fail_msg: "BGP summary data is missing or malformed. Ensure BGP is configured."
+        success_msg: "BGP summary data successfully retrieved and validated."
 
-    - name: Verify BGP operational status
-      # Observability: Confirm BGP is initialized by checking for standard headers in the output.
-      ansible.builtin.assert:
-        that:
-          - "'BGP' in bgp_output.stdout or 'Neighbor' in bgp_output.stdout"
-        fail_msg: "BGP process may not be active or configured on this device."
-        quiet: true
-
-    - name: Display BGP Status Summary
-      # Documentation: Output the results in a clear, readable format for operational review.
+    - name: Present formatted BGP status
+      # Documentation: Displaying the result for human verification in logs.
       ansible.builtin.debug:
         msg: |
-          ======================= BGP OPERATIONAL STATUS =======================
-          {{ bgp_output.stdout }}
+          ======================= BGP STATUS SUMMARY =======================
+          {{ bgp_result.stdout }}

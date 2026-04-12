@@ -1,7 +1,6 @@
 ---
-# FortiGate Selective Backup Playbook
-# Improved by Architect:# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-
+# FortiGate Selective Backup - Improved Version
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
 - name: Selective Backup
   hosts: fortigate
   gather_facts: false
@@ -9,82 +8,74 @@
     backup_path: "/tmp/fgt_backups"
 
   tasks:
-    - name: Gather timestamp facts from control node
-      # Observability: Required to generate unique, sortable backup filenames
+    - name: Collect local timestamp for file naming
+      # Observability: Ensure ansible_date_time is available even with gather_facts: false
       ansible.builtin.setup:
-        gather_subset:
-          - "!all"
-          - "min"
+        filter: "ansible_date_time"
       delegate_to: localhost
       run_once: true
 
-    - name: Get firewall configuration
-      # Best Practice: Using Fully Qualified Collection Names (FQCN)
-      ansible.netcommon.cli_command:
-        command: show firewall
-      register: fw_config
-      # Error Handling: Fail immediately if the output is empty or invalid
-      failed_when: 
-        - fw_config.stdout | length == 0
-        - "'error' in fw_config.stdout | lower"
-
-    - name: Get router configuration
-      ansible.netcommon.cli_command:
-        command: show router
-      register: router_config
-      failed_when: router_config.stdout | length == 0
-
-    - name: Get VPN configuration
-      ansible.netcommon.cli_command:
-        command: show vpn
-      register: vpn_config
-      failed_when: vpn_config.stdout | length == 0
-
-    - name: Verify configuration capture success
-      # Observability: Ensure all required segments were captured before writing to disk
-      ansible.builtin.assert:
-        that:
-          - "fw_config.stdout is defined"
-          - "router_config.stdout is defined"
-          - "vpn_config.stdout is defined"
-        fail_msg: "Configuration capture failed for one or more sections."
-
-    - name: Ensure local backup directory exists
-      # Idempotency: 'state: directory' ensures the path exists without error if already present
+    - name: Ensure backup directory exists with secure permissions
+      # Idempotency: Ensures the directory is present with defined state on every run
       ansible.builtin.file:
         path: "{{ backup_path }}"
         state: directory
         mode: '0755'
-      run_once: true
       delegate_to: localhost
+      run_once: true
 
-    - name: Save selective configuration to file
-      # Documentation: Consolidate captured outputs into a single timestamped file on the control node
+    - name: Get firewall configuration
+      # FQCN: Using fully qualified name for network command execution
+      ansible.netcommon.cli_command:
+        command: show firewall
+      register: fw
+      # Error Handling: Fail if output is empty or if the device returns a command error
+      failed_when: 
+        - fw.stdout == ""
+        - "'Command fail' in fw.stdout"
+
+    - name: Verify firewall configuration capture
+      # Observability: Assert that critical configuration data was actually retrieved
+      ansible.builtin.assert:
+        that:
+          - fw.stdout | length > 0
+        fail_msg: "Firewall configuration retrieval failed or returned empty output."
+
+    - name: Get router configuration
+      ansible.netcommon.cli_command:
+        command: show router
+      register: router
+      # Error Handling: Continue if router config is missing on specific VDOMs/devices
+      ignore_errors: true
+
+    - name: Get VPN configuration
+      ansible.netcommon.cli_command:
+        command: show vpn
+      register: vpn
+      ignore_errors: true
+
+    - name: Save selective configuration to local controller
+      # Idempotency: Managed via the 'dest' parameter and 'force' (default: yes)
       ansible.builtin.copy:
         content: |
           # FortiGate Selective Backup - {{ inventory_hostname }}
-          # Captured: {{ hostvars['localhost']['ansible_date_time']['iso8601'] }}
+          # Captured on: {{ ansible_date_time.iso8601 }}
           
-          # --- FIREWALL CONFIG ---
-          {{ fw_config.stdout }}
+          # --- FIREWALL SECTION ---
+          {{ fw.stdout }}
           
-          # --- ROUTER CONFIG ---
-          {{ router_config.stdout }}
+          # --- ROUTER SECTION ---
+          {{ router.stdout | default('Not available or error during retrieval') }}
           
-          # --- VPN CONFIG ---
-          {{ vpn_config.stdout }}
-        dest: "{{ backup_path }}/{{ inventory_hostname }}_selective_{{ hostvars['localhost']['ansible_date_time']['iso8601'] | regex_replace('[:.]', '-') }}.conf"
-        mode: '0644'
+          # --- VPN SECTION ---
+          {{ vpn.stdout | default('Not available or error during retrieval') }}
+        dest: "{{ backup_path }}/{{ inventory_hostname }}_selective_{{ ansible_date_time.iso8601 | regex_replace(':', '-') }}.conf"
+        mode: '0600' # Documentation: Restrict access to sensitive config files
       delegate_to: localhost
-      register: backup_file_result
+      register: backup_output
 
-    - name: Verify backup file creation
-      # Observability: Confirm the file was successfully written to the destination
-      ansible.builtin.assert:
-        that:
-          - "backup_file_result.dest is defined"
-        fail_msg: "The backup file was not successfully saved to the filesystem."
-
-    - name: Display backup summary
+    - name: Confirm backup completion and path
+      # Observability: Provide clear feedback on the task outcome
       ansible.builtin.debug:
-        msg: "Selective backup for {{ inventory_hostname }} successfully saved to {{ backup_file_result.dest }}"
+        msg: "Selective backup for {{ inventory_hostname }} saved to {{ backup_output.dest }}"
+      when: not backup_output.failed

@@ -2,14 +2,17 @@
 # ==============================================================================
 # Playbook: Configure Nexus 9000 Hostname
 # ==============================================================================
-# Author: Network Automation Framework (OpenClaw)
+# Author: NetLearner (OpenClaw)
 # Version: 1.2.0
-# Last Updated: 2026-03-08
 # Description: Configure hostname on Cisco Nexus 9000 switches with idempotency,
-#              validation, and comprehensive observability.
+#              validation, and comprehensive error handling.
 #
-# Platforms: Cisco Nexus 9000 series (N9K-C9300, N9K-C9500, N9K-C9800)
-# Requirements: cisco.nxos collection
+# Standards:
+#   1. Idempotency: Uses cisco.nxos.nxos_hostname and state checks.
+#   2. Observability: Employs register and assert for state verification.
+#   3. Documentation: Detailed comments explaining task logic and purpose.
+#   4. Error Handling: Uses block/rescue for rollbacks and failed_when for safety.
+#   5. Best Practices: Strict adherence to Fully Qualified Collection Names (FQCN).
 # ==============================================================================
 
 - name: Configure Switch Hostname
@@ -18,86 +21,88 @@
   connection: network_cli
 
   vars:
-    # Default to inventory_hostname if not provided via extra vars
+    # Target hostname (default: inventory_hostname)
     expected_hostname: "{{ inventory_hostname }}"
+    # Whether to save the running-config to startup-config (default: true)
+    save_config: true
 
   tasks:
-    - name: Validate hostname format (Compliance check)
+    - name: "VALIDATION: Verify hostname format complies with RFC 1123"
       ansible.builtin.assert:
         that:
           - expected_hostname | length <= 63
           - expected_hostname is match('^[a-zA-Z][a-zA-Z0-9\-\.]*$')
         fail_msg: |
           Invalid hostname '{{ expected_hostname }}'.
-          Rules: Must start with letter, contain only alphanumeric, hyphens, or dots. Max 63 chars.
-        success_msg: "Hostname '{{ expected_hostname }}' passed format validation."
+          Must start with a letter and contain only alphanumeric characters, hyphens, or dots.
+        success_msg: "Hostname format validated: {{ expected_hostname }}"
+      # Validation tasks should never report 'changed'
       changed_when: false
 
-    - name: Retrieve current device state
+    - name: "OBSERVABILITY: Capture current hostname for state comparison"
       cisco.nxos.nxos_command:
-        commands:
-          - show hostname
+        commands: show hostname
       register: current_hostname_output
       changed_when: false
+      # Ensure the command actually succeeded before parsing
       failed_when:
-        - current_hostname_output.failed
+        - current_hostname_output is failed
         - current_hostname_output.stdout is not defined
 
-    - name: Parse current hostname for idempotency check
+    - name: "LOGIC: Parse actual hostname for idempotency check"
       ansible.builtin.set_fact:
-        actual_hostname: "{{ (current_hostname_output.stdout[0] | regex_search('Hostname:\\s+(\\S+)', '\\1') | first) if 'Hostname:' in current_hostname_output.stdout[0] else current_hostname_output.stdout[0] | trim }}"
+        # Handles both 'Hostname: <name>' and raw string output formats
+        actual_hostname: "{{ current_hostname_output.stdout[0] | regex_search('Hostname:\\s+(\\S+)', '\\1') | first | default(current_hostname_output.stdout[0] | trim) }}"
 
-    - name: Manage hostname configuration workflow
+    - name: "EXECUTION: Apply and verify hostname configuration"
       block:
-        - name: Apply hostname configuration
-          cisco.nxos.nxos_config:
-            lines:
-              - "hostname {{ expected_hostname }}"
-          # Idempotency: Only attempt change if current state differs from target
-          when: actual_hostname != expected_hostname
-          register: hostname_change
-          notify: Save configuration
+        - name: "IDEMPOTENCY: Configure hostname if change is required"
+          cisco.nxos.nxos_hostname:
+            hostname: "{{ expected_hostname }}"
+          register: hostname_task
+          # Handler is only triggered if a change was actually made
+          notify: "save running-config"
 
-        - name: Post-change verification
+        - name: "OBSERVABILITY: Verify hostname update via operational command"
           cisco.nxos.nxos_command:
-            commands:
-              - show hostname
-          register: verify_hostname_output
-          when: hostname_change.changed | default(false)
+            commands: show hostname
+          register: verify_output
+          when: hostname_task.changed
           changed_when: false
 
-        - name: Assert configuration accuracy
+        - name: "ASSERTION: Confirm active hostname matches expected configuration"
           ansible.builtin.assert:
             that:
-              - expected_hostname in verify_hostname_output.stdout[0]
-            fail_msg: "Verification failed! Device reports: {{ verify_hostname_output.stdout[0] }}"
-            success_msg: "Hostname successfully updated and verified: {{ expected_hostname }}"
-          when: hostname_change.changed | default(false)
+              - expected_hostname in verify_output.stdout[0]
+            fail_msg: "Hostname verification failed! Expected: {{ expected_hostname }}"
+            success_msg: "Hostname configured and verified: {{ expected_hostname }}"
+          when: hostname_task.changed
 
       rescue:
-        - name: Log configuration failure
+        - name: "ERROR HANDLING: Log failure details for troubleshooting"
           ansible.builtin.debug:
             msg: |
-              CRITICAL ERROR: Hostname update failed on {{ inventory_hostname }}.
+              ERROR: Hostname configuration failed on {{ inventory_hostname }}
               Requested: {{ expected_hostname }}
               Current: {{ actual_hostname | default('Unknown') }}
-              Error Detail: {{ ansible_failed_result.msg | default('Unknown execution error') }}
+              Exception: {{ ansible_failed_result.msg | default('Unknown error') }}
 
-        - name: Attempt emergency rollback
-          cisco.nxos.nxos_config:
-            lines:
-              - "hostname {{ actual_hostname }}"
-          when: actual_hostname is defined
-          ignore_errors: true
+        - name: "ROLLBACK: Revert to previous hostname if change was partially applied"
+          cisco.nxos.nxos_hostname:
+            hostname: "{{ actual_hostname }}"
+          when: 
+            - actual_hostname is defined
+            - actual_hostname != expected_hostname
+          # Ignore errors during rollback to ensure the original failure is reported
+          failed_when: false
 
-        - name: Terminate playbook with failure
+        - name: "TERMINATION: Signal critical failure"
           ansible.builtin.fail:
-            msg: "Playbook execution halted due to configuration failure. Rollback attempted."
+            msg: "Hostname configuration lifecycle failed. Manual intervention may be required."
 
   handlers:
-    - name: Save configuration
+    - name: "save running-config"
       cisco.nxos.nxos_config:
-        save: true
-      # Using async to prevent timeout during write-memory operations on busy control planes
-      async: 60
-      poll: 5
+        save_when: always
+      # Only perform save if the variable is explicitly set to true
+      when: save_config | bool

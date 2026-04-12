@@ -1,0 +1,146 @@
+---
+# ==============================================================================
+# Playbook: Backup ASA Configuration
+# ==============================================================================
+# Author: NetLearner Architect (Refined from Arjun's version)
+# Version: 1.2.0
+# Last Updated: 2026-03-15
+# Description: Backup running and startup configurations from Cisco ASA/Firepower
+#              devices with strict idempotency, observability, and FQCN usage.
+#
+# Standards Applied:
+#   - Idempotency: Removed forced 'changed_when: true' to rely on module logic.
+#   - Observability: Added assertions for config validity and size.
+#   - Documentation: Detailed comments explaining task logic.
+#   - Error Handling: Enhanced block/rescue logic with detailed failure logging.
+#   - Best Practices: Fully Qualified Collection Names (FQCN) throughout.
+# ==============================================================================
+
+- name: Backup ASA Configuration
+  hosts: asa_firepower
+  gather_facts: false
+  connection: network_cli
+
+  vars:
+    # Directory to store backups on the local control node
+    backup_path: "/tmp/asa_backups"
+    # Use the now() function for dynamic timestamping without requiring fact gathering
+    timestamp: "{{ now(fmt='%Y%m%dT%H%M%S') }}"
+    backup_name: "{{ inventory_hostname }}_{{ timestamp }}"
+    # Retention period in days for older configuration files
+    retention_days: 30
+    # Toggle to include/exclude sensitive data (e.g., keys, passwords)
+    include_sensitive: false
+    # Safety limit for configuration file size (in MB)
+    max_backup_size_mb: 10
+
+  tasks:
+    - name: Ensure backup storage directory exists on localhost
+      ansible.builtin.file:
+        path: "{{ backup_path }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+      # Idempotency: The module only reports a change if the directory is missing.
+
+    - name: Execute device backup and validation sequence
+      block:
+        - name: Retrieve running configuration from ASA
+          cisco.asa.asa_command:
+            commands: 
+              - "show running-config {{ 'all' if include_sensitive else '' }}"
+          register: running_config
+          changed_when: false
+          # Commands are read-only; they should never report a change.
+
+        - name: Retrieve startup configuration from ASA
+          cisco.asa.asa_command:
+            commands: 
+              - show startup-config
+          register: startup_config
+          changed_when: false
+
+        - name: Validate configuration integrity and size
+          ansible.builtin.assert:
+            that:
+              - running_config.stdout[0] is defined
+              - running_config.stdout[0] | length > 0
+              - (running_config.stdout[0] | length) < (max_backup_size_mb * 1024 * 1024)
+            fail_msg: "Configuration validation failed for {{ inventory_hostname }}. Check size or connectivity."
+            success_msg: "Configuration validation passed for {{ inventory_hostname }}."
+
+        - name: Persist running configuration to disk
+          ansible.builtin.copy:
+            content: "{{ running_config.stdout[0] }}"
+            dest: "{{ backup_path }}/{{ backup_name }}_running.cfg"
+            mode: '0640'
+          delegate_to: localhost
+          register: running_save
+          # Idempotency: Copy module compares checksums before writing to avoid redundant updates.
+
+        - name: Persist startup configuration to disk
+          ansible.builtin.copy:
+            content: "{{ startup_config.stdout[0] }}"
+            dest: "{{ backup_path }}/{{ backup_name }}_startup.cfg"
+            mode: '0640'
+          delegate_to: localhost
+          register: startup_save
+
+        - name: Generate backup metadata for audit trails
+          ansible.builtin.copy:
+            content: |
+              # ASA Backup Metadata
+              hostname: {{ inventory_hostname }}
+              timestamp: {{ now(fmt='%Y-%m-%d %H:%M:%S') }}
+              running_config_size: {{ running_config.stdout[0] | length }} bytes
+              startup_config_size: {{ startup_config.stdout[0] | length }} bytes
+              include_sensitive: {{ include_sensitive }}
+              status: success
+            dest: "{{ backup_path }}/{{ backup_name }}_metadata.yml"
+            mode: '0640'
+          delegate_to: localhost
+
+      rescue:
+        - name: Report backup failure for host
+          ansible.builtin.debug:
+            msg: "CRITICAL: Backup failed for {{ inventory_hostname }}. Error: {{ ansible_failed_result.msg | default('Connection or command failure') }}"
+
+        - name: Create failure persistence log
+          ansible.builtin.copy:
+            content: |
+              Timestamp: {{ now() }}
+              Hostname: {{ inventory_hostname }}
+              Failure Detail: {{ ansible_failed_result | to_nice_json }}
+            dest: "{{ backup_path }}/{{ inventory_hostname }}_last_failure.log"
+          delegate_to: localhost
+
+      always:
+        - name: Display execution summary
+          ansible.builtin.debug:
+            msg: |
+              ========================================
+              Backup Summary: {{ inventory_hostname }}
+              ========================================
+              Status: {{ 'SUCCESS' if (running_save is defined and not running_save.failed) else 'FAILED' }}
+              Base Filename: {{ backup_name }}
+              ========================================
+          when: not ansible_check_mode
+
+    - name: Query for expired backup files
+      ansible.builtin.find:
+        paths: "{{ backup_path }}"
+        patterns: "{{ inventory_hostname }}_*"
+        age: "{{ retention_days }}d"
+      delegate_to: localhost
+      register: expired_backups
+      changed_when: false
+
+    - name: Purge backups exceeding retention policy
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ expired_backups.files }}"
+      delegate_to: localhost
+      when: expired_backups.matched > 0
+      # Idempotency: state 'absent' is a safe no-op if the file is already gone.

@@ -1,33 +1,34 @@
 ---
-# Per-Interface Traffic Rate Analysis
-# Standard: Idempotency - This is a read-only command and is inherently safe for repeated execution.
 - name: Get Interface Traffic Rates
   hosts: asa_firepower
   gather_facts: false
+  # This playbook is inherently idempotent as it performs read-only monitoring 
+  # and does not modify the device configuration state.
 
   tasks:
-    - name: Retrieve interface traffic statistics
-      # FQCN: Using fully qualified collection names for best practices and portability
+    - name: Retrieve per-interface traffic statistics from the security appliance
+      # Use Fully Qualified Collection Name (FQCN) for the command module.
+      # We register the output to enable observability and validation in subsequent steps.
       ansible.netcommon.cli_command:
         command: show traffic
-      register: traffic_result
-      # Error Handling: Ensure the task fails if the device returns an error message
+      register: traffic_output
+      # Error Handling: Fail the task if the output is empty or indicates a CLI syntax error.
       failed_when:
-        - traffic_result.failed or "Invalid input" in traffic_result.stdout
-        - "'ERROR' in traffic_result.stdout"
+        - traffic_output.stdout | length == 0
+        - "'Invalid input' in traffic_output.stdout"
 
-    - name: Verify traffic data collection
-      # Observability: Assert that the command returned actual data for validation
+    - name: Validate that traffic statistics were successfully captured
+      # Observability: Assert that the output contains expected keywords (e.g., 'interface').
+      # This ensures the playbook doesn't report "success" on garbled or incomplete data.
       ansible.builtin.assert:
         that:
-          - "traffic_result.stdout is defined"
-          - "traffic_result.stdout | length > 0"
-        fail_msg: "Traffic statistics could not be retrieved or the output was empty."
-        success_msg: "Traffic statistics successfully captured and validated."
+          - "'interface' in traffic_output.stdout | lower"
+        fail_msg: "The 'show traffic' command did not return expected interface data."
+        success_msg: "Successfully verified the presence of interface traffic statistics."
 
-    - name: Display traffic rates to console
-      # Observability: Provide a formatted view of the collected data for the operator
+    - name: Display formatted traffic rates for operational visibility
+      # Outputting the data for human review.
       ansible.builtin.debug:
         msg: |
           ======================= TRAFFIC RATES =======================
-          {{ traffic_result.stdout }}
+          {{ traffic_output.stdout }}

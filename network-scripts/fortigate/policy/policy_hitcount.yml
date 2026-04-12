@@ -1,39 +1,36 @@
 ---
-# FortiGate Policy Hit Count Retrieval
-# This playbook retrieves real-time hit count statistics for firewall policies.
-# It adheres to Standard:s for robustness and observability.
-- name: Get FortiGate Policy Hit Counts
+# Playbook: FortiGate Policy Hit Count Retrieval
+# Purpose: This playbook retrieves policy hit counts from FortiGate devices to support audit and optimization.
+# Standards: Idempotent (Read-only), Observable (Assertions), Documented, FQCN compliant.
+- name: Get Policy Hit Count
   hosts: fortigate
   gather_facts: false
-  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Execute hitcount command on FortiOS CLI
-      # Use FQCN for portability. This is a read-only operation and thus idempotent.
+    - name: Fetch hit count data from firewall
+      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interaction.
       ansible.netcommon.cli_command:
         command: get firewall policy hitcount
-      register: hits_raw
-      # Error Handling: Fail if the command is unrecognized or execution fails.
+      register: hits
+      # Idempotency: Marked as changed: false because this is a non-mutating 'get' command.
+      # This ensures the playbook is safe to run multiple times without indicating drift.
+      changed_when: false
+      # Error Handling: Explicitly check for common CLI failure indicators or "error" strings in the output.
       failed_when:
-        - hits_raw.failed
-        - "'Unknown command' in hits_raw.stdout or 'Command fail' in hits_raw.stdout"
+        - hits.failed or "Unknown action" in hits.stdout or "error" in hits.stdout.lower()
 
-    - name: Verify command output integrity
-      # Observability: Assert that we received a non-empty response from the device.
+    - name: Assert hit count data is present
+      # Observability: Verify that the output is defined and not empty to confirm the command executed correctly.
       ansible.builtin.assert:
         that:
-          - hits_raw.stdout is defined
-          - hits_raw.stdout | length > 0
-        fail_msg: "The hit count command returned no data. Check policy configuration."
-        success_msg: "Hit count data successfully captured."
+          - hits.stdout is defined
+          - hits.stdout | length > 0
+        fail_msg: "Data retrieval failed or the output was empty. Verify policy existence and permissions."
+        success_msg: "Successfully captured policy hit count data."
 
-    - name: Display formatted hit count report
-      # Documentation: Outputting the results in a readable format for the operator.
+    - name: Display Policy Hit Count results
+      # Documentation: Present the raw command output in a formatted block for operator visibility.
       ansible.builtin.debug:
         msg: |
-          ======================= POLICY HIT COUNT REPORT =======================
-          Timestamp: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
-          Device: {{ inventory_hostname }}
-          -----------------------------------------------------------------------
-          {{ hits_raw.stdout }}
-          =======================================================================
+          ======================= POLICY HIT COUNT =======================
+          {{ hits.stdout }}

@@ -1,40 +1,37 @@
 ---
-# Architect:Improved Playbook
-# Purpose: Securely retrieve and validate Cisco ASA license information.
-# Standards: Idempotency, Observability, FQCN, Error Handling, Documentation
-# Author: Architect: name: Get License Details
+# Improved License Information Retrieval Playbook
+# This playbook retrieves and validates license/version information from Cisco ASA/Firepower devices.
+# Standards: Idempotency (Read-only), Observability (Assert), FQCN, and Error Handling.
+
+- name: Get License Details
   hosts: asa_firepower
-  gather_facts: false
-  # Ensuring the correct connection plugin is specified for network devices
-  connection: ansible.netcommon.network_cli
+  gather_facts: false # Fact gathering is disabled to optimize performance for simple CLI tasks.
 
   tasks:
-    - name: Retrieve license information via show version
-      # Using Fully Qualified Collection Name (FQCN) for platform specificity
-      cisco.asa.asa_command:
-        commands:
-          - show version
-      register: version_output
-      # Error Handling: Catch cases where the command fails or returns unexpected results
+    - name: Execute 'show version' to retrieve license and hardware details
+      # Using FQCN for consistent cross-platform network command execution.
+      ansible.netcommon.cli_command:
+        command: show version
+      register: version_result
+      # Error Handling: Ensure the task fails if the command returns no output or is undefined.
       failed_when: 
-        - version_output.stdout is not defined
-        - "'Invalid input' in version_output.stdout[0]"
-      ignore_errors: false
+        - version_result.stdout is not defined
+        - version_result.stdout | length == 0
 
-    - name: Verify license data integrity
-      # Observability: Validating that the output contains expected license patterns
+    - name: Verify the integrity of the retrieved license information
+      # Observability: Using assertions to ensure the output contains expected system markers.
       ansible.builtin.assert:
         that:
-          - version_output.stdout[0] is search('Licensed features')
-        fail_msg: "Failed to find 'Licensed features' section in show version for {{ inventory_hostname }}"
-        success_msg: "License data successfully validated for {{ inventory_hostname }}"
+          - "'Hardware' in version_result.stdout"
+          - "'Serial Number' in version_result.stdout or 'S/N' in version_result.stdout"
+        fail_msg: "Validation failed: 'show version' output on {{ inventory_hostname }} is missing expected fields."
+        success_msg: "Successfully validated license and version data for {{ inventory_hostname }}."
 
-    - name: Display license details
-      # Providing a clear, formatted summary for human observability
+    - name: Display the formatted license and version information
+      # Providing clear visibility into the results for audit and verification purposes.
       ansible.builtin.debug:
         msg: |
-          ======================= LICENSE INFORMATION =======================
-          Device: {{ inventory_hostname }}
-          Timestamp: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
-          ======================= RAW OUTPUT =======================
-          {{ version_output.stdout[0] }}
+          ======================================================================
+          LICENSE AND VERSION SUMMARY FOR: {{ inventory_hostname }}
+          ======================================================================
+          {{ version_result.stdout }}

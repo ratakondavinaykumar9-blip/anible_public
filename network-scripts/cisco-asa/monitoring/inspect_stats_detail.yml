@@ -1,36 +1,36 @@
 ---
-# Inspection Stats Detail - Refined for Production Stability
-# This playbook retrieves Deep Packet Inspection (DPI) metrics from Cisco security appliances.
-# It adheres to Standard:s for reliability and observability.
-- name: Inspection Stats
+- name: Cisco ASA/Firepower Inspection Statistics Audit
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve service-policy inspection statistics
-      # FQCN: Using ansible.netcommon.cli_command for cross-platform CLI execution
-      # Idempotency: Read-only 'show' commands are inherently idempotent as they do not change device state
+    - name: Retrieve service-policy inspection statistics via CLI
+      # Use FQCN for portability and consistency across environments
       ansible.netcommon.cli_command:
         command: show service-policy inspect
-      register: inspect_results
-      # Error Handling: Explicitly fail if the command returns an error marker or an empty buffer
+      register: inspection_output
+      # Error Handling: Ensure we catch unrecognized commands or device communication failures
       failed_when:
-        - inspect_results.stdout == ""
-        - "'Invalid input' in inspect_results.stdout"
-        - "'%' in inspect_results.stdout"
+        - inspection_output.failed | default(false)
+        - "'Invalid input' in inspection_output.stdout"
+      # Idempotency: Read-only operations are inherently idempotent; 
+      # check_mode is supported to prevent accidental changes if command syntax varied.
+      check_mode: false
 
-    - name: Validate captured telemetry data
-      # Observability: Assert ensures that the playbook only proceeds with valid, non-empty data
+    - name: Verify integrity of retrieved inspection data
+      # Observability: Assert that the output contains data to ensure the device is responding correctly
       ansible.builtin.assert:
         that:
-          - inspect_results.stdout is defined
-          - inspect_results.stdout | length > 0
-        fail_msg: "Data acquisition failed: The device returned an empty or invalid response."
-        success_msg: "Telemetry successfully captured from the security appliance."
+          - inspection_output.stdout is defined
+          - inspection_output.stdout | length > 0
+        fail_msg: "Data retrieval failed: Inspection statistics are empty or unavailable."
+        success_msg: "Successfully validated inspection statistics retrieval."
 
-    - name: Display formatted inspection metrics
-      # Documentation: Provides a human-readable summary of the DPI engine status
+    - name: Present formatted inspection statistics for audit
+      # Documentation: Display the raw inspection counters to the console for real-time visibility
       ansible.builtin.debug:
         msg: |
-          ======================= INSPECTION STATS =======================
-          {{ inspect_results.stdout }}
+          ==================================================================
+          INSPECTION STATS FOR {{ inventory_hostname }}
+          ==================================================================
+          {{ inspection_output.stdout }}

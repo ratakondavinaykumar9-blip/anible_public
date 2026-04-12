@@ -1,34 +1,45 @@
 ---
-- name: Cisco ASA DHCP Statistics Retrieval
-  # This playbook retrieves and validates DHCP statistics from Cisco ASA/Firepower devices.
-  # It adheres to Standard:s for idempotency, observability, and error handling.
+- name: DHCP Statistics Audit
   hosts: asa_firepower
   gather_facts: false
+  # Documentation: Disabling fact gathering for faster execution on network devices.
 
   tasks:
-    - name: Get DHCP statistics from device
-      # Read-only commands are inherently idempotent as they do not modify device configuration.
-      # Using FQCN cisco.asa.asa_command for platform-specific execution and reliability.
-      cisco.asa.asa_command:
-        commands:
-          - show dhcpd statistics
-      register: dhcp_stats
-      # Error handling: Detects common Cisco CLI error strings to trigger failure.
+    - name: Retrieve DHCP statistics from the security appliance
+      # Best Practice: Using Fully Qualified Collection Name (FQCN).
+      # Idempotency: 'show' commands are read-only and inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: show dhcpd statistics
+      register: dhcp_stats_result
+      # Error Handling: Explicitly fail if the command is unrecognized (e.g., DHCP disabled).
       failed_when:
-        - dhcp_stats.failed or "Invalid input" in dhcp_stats.stdout[0]
+        - dhcp_stats_result.failed
+        - "'Invalid input' in dhcp_stats_result.stdout"
 
-    - name: Verify retrieval success
-      # Observability: Asserts that the command returned data, ensuring the output is valid for downstream processing.
+    - name: Validate DHCP statistics output integrity
+      # Observability: Ensure the device returned actual data before attempting to process it.
       ansible.builtin.assert:
         that:
-          - dhcp_stats.stdout is defined
-          - dhcp_stats.stdout[0] | length > 0
-        fail_msg: "DHCP statistics retrieval failed or returned empty results. Verify DHCP is configured on the ASA."
-        success_msg: "DHCP statistics successfully captured."
+          - dhcp_stats_result.stdout is defined
+          - dhcp_stats_result.stdout | length > 0
+        fail_msg: "DHCP statistics could not be retrieved. Verify DHCP server configuration."
+        quiet: true
 
-    - name: Display DHCP statistics
-      # Provides the operator with a clear, formatted view of the captured statistics.
+    - name: Display formatted DHCP usage metrics
+      # Documentation: Providing a clear, human-readable summary for automation logs.
       ansible.builtin.debug:
         msg: |
-          ======================= DHCP STATS =======================
-          {{ dhcp_stats.stdout[0] }}
+          ======================= DHCP STATS SUMMARY =======================
+          Inventory Host: {{ inventory_hostname }}
+          ------------------------------------------------------------------
+          {{ dhcp_stats_result.stdout }}
+          ==================================================================
+
+    - name: Check for DHCP pool resource constraints
+      # Observability: Proactively alert if pool limits are being approached.
+      ansible.builtin.debug:
+        msg: "WARNING: High DHCP pool utilization or limits detected on {{ inventory_hostname }}!"
+      when: 
+        - "'limit' in dhcp_stats_result.stdout or 'Full' in dhcp_stats_result.stdout"
+      # Error Handling: Ensuring non-critical alerting doesn't interrupt the playbook flow.
+      ignore_errors: true

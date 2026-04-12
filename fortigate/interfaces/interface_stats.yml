@@ -1,34 +1,36 @@
 ---
 # FortiGate Interface Statistics
 # This playbook retrieves low-level netlink interface statistics from a FortiGate device.
-# It adheres to industry standards for observability, error handling, and FQCN usage.
-
-- name: Get Interface Stats
+# Standards Applied: Idempotency, Observability, Documentation, Error Handling, and FQCN.
+- name: Get FortiGate Interface Statistics
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute diagnose command to retrieve netlink interface list
-      # Using ansible.netcommon.cli_command for raw diagnostic retrieval
+    - name: Retrieve netlink interface list via diagnose command
+      # FQCN: Using ansible.netcommon.cli_command for direct shell interaction.
+      # Idempotency: changed_when: false ensures read-only operations do not report a change status.
       ansible.netcommon.cli_command:
         command: diagnose netlink interface list
-      register: stats
-      # Error Handling: Ensure we fail if the command returns an error message or fails at the transport layer
-      failed_when: 
-        - stats.failed or "Command fail" in stats.stdout or "Unknown command" in stats.stdout
+      register: interface_stats
+      changed_when: false
+      # Error Handling: Fail if the output is empty or if the command is unrecognized by the firmware.
+      failed_when:
+        - interface_stats.stdout | length == 0
+        - "'Unknown command' in interface_stats.stdout"
 
-    - name: Verify successful data retrieval
-      # Observability: Assert that the output is present and contains data
+    - name: Validate interface statistics data
+      # Observability: Assert that the output contains expected data patterns (e.g., 'index').
+      # This ensures the playbook fails early if the device returns unexpected content.
       ansible.builtin.assert:
         that:
-          - stats.stdout is defined
-          - stats.stdout | length > 0
-        fail_msg: "Interface statistics could not be retrieved or the output was empty."
-        success_msg: "Successfully captured interface statistics."
+          - "'index' in interface_stats.stdout"
+        fail_msg: "The command succeeded but the output did not contain valid interface statistics."
+        success_msg: "Interface statistics successfully validated."
 
-    - name: Display formatted Interface Statistics
-      # Providing clear visibility into the captured diagnostic data
+    - name: Display interface statistics
+      # Documentation: Providing a clear, formatted view of the registered data for the operator.
       ansible.builtin.debug:
         msg: |
           ======================= INTERFACE STATS =======================
-          {{ stats.stdout }}
+          {{ interface_stats.stdout }}

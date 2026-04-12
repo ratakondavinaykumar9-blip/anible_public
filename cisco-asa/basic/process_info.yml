@@ -1,39 +1,35 @@
 ---
-# Process Information Retrieval
-# This playbook collects process status from Cisco ASA/Firepower devices.
-# It adheres to senior automation standards for observability and reliability.
+# NetLearner Architect Improved Playbook: Get Process Info
+# This playbook retrieves real-time process utilization from Cisco ASA/Firepower devices.
+# It adheres to enterprise standards for observability, idempotency, and robust error handling.
 
 - name: Get Process Info
   hosts: asa_firepower
-  gather_facts: false # Facts are not required for command execution, improving performance
+  gather_facts: false # Fact gathering is disabled to minimize execution time and overhead
 
   tasks:
-    - name: Retrieve process information from the device
-      # Using Fully Qualified Collection Name (FQCN) for reliability
+    - name: Execute 'show process' on the target device
+      # FQCN is used to ensure predictable behavior across different Ansible environments.
+      # Status retrieval is inherently idempotent as it does not modify device configuration.
       ansible.netcommon.cli_command:
         command: show process
       register: proc_result
-      # Error Handling: Explicitly fail if the command is unrecognized or execution fails
+      # Error Handling: Explicitly catching CLI-specific error strings that might not trigger a task failure
       failed_when: 
-        - proc_result.failed
-        - "'Invalid input' in proc_result.stdout"
+        - "'Invalid input' in proc_result.stdout or '% Error' in proc_result.stdout"
 
-    - name: Validate process output integrity
-      # Observability: Ensure we received substantial data before proceeding
+    - name: Validate process data integrity
+      # Observability: Using assertions to verify that the command returned usable data
       ansible.builtin.assert:
         that:
-          - "proc_result.stdout is defined"
-          - "proc_result.stdout | length > 0"
-          - "'Process' in proc_result.stdout or 'Runtime' in proc_result.stdout"
-        fail_msg: "The 'show process' command returned unexpected or empty data."
-        success_msg: "Process data successfully retrieved and validated."
+          - proc_result.stdout is defined
+          - proc_result.stdout | length > 0
+        fail_msg: "Critical failure: The 'show process' command returned empty or undefined output."
+        success_msg: "Verification successful: Process data captured and validated."
 
-    - name: Display formatted process information
-      # Observability: Present the raw output in a readable format for logs/users
+    - name: Display retrieved process information
+      # Observability: Providing a clear, formatted view of the device state for the operator
       ansible.builtin.debug:
         msg: |
-          ======================= DEVICE PROCESSES =======================
+          ======================= PROCESSES =======================
           {{ proc_result.stdout }}
-
-# Idempotency Note: This playbook is inherently idempotent as 'show' commands 
-# do not modify the state of the target system.

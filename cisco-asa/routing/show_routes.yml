@@ -1,54 +1,39 @@
 ---
-# Show Routes - Improved Version
-# Retrieves the routing table and routing database from Cisco ASA/Firepower devices.
-# Standards Applied: Idempotency, Observability, Documentation, Error Handling, and FQCN.
-
-- name: Get Routing Table Information
+# Show Routes
+# Improved: 2026-03-15 (NetLearner Architect)
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
+- name: Get Routing Table
   hosts: asa_firepower
   gather_facts: no
 
   tasks:
-    - name: Fetch active routing table
-      # Using Fully Qualified Collection Name (FQCN) for reliability.
-      # This command is inherently idempotent as it is a read-only operation.
+    - name: Retrieve the operational routing table
+      # Documentation: Captures the active RIB entries. Read-only commands are inherently idempotent.
       ansible.netcommon.cli_command:
         command: show route
       register: routes
-      # Error Handling: Ensure we fail if the command execution itself fails.
-      failed_when: routes.failed or "Invalid input" in routes.stdout
+      # Error Handling: Fail if the command is unrecognized or returns no data
+      failed_when: 
+        - routes.stdout is not defined or routes.stdout | length == 0
+        - "'Invalid input' in routes.stdout"
 
-    - name: Verify routing table retrieval
-      # Observability: Assert that the command returned data to prevent silent failures.
-      ansible.builtin.assert:
-        that:
-          - routes.stdout is defined
-          - routes.stdout | length > 0
-        fail_msg: "Routing table output is empty or undefined for {{ inventory_hostname }}"
-        success_msg: "Routing table successfully captured for {{ inventory_hostname }}"
-        quiet: true
-
-    - name: Fetch underlying routing database
-      # Some ASA/Firepower versions or contexts may not support the 'database' keyword.
-      # Error Handling: Using ignore_errors to allow the playbook to continue if this specific command is unsupported.
+    - name: Retrieve the internal routing database
+      # Documentation: Provides detailed RIB information including protocol metrics.
       ansible.netcommon.cli_command:
         command: show route database
       register: route_db
-      ignore_errors: yes
+      failed_when: 
+        - route_db.stdout is not defined or route_db.stdout | length == 0
+        - "'Invalid input' in route_db.stdout"
 
-    - name: Display gathered routing details
-      # Observability: Providing a structured and formatted output of the collected data.
-      ansible.builtin.debug:
-        msg: |
-          ============================================================
-          Active Routing Table: {{ inventory_hostname }}
-          ============================================================
-          {{ routes.stdout }}
-          
-          {% if route_db.stdout is defined and not route_db.failed %}
-          ============================================================
-          Routing Database:
-          ============================================================
-          {{ route_db.stdout }}
-          {% else %}
-          Note: Routing database command was skipped or is not supported on this device.
-          {% endif %}
+    - name: Verify routing data integrity
+      # Observability: Assert that we received valid routing headers from the device
+      ansible.builtin.assert:
+        that:
+          - "'Codes:' in routes.stdout"
+          - "'Gateway of last resort' in routes.stdout or 'no gateway' in routes.stdout"
+        fail_msg: "Routing table format on {{ inventory_hostname }} is unexpected or incomplete."
+        success_msg: "Successfully validated routing table for {{ inventory_hostname }}."
+
+    - name: Display routes

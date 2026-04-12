@@ -1,38 +1,35 @@
 ---
 # Routing Protocols Configuration Audit
-# Purpose: This playbook retrieves and verifies the configured routing protocols on Cisco ASA/Firepower devices.
-# Standards: Idempotency (read-only), Observability (assertions), Documentation (in-line comments),
-# Error Handling (validation), Best Practices (FQCN).
+# Purpose: This playbook retrieves and validates the routing protocol configuration on Cisco ASA/Firepower devices.
+# It ensures operational visibility into active routing processes (OSPF, EIGRP, BGP, etc.) without altering state.
 
-- name: Audit Routing Protocols
+- name: Analyze Routing Protocols
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: no
 
   tasks:
-    - name: Retrieve routing protocol configuration from device
-      # Why: Fetches the 'router' section of the running-config to identify active protocols (OSPF, EIGRP, BGP, etc.)
-      # Idempotency: Read-only command; safe for repeated execution as it does not modify device state.
+    - name: Retrieve current routing protocol configuration
+      # Using FQCN for standardized command execution.
+      # This is a read-only operation, ensuring idempotency (safe to run repeatedly).
       ansible.netcommon.cli_command:
-        command: "show running-config | include router"
+        command: show running-config | include router
       register: protocols_result
-      # Error Handling: Ensure the task fails if the connection is dropped or the command execution fails.
-      # changed_when is false because 'show' commands never change the target system.
-      failed_when: protocols_result.failed == true
-      changed_when: false
+      # Error Handling: Fail only if the command execution fails or returns an "Invalid" response.
+      failed_when:
+        - protocols_result.failed or "Invalid" in protocols_result.stderr
 
-    - name: Verify protocol data integrity
-      # Observability: Validates that the command returned a valid response object.
-      # This ensures downstream tasks or reports are based on actual retrieved data.
+    - name: Verify data retrieval success (Observability)
+      # Assert that the device responded with a valid stdout object.
       ansible.builtin.assert:
         that:
           - protocols_result.stdout is defined
-        fail_msg: "Critical: Failed to retrieve configuration data from {{ inventory_hostname }}."
-        success_msg: "Data successfully retrieved from {{ inventory_hostname }}."
+        fail_msg: "Failed to capture routing configuration from {{ inventory_hostname }}"
+        success_msg: "Successfully retrieved routing data from {{ inventory_hostname }}"
 
-    - name: Log Routing Protocols configuration
-      # Observability: Provides immediate visibility into the configuration state for the operator.
-      # Documentation: The header clearly identifies the source host for the output.
+    - name: Display routing protocol summary
+      # Observability: Formatted output for audit and troubleshooting purposes.
+      # Documentation: Identifies if no routing protocols are configured to avoid confusion.
       ansible.builtin.debug:
         msg: |
-          ======================= ROUTING PROTOCOLS [{{ inventory_hostname }}] =======================
-          {{ protocols_result.stdout | default('INFO: No routing protocols are currently configured on this device.') }}
+          ======================= ROUTING PROTOCOLS: {{ inventory_hostname }} =======================
+          {{ protocols_result.stdout if protocols_result.stdout | length > 0 else 'NOTICE: No routing processes (router keyword) are currently configured.' }}

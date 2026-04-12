@@ -1,33 +1,37 @@
 ---
-# FortiGate Antivirus Profile Retrieval Playbook
-# This playbook is designed to safely retrieve and verify Antivirus profile information.
-# Standards: Idempotent, Observable, Documented, Error-Handled, FQCN-compliant.
+# Playbook: FortiGate Antivirus Profile Retrieval
+# Standards: Idempotency (Read-only), Observability (Assert), Best Practices (FQCN)
+# Purpose: This playbook retrieves the current AV profile configuration for auditing purposes.
 
-- name: FortiGate Antivirus Profile Operations
+- name: Retrieve and Validate AV Profiles
   hosts: fortigate
   gather_facts: false
-  # Ensuring the use of network_cli for consistent FortiOS interaction
-  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve Antivirus Profile details via CLI
-      # Standard 5: Use Fully Qualified Collection Names (FQCN)
+    - name: Fetch Antivirus Profile data via CLI
+      # Use FQCN for cross-platform network CLI consistency.
+      # Captured output is registered for subsequent validation and observability.
       ansible.netcommon.cli_command:
         command: "get firewall avprofile"
-      # Standard 2: Register output for downstream verification and observability
       register: av_result
-      # Standard 4: Define failure conditions to catch CLI parsing errors or permission denials
+      # Error Handling: Explicitly detect device-side error strings that may not trigger a standard failure.
       failed_when:
         - av_result.failed or "Unknown action" in av_result.stdout or "Command fail" in av_result.stdout
 
-    - name: Validate AV Profile data integrity
-      # Standard 2: Use assert for observability and to ensure the data is not empty
+    - name: Verify data integrity of retrieved AV profiles
+      # Observability: Ensure that the command execution resulted in meaningful configuration data.
       ansible.builtin.assert:
         that:
           - av_result.stdout is defined
           - av_result.stdout | length > 0
-        fail_msg: "The AV Profile retrieval failed or the configuration is empty."
-        success_msg: "Successfully retrieved and verified AV Profile data."
-        quiet: true
+        fail_msg: "The FortiGate device returned no Antivirus profile information."
+        success_msg: "Antivirus profile configuration successfully retrieved and validated."
 
-    - name: Display Form
+    - name: Display retrieved Antivirus Profile details
+      # Documentation: Format the output for clear visibility in automation logs and audit trails.
+      # This read-only task ensures idempotency by not modifying device state.
+      ansible.builtin.debug:
+        msg: |
+          ======================= START AV PROFILE =======================
+          {{ av_result.stdout }}
+          ======================= END AV PROFILE =========================

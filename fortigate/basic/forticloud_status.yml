@@ -1,42 +1,34 @@
 ---
-# FortiGate FortiCloud Status Verification
-# Improved: 2026-03-08
-# Description: This playbook retrieves and validates the FortiCloud service status.
-# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
----
+# FortiGate FortiCloud Status
+# Improved: 2026-03-15
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
 - name: Get FortiCloud Status
   hosts: fortigate
-  gather_facts: false
-  # Ensure the connection type is explicitly defined if not in inventory
-  vars:
-    ansible_connection: ansible.netcommon.network_cli
+  gather_facts: false # Fact gathering disabled for network-only tasks to improve performance
 
   tasks:
     - name: Retrieve FortiCloud service information
-      # Use FQCN for reliability across different Ansible environments
+      # Idempotency: cli_command is safe for repeated execution as it performs a read-only operation
       ansible.netcommon.cli_command:
         command: get fmupdate service
-      register: cloud_status
-      # Idempotency: Read-only 'get' commands should never trigger a change state
-      changed_when: false
-      # Error Handling: Fail if the output is empty or contains known CLI error strings
+      register: forticloud_raw
+      # Error Handling: Ensure we catch application-level errors not reported via exit code
       failed_when: 
-        - cloud_status.stdout | length == 0
-        - "'Command fail' in cloud_status.stdout"
-        - "'Unknown command' in cloud_status.stdout"
+        - forticloud_raw.failed or "Command fail" in forticloud_raw.stdout or "Unknown action" in forticloud_raw.stdout
 
     - name: Validate FortiCloud output integrity
-      # Observability: Assert that the response contains expected service keywords
+      # Observability: Assert that the command returned meaningful data before proceeding
       ansible.builtin.assert:
         that:
-          - "'Service' in cloud_status.stdout"
-        fail_msg: "The FortiCloud status output was malformed or incomplete."
-        success_msg: "FortiCloud service status successfully validated."
+          - forticloud_raw.stdout is defined
+          - forticloud_raw.stdout | length > 0
+        fail_msg: "The command 'get fmupdate service' returned an empty response or failed."
+        quiet: true
 
-    - name: Display formatted FortiCloud status
-      # Documentation: Providing a clear, human-readable view of the operational state
+    - name: Display FortiCloud operational status
+      # Documentation: Providing structured output for audit logs and manual verification
       ansible.builtin.debug:
         msg: |
-          ======================= FORTICLOUD STATUS =======================
-          {{ cloud_status.stdout }}
-          =================================================================
+          ======================= FORTICLOUD =======================
+          {{ forticloud_raw.stdout }}
+          ==========================================================

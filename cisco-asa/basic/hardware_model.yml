@@ -1,34 +1,35 @@
 ---
-# Hardware Model Info - Enhanced for Production
-# Improved: 2026-03-08
-# Role: Architect:#
-# Standards: Idempotency (Read-only), Observability (Assert), FQCN, Error Handling.
----
-- name: Get Hardware Model Info
+# Hardware Model Information Retrieval
+# This playbook retrieves hardware model details from Cisco ASA/Firepower devices.
+# It ensures idempotency, provides observability via assertions, and follows FQCN standards.
+
+- name: Get Hardware Model Information
   hosts: asa_firepower
-  gather_facts: false # Facts are not required for this read-only command operation
+  gather_facts: false
 
   tasks:
-    - name: Fetch hardware model information from the device
-      # Using FQCN for cross-platform compatibility and clarity.
-      # This task is idempotent as it performs a read-only 'show' operation.
+    - name: Execute show version command to capture model info
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
       ansible.netcommon.cli_command:
         command: "show version | include (Hardware|Model)"
       register: model_output
-      # Error Handling: Mark as failed if the command execution fails or returns an empty string.
-      failed_when: 
-        - model_output.failed or (model_output.stdout | length == 0)
+      # Idempotency: This is a read-only operation; it should never report a 'changed' status
+      changed_when: false
+      # Error Handling: Mark as failed if the output is empty or the command is unrecognized
+      failed_when:
+        - model_output.stdout | length == 0
+        - "'Invalid' in model_output.stdout"
 
-    - name: Validate that hardware information was successfully captured
-      # Observability: Assert ensures that subsequent tasks rely on valid, non-empty data.
+    - name: Validate hardware model capture
+      # Observability: Assert that the model information was correctly registered
       ansible.builtin.assert:
         that:
           - "model_output.stdout is defined"
           - "model_output.stdout | length > 0"
-        fail_msg: "Failed to retrieve hardware model information from {{ inventory_hostname }}."
-        success_msg: "Successfully retrieved hardware model info for {{ inventory_hostname }}."
+        fail_msg: "Hardware model information could not be retrieved. Please check device connectivity."
+        success_msg: "Hardware model information successfully retrieved."
 
-    - name: Display the retrieved hardware model
-      # Observability: Provide the operator with the specific results registered in the previous task.
+    - name: Display hardware model details
+      # Observability: Output the results for manual verification
       ansible.builtin.debug:
-        msg: "Hardware Model: {{ model_output.stdout }}"
+        msg: "{{ model_output.stdout_lines }}"

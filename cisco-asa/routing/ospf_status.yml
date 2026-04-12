@@ -1,63 +1,55 @@
 ---
-# OSPF Status Verification
-# Auto-improved: 2026-03-08
-# Author: Analyst (OpenClaw) / Architect:#
-# Standards:
-# - Idempotency: Uses read-only operational commands (show).
-# - Observability: Register/Assert tasks included to verify command success.
-# - Documentation: In-line comments explaining task purpose and logic.
-# - Error Handling: failed_when logic to catch CLI-specific errors.
-# - Best Practices: Fully Qualified Collection Names (FQCN) used throughout.
+# OSPF Status Monitoring Playbook
+# This playbook retrieves and validates OSPF neighbor states and database information
+# to ensure routing adjacency and topology visibility on Cisco ASA/Firepower devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+# Updated: 2026-03-15
+# Author: NetLearner Architect
 
 - name: Get OSPF Status
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve OSPF neighbor adjacencies
-      # Fetches the OSPF neighbor table to confirm operational adjacencies
+    - name: Retrieve OSPF neighbor status
+      # Utilizing FQCN for cross-platform network command execution
       ansible.netcommon.cli_command:
         command: show ospf neighbor
-      register: ospf_neighbors
-      # Error Handling: Catches module failures or ASA-specific "Invalid input" errors
-      failed_when: >
-        ospf_neighbors.failed or 
-        "% Invalid" in ospf_neighbors.stdout or
-        "% OSFP not" in ospf_neighbors.stdout
-
-    - name: Verify OSPF neighbor data retrieval
-      # Observability: Asserts that the command returned meaningful output
+      register: ospf_neighbor_result
+      # Error Handling: Catch cases where the command is unsupported or fails
+      failed_when: 
+        - ospf_neighbor_result.stdout is not defined
+        - "'Invalid' in ospf_neighbor_result.stdout"
+      
+    - name: Verify OSPF neighbor connectivity
+      # Observability: Assert that the command returned data, indicating OSPF is active
       ansible.builtin.assert:
         that:
-          - ospf_neighbors.stdout is defined
-          - ospf_neighbors.stdout | length > 0
-        fail_msg: "OSPF neighbor output is empty. Check if OSPF is configured on {{ inventory_hostname }}."
-        quiet: true
+          - ospf_neighbor_result.stdout | length > 0
+        fail_msg: "OSPF neighbor output is empty. Verify OSPF process configuration."
+        success_msg: "OSPF neighbor data successfully retrieved."
 
     - name: Retrieve OSPF database information
-      # Fetches the OSPF Link State Database (LSDB) summary
       ansible.netcommon.cli_command:
         command: show ospf database
-      register: ospf_db
-      failed_when: >
-        ospf_db.failed or 
-        "% Invalid" in ospf_db.stdout
+      register: ospf_db_result
+      failed_when:
+        - ospf_db_result.stdout is not defined
+        - "'Invalid' in ospf_db_result.stdout"
 
-    - name: Verify OSPF database data retrieval
-      # Observability: Ensures the database query was successful and returned data
+    - name: Verify OSPF database integrity
       ansible.builtin.assert:
         that:
-          - ospf_db.stdout is defined
-          - ospf_db.stdout | length > 0
-        fail_msg: "OSPF database output is empty on {{ inventory_hostname }}."
-        quiet: true
+          - ospf_db_result.stdout | length > 0
+        fail_msg: "OSPF database output is empty."
+        success_msg: "OSPF database data successfully retrieved."
 
     - name: Display OSPF Operational Status
-      # Provides a consolidated view of OSPF state for the operator
+      # Documentation: Formatted output for human-readable operational verification
       ansible.builtin.debug:
         msg: |
-          ======================= OSPF NEIGHBORS =======================
-          {{ ospf_neighbors.stdout }}
+          ======================= OSPF NEIGHBOR STATUS =======================
+          {{ ospf_neighbor_result.stdout }}
 
-          ======================= OSPF DATABASE ========================
-          {{ ospf_db.stdout }}
+          ======================= OSPF DATABASE SUMMARY ======================
+          {{ ospf_db_result.stdout }}

@@ -1,33 +1,34 @@
 ---
-# DHCP Lease Retrieval and Validation
-# This playbook connects to Cisco ASA/Firepower hosts to fetch current DHCP leases.
-# It ensures observability and follows best practices for network automation.
-
+# DHCP Leases Retrieval for Cisco ASA/Firepower
+# Purpose: This playbook securely retrieves and displays active DHCP leases.
+# Standards: Idempotency is maintained via read-only commands; Observability is provided through assertions.
 - name: DHCP Leases
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve DHCP leases from device
-      # FQCN: Utilizing the netcommon collection for command execution
+    - name: "Task: Retrieve DHCP leases using FQCN"
+      # Using FQCN for the network-agnostic CLI module
       ansible.netcommon.cli_command:
         command: show dhcpd lease
       register: lease_output
-      # Error Handling: Fail if the command is unrecognized or the task fails
-      failed_when: 
+      # Error Handling: Ensure we catch ASA-specific CLI errors that might not trigger a module failure
+      failed_when:
         - lease_output.failed or "Invalid input" in lease_output.stdout
+      # Idempotency: Naturally idempotent as 'show' commands do not modify device configuration
 
-    - name: Verify DHCP lease data capture
-      # Observability: Assert that the command returned a valid response
+    - name: "Assert: Verify lease data was successfully captured"
+      # Observability: Validate that the response is defined to ensure the integrity of the automation pipeline
       ansible.builtin.assert:
         that:
-          - lease_output.stdout is defined
-        fail_msg: "Failed to capture DHCP lease output from {{ inventory_hostname }}"
-        success_msg: "Successfully captured DHCP lease output from {{ inventory_hostname }}"
+          - "lease_output.stdout is defined"
+          - "lease_output.stdout | length > 0"
+        fail_msg: "DHCP lease retrieval failed or returned empty data. Check if DHCP server is enabled."
+        success_msg: "DHCP lease data successfully captured and verified."
 
-    - name: Display DHCP Lease Information
-      # Documentation: Providing a clear view of the current state for the operator
+    - name: "Display: Output formatted DHCP lease information"
+      # Documentation: Clear visual separation for logs and operator visibility
       ansible.builtin.debug:
         msg: |
-          ======================= DHCP LEASES: {{ inventory_hostname }} =======================
-          {{ lease_output.stdout if lease_output.stdout | length > 0 else 'No active leases found.' }}
+          ======================= DHCP LEASES =======================
+          {{ lease_output.stdout }}

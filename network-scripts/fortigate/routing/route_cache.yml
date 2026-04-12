@@ -1,37 +1,36 @@
 ---
-# Playbook: FortiGate Route Cache Retrieval
-# Purpose: Safely retrieves and displays the current routing table cache from FortiGate devices.
-# This playbook adheres to industry standards for Idempotency, Observability, and Error Handling.
+# NetLearner Standard: FortiGate Route Cache Retrieval
+# This playbook retrieves diagnostic routing information from a FortiGate device.
+# It is designed to be idempotent (read-only) and includes observability checks.
 
-- name: Get FortiGate Route Cache
+- name: FortiGate Route Cache Retrieval
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false  # Optimized: Standard facts are not required for diagnostic CLI commands.
 
   tasks:
-    - name: Retrieve routing table cache via CLI
-      # Use FQCN for consistent cross-platform network command execution
+    - name: Retrieve routing table cache
+      # Using Fully Qualified Collection Name (FQCN) for standard network command execution.
       ansible.netcommon.cli_command:
         command: get router info routing-table cache
-      register: route_cache_raw
-      # Read-only operation: Ensure idempotency by preventing 'changed' status
-      changed_when: false
-      # Error handling: Fail if the command explicitly returns a failure message
+      register: route_cache_result
+      # Error Handling: Explicitly catch FortiOS-specific command execution failures or invalid syntax.
       failed_when: 
-        - route_cache_raw.failed or "Command fail" in route_cache_raw.stdout
+        - route_cache_result.failed 
+        - "'Command fail' in route_cache_result.stdout"
+        - "'Unknown action' in route_cache_result.stdout"
 
-    - name: Verify route cache data integrity
-      # Observability: Validate that data was successfully captured before proceeding
+    - name: Verify route cache content
+      # Observability: Use assertions to ensure that valid data was returned before proceeding.
       ansible.builtin.assert:
         that:
-          - route_cache_raw.stdout is defined
-          - route_cache_raw.stdout | length > 0
-        fail_msg: "Route cache retrieval failed or returned empty data."
-        success_msg: "Route cache successfully retrieved and validated."
+          - route_cache_result.stdout is defined
+          - route_cache_result.stdout | length > 0
+        fail_msg: "Route cache retrieval failed or returned empty results. Verify device connectivity and permissions."
+        success_msg: "Route cache successfully captured and validated."
 
-    - name: Display formatted route cache
-      # Documentation: Clear separation of output for easier log analysis
+    - name: Display Route Cache
+      # Observability: Present the formatted data to the operator for auditing/logging.
       ansible.builtin.debug:
         msg: |
-          ======================= ROUTE CACHE START =======================
-          {{ route_cache_raw.stdout }}
-          ======================== ROUTE CACHE END =========================
+          ======================= ROUTE CACHE =======================
+          {{ route_cache_result.stdout }}

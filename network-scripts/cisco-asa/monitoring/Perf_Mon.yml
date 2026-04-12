@@ -1,55 +1,56 @@
 ---
-# Performance Monitoring Playbook
-# Purpose: Collects and validates performance and traffic statistics from ASA/Firepower devices.
-# Standards: Idempotency (Read-only), Observability (Register/Assert), FQCN, Error Handling.
-
-- name: Performance Monitoring
+- name: Cisco ASA/Firepower Performance Monitoring
   hosts: asa_firepower
   gather_facts: false
+  # Using gather_facts: false as network facts are not required for CLI monitoring tasks
 
   tasks:
-    - name: Get performance monitoring statistics
-      # Using FQCN for consistent cross-platform network command execution
+    - name: Retrieve Performance Monitoring Statistics
+      # Captures CPU, memory, and connection rate metrics for resource analysis
+      # Using FQCN: ansible.netcommon.cli_command for standardized network interaction
       ansible.netcommon.cli_command:
         command: show perfmon
-      register: perf
-      # Error Handling: Fail if the command is not recognized or execution fails
+      register: perf_mon_result
+      # Error Handling: Check for common CLI error strings that might not trigger a connection failure
       failed_when: 
-        - perf.failed or "Invalid input" in perf.stdout
+        - perf_mon_result.failed
+        - "'Invalid' in perf_mon_result.stdout or 'Error' in perf_mon_result.stdout"
 
-    - name: Verify performance monitoring output
-      # Observability: Assert that data was successfully captured
+    - name: Verify Performance Data Integrity
+      # Observability: Assert that the command returned data to ensure monitoring validity
       ansible.builtin.assert:
         that:
-          - perf.stdout is defined
-          - perf.stdout | length > 0
-        fail_msg: "Performance monitoring data collection returned no content."
-        success_msg: "Performance monitoring data successfully captured."
+          - perf_mon_result.stdout | length > 0
+        fail_msg: "Device {{ inventory_hostname }} returned empty performance data."
+        quiet: true
 
-    - name: Get traffic statistics
+    - name: Retrieve Interface Traffic Statistics
+      # Captures throughput metrics across all interfaces to identify bottlenecks
       ansible.netcommon.cli_command:
         command: show traffic
-      register: traffic
-      failed_when: 
-        - traffic.failed or "Invalid input" in traffic.stdout
+      register: traffic_result
+      failed_when:
+        - traffic_result.failed
+        - "'Invalid' in traffic_result.stdout or 'Error' in traffic_result.stdout"
 
-    - name: Verify traffic statistics output
+    - name: Verify Traffic Data Integrity
+      # Observability: Ensure traffic statistics were successfully gathered
       ansible.builtin.assert:
         that:
-          - traffic.stdout is defined
-          - traffic.stdout | length > 0
-        fail_msg: "Traffic statistics collection returned no content."
-        success_msg: "Traffic statistics successfully captured."
+          - traffic_result.stdout | length > 0
+        fail_msg: "Device {{ inventory_hostname }} returned empty traffic data."
+        quiet: true
 
-    - name: Display Performance and Traffic Report
-      # Formatted debug for improved human-readability and observability
+    - name: Display Consolidated Monitoring Output
+      # Documentation: Provides a human-readable summary for auditing and immediate troubleshooting
       ansible.builtin.debug:
         msg: |
           ======================= PERFORMANCE REPORT =======================
-          DEVICE: {{ inventory_hostname }}
+          HOST: {{ inventory_hostname }}
           
-          --- SHOW PERFMON ---
-          {{ perf.stdout }}
-          
-          --- SHOW TRAFFIC ---
-          {{ traffic.stdout }}
+          [PERFMON - CPU/Memory/Connections]
+          {{ perf_mon_result.stdout }}
+
+          [TRAFFIC - Interface Throughput]
+          {{ traffic_result.stdout }}
+          ==================================================================

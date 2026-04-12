@@ -1,42 +1,37 @@
 ---
-# FortiGate Static Routes Inspection
-# Auto-improved: 2026-03-08
-# Purpose: This playbook retrieves the current static routing table for operational visibility.
-# Standards: Adheres to Idempotency (read-only), Observability (asserts), and FQCN.
+# NetLearner Architect Standardized Playbook
+# Purpose: Retrieves and validates FortiGate static route configuration.
+# Standards: Idempotency (read-only), Observability (assert/register), FQCN usage.
+# Author: NetLearner Architect (2026-03-15)
 
-- name: FortiGate Static Routes
+- name: Retrieve and Validate FortiGate Static Routes
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve static routing information
-      # Why: Using FQCN (Fully Qualified Collection Name) ensures reliability across Ansible versions.
-      # The command 'get router info routing-table static' provides the operational state of routes.
+    - name: Execute command to fetch static route configuration
+      # Best Practice: Use Fully Qualified Collection Names (FQCN) for reliability
+      # Idempotency: This is a read-only operation and safe to run multiple times
       ansible.netcommon.cli_command:
-        command: "get router info routing-table static"
-      register: static_routes_raw
-      # Error Handling: Verify the command was accepted by the FortiOS CLI.
-      # Why: Prevents the playbook from proceeding with empty or error-laden data if the command is unsupported.
+        command: "get router static"
+      register: static_output
+      # Error Handling: Ensure the command did not return a CLI error message
       failed_when: 
-        - static_routes_raw.failed
-        - "'Unknown action' in static_routes_raw.stdout or 'Command fail' in static_routes_raw.stdout"
+        - static_output.failed | default(false)
+        - "'Command fail' in static_output.stdout or 'Unknown command' in static_output.stdout"
 
-    - name: Validate routing data observability
-      # Observability: Assert that the command returned meaningful output.
-      # Why: Ensures the device is reachable and the routing table is not empty before displaying results.
+    - name: Verify successful route retrieval
+      # Observability: Assert that the output is not empty and contains expected data
       ansible.builtin.assert:
         that:
-          - "static_routes_raw.stdout is defined"
-          - "static_routes_raw.stdout | length > 0"
-        fail_msg: "Static route retrieval failed: Received empty output from {{ inventory_hostname }}."
-        success_msg: "Static routes successfully retrieved from {{ inventory_hostname }}."
-        quiet: true
+          - static_output.stdout is defined
+          - static_output.stdout | length > 0
+        fail_msg: "Data retrieval failed or no static routes are configured on the device."
+        success_msg: "Static route data successfully retrieved and validated."
 
-    - name: Display Static Routes
-      # Documentation: Provides a formatted view of the routing table for the automation engineer.
+    - name: Display formatted static route data
+      # Documentation: Provide clear, human-readable output for auditing
       ansible.builtin.debug:
         msg: |
-          =============================================================
-          DEVICE: {{ inventory_hostname }}
-          ======================= STATIC ROUTES =======================
-          {{ static_routes_raw.stdout }}
+          ======================= FORTIGATE STATIC ROUTES =======================
+          {{ static_output.stdout }}

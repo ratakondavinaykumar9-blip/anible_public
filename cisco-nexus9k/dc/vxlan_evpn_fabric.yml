@@ -2,7 +2,7 @@
 - name: "Cisco Nexus 9000 VXLAN EVPN Fabric Deployment"
   hosts: "{{ target_hosts | default('all') }}"
   gather_facts: false
-  connection: network_cli
+  connection: cisco.nxos.network_cli
   vars:
     # --- Global Fabric Parameters ---
     fabric_as: 65001
@@ -48,6 +48,7 @@
     - name: "VXLAN EVPN CONFIGURATION BLOCK"
       block:
         # --- PHASE 0: PRE-FLIGHT & SYSTEM DEFAULTS ---
+        # Features must be enabled before any dependent configuration can be applied.
         - name: "Enable Required NX-OS Features"
           cisco.nxos.nxos_feature:
             feature: "{{ item }}"
@@ -58,25 +59,25 @@
             - interface-vlan
             - nv overlay
             - vn-segment-vlan-based
-          register: feature_activation
-          # Why: Features must be enabled before any dependent configuration (like OSPF or BGP) can be parsed.
+          register: features_status
 
-        - name: "Verify Feature Activation Success"
+        - name: "Verify Feature Activation"
           ansible.builtin.assert:
-            that: "not item.failed"
-            fail_msg: "Failed to enable feature: {{ item.item }}"
-          loop: "{{ feature_activation.results }}"
-          quiet: true
+            that:
+              - not features_status.failed
+            fail_msg: "Critical failure: Required NX-OS features could not be enabled."
+            quiet: true
 
-        - name: "Configure Global System Parameters (MTU & Anycast MAC)"
+        # Global parameters like MTU and Anycast MAC are foundational for fabric forwarding.
+        - name: "Configure Global System Parameters"
           cisco.nxos.nxos_config:
             lines:
               - "system jumbomtu {{ mtu_size }}"
               - "fabric forwarding anycast-gateway-mac {{ anycast_gateway_mac }}"
-          register: global_params
-          # Why: Jumbo MTU (9216) accounts for VXLAN encapsulation overhead; Anycast MAC provides a unified gateway identity.
+          register: system_config
 
         # --- PHASE 1: UNDERLAY NETWORK (Loopbacks & OSPF) ---
+        # Loopback interfaces serve as stable endpoints for BGP and VTEP sourcing.
         - name: "Configure Infrastructure Loopbacks"
           cisco.nxos.nxos_l3_interfaces:
             config:
@@ -86,8 +87,7 @@
               - name: Loopback1
                 ipv4:
                   - address: "{{ vtep_loopback_ip }}"
-          register: loopback_config
-          # Why: Loopback0 is the stable BGP Router-ID; Loopback1 is the VTEP Source (NVE IP).
+          register: l3_int_status
 
         - name: "Initialize OSPF Process"
           cisco.nxos.nxos_ospf_vrf:
@@ -96,8 +96,7 @@
                 - process_id: "{{ ospf_process_id }}"
                   router_id: "{{ router_id | regex_replace('/.*', '') }}"
             state: merged
-          register: ospf_proc
-          # Why: Underlay routing establishes connectivity between all VTEP Loopbacks.
+          register: ospf_vrf_status
 
         - name: "Enable OSPF on Fabric Interfaces"
           cisco.nxos.nxos_ospfv2:
@@ -111,10 +110,18 @@
                           area: "{{ ospf_area }}"
                           network_type: point_to_point
           loop: "{{ fabric_interfaces | default([]) }}"
-          when: fabric_interfaces is defined and fabric_interfaces | length > 0
-          register: ospf_if_config
+          when: fabric_interfaces is defined
+          register: ospf_if_status
+
+        - name: "Verify Underlay Routing Stability"
+          ansible.builtin.assert:
+            that:
+              - not l3_int_status.failed
+              - not ospf_vrf_status.failed
+            quiet: true
 
         # --- PHASE 2: BGP OVERLAY (EVPN CONTROL PLANE) ---
+        # BGP EVPN handles the exchange of MAC and IP reachability information.
         - name: "Configure Global BGP and EVPN Address Family"
           cisco.nxos.nxos_bgp_global:
             config:
@@ -125,8 +132,7 @@
                 - afi: l2vpn
                   safi: evpn
             state: merged
-          register: bgp_global_cfg
-          # Why: BGP EVPN distributes MAC/IP reachability; router-id must be a stable Loopback.
+          register: bgp_global_status
 
         - name: "Configure iBGP EVPN Peering with Spines"
           cisco.nxos.nxos_bgp_neighbor_address_family:
@@ -140,10 +146,10 @@
                     both: true
             state: merged
           loop: "{{ bgp_neighbors }}"
-          register: bgp_neighbor_cfg
-          # Why: Communities are essential for EVPN Route-Target filtering across the fabric.
+          register: bgp_neighbor_status
 
         # --- PHASE 3: TENANT SEGMENTATION (VRF & L3 VNI) ---
+        # VRFs provide isolation, while L3 VNIs enable routing between different L2 segments.
         - name: "Define Tenant VRFs and L3 VNIs"
           cisco.nxos.nxos_vrf:
             config:
@@ -156,8 +162,7 @@
                       - rt: "{{ item.rt }}"
                         direction: both
           loop: "{{ vrf_mappings }}"
-          register: vrf_setup
-          # Why: L3 VNIs provide inter-subnet routing within the specific VRF container.
+          register: vrf_status
 
         - name: "Map VLANs to VNIs"
           cisco.nxos.nxos_vlan:
@@ -167,26 +172,32 @@
                 name: "{{ item.description }}"
                 state: active
           loop: "{{ vni_mappings }}"
-          register: vlan_vni_map
-          # Why: Bridges traditional access-layer VLANs to the VXLAN overlay.
+          register: vlan_status
 
         # --- PHASE 4: NVE INTERFACE (DATA PLANE) ---
+        # The NVE interface is the logical encapsulation point for the VXLAN tunnel.
         - name: "Configure NVE1 Interface and VNI Membership"
           cisco.nxos.nxos_vxlan_vtep:
             config:
               interface: nve1
               source_interface: Loopback1
               host_reachability_protocol: bgp
-              vni_members:
-                - vni: "{{ item.vni_id }}"
-                  mcast_group: "239.1.1.1"
-                - vni: "{{ vrf_mappings[0].vni }}"
-                  associate_vrf: true
-          loop: "{{ vni_mappings }}"
-          register: nve_interface
-          # Why: NVE1 is the logical VTEP; member VNIs define which traffic is encapsulated.
+              vni_members: "{{ nve_vni_list }}"
+          vars:
+            # Construct a unified list of L2 and L3 VNI members for idempotency.
+            nve_vni_list: >-
+              {% set members = [] %}
+              {% for mapping in vni_mappings %}
+              {%   set _ = members.append({'vni': mapping.vni_id, 'mcast_group': '239.1.1.1'}) %}
+              {% endfor %}
+              {% for vrf in vrf_mappings %}
+              {%   set _ = members.append({'vni': vrf.vni, 'associate_vrf': true}) %}
+              {% endfor %}
+              {{ members }}
+          register: nve_status
 
         # --- PHASE 5: ANYCAST GATEWAYS (SVI) ---
+        # Distributed Anycast Gateway allows the same IP/MAC to exist on all leaves for seamless mobility.
         - name: "Configure Distributed Anycast Gateways"
           cisco.nxos.nxos_l3_interfaces:
             config:
@@ -195,8 +206,7 @@
                   - address: "{{ item.anycast_ip }}"
                 vrf: "{{ item.vrf_name }}"
           loop: "{{ vni_mappings }}"
-          register: svi_anycast
-          # Why: SVI provides the first-hop gateway; VRF association ensures correct routing context.
+          register: svi_status
 
         - name: "Enable Fabric Forwarding on SVIs"
           cisco.nxos.nxos_config:
@@ -205,7 +215,6 @@
               - "  fabric forwarding mode anycast-gateway"
           loop: "{{ vni_mappings }}"
           register: fabric_fwd_status
-          # Why: Enables the "anycast-gateway" behavior allowing the same IP/MAC on all Leafs.
 
         - name: "Configure EVPN VNI Logic"
           cisco.nxos.nxos_evpn_vni:
@@ -217,33 +226,48 @@
                     direction: both
           loop: "{{ vni_mappings }}"
           register: evpn_vni_status
-          # Why: Ties the L2 VNI to the BGP EVPN control plane for endpoint learning.
+
+        - name: "Final Operational State Verification"
+          cisco.nxos.nxos_command:
+            commands:
+              - "show nve interface nve1"
+              - "show nve vni"
+          register: final_verification
+
+        - name: "Assert NVE Interface is Up and Functional"
+          ansible.builtin.assert:
+            that:
+              - "'nve1' in final_verification.stdout[0]"
+              - "'Up' in final_verification.stdout[0]"
+            fail_msg: "Data plane verification failed: NVE1 interface is not in Up state."
+            quiet: true
 
       rescue:
-        - name: "FAILURE DETECTED: Capture State for Troubleshooting"
+        - name: "FAILURE DETECTED: Capture Diagnostics"
           cisco.nxos.nxos_command:
             commands:
               - "show bgp l2vpn evpn summary"
               - "show nve vni"
               - "show nve interface nve1 detail"
-          register: failure_diagnostics
-          ignore_errors: true
+              - "show logging last 20"
+          register: diagnostics
 
-        - name: "Report Failure Reason"
+        - name: "Report Detailed Failure"
           ansible.builtin.fail:
             msg: >
               VXLAN EVPN deployment failed on {{ inventory_hostname }}. 
-              Diagnostic output: {{ failure_diagnostics.stdout_lines | default('No diagnostic data captured') }}
+              Diagnostic output summary: {{ diagnostics.stdout_lines }}
 
       always:
         - name: "Operational State Check"
           cisco.nxos.nxos_command:
             commands:
               - "show nve vni"
-          register: nve_status
+          register: final_nve_summary
           ignore_errors: true
-          # Why: Provides a final snapshot of the operational data plane state.
 
         - name: "Log Completion Status"
           ansible.builtin.debug:
-            msg: "Playbook execution completed. Check NVE status: {{ nve_status.stdout | default('N/A') }}"
+            msg: >
+              Deployment execution finished for {{ inventory_hostname }}. 
+              Final NVE Summary: {{ final_nve_summary.stdout[0] | default('No status available') }}

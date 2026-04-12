@@ -1,31 +1,41 @@
 ---
-- name: Get VLAN Interfaces
+# ==============================================================================
+# PLAYBOOK: Cisco ASA VLAN Interface Retrieval
+# DESCRIPTION: Fetches and displays VLAN interface status from Cisco ASA/Firepower.
+# STANDARDS: Idempotent, Observable, Documented, and uses FQCN.
+# ==============================================================================
+- name: Retrieve and Validate VLAN Interfaces
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve VLAN interface status from Cisco ASA
-      # Use Fully Qualified Collection Name (FQCN) for consistency and reliability.
-      # This task is idempotent as it performs a read-only 'show' operation.
+    - name: Execute 'show interface VLAN' command
+      # Using FQCN (ansible.netcommon) for cross-version compatibility.
+      # Read-only commands are inherently idempotent.
       ansible.netcommon.cli_command:
         command: show interface VLAN
       register: vlan_result
-      # Error Handling: Fail if the device returns an error string or the command execution fails.
+      # Error Handling: Fail if the device returns an error message or command is unrecognized.
       failed_when:
         - vlan_result.failed or "Invalid input" in vlan_result.stdout
 
-    - name: Validate VLAN information retrieval
-      # Observability: Assert that the output is not empty to verify successful data capture.
+    - name: Validate command output content
+      # Observability: Ensure that the command returned data before proceeding.
       ansible.builtin.assert:
         that:
           - vlan_result.stdout is defined
           - vlan_result.stdout | length > 0
-        fail_msg: "No VLAN interface data was retrieved. Check device configuration."
-        success_msg: "VLAN interface data successfully captured."
+        fail_msg: "VLAN interface data could not be retrieved or is empty."
+        success_msg: "Successfully captured VLAN interface configuration."
 
-    - name: Display formatted VLAN interface details
-      # Documentation: Provide a clear, human-readable report of the current interface state.
+    - name: Display VLAN interface details
+      # Providing a structured view for better observability in automation logs.
       ansible.builtin.debug:
         msg: |
-          ======================= VLAN INTERFACES =======================
+          ======================================================================
+          DEVICE: {{ inventory_hostname }}
+          COMMAND: show interface VLAN
+          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          ======================================================================
           {{ vlan_result.stdout }}
+          ======================================================================

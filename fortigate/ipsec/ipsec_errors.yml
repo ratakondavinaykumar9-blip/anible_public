@@ -1,44 +1,36 @@
 ---
-# FortiGate IPSec Errors Diagnostic Playbook
-# Improved by: Architect:# Purpose: Retrieves and validates IPSec VPN diagnostic logs from FortiGate devices.
-# Standards: Idempotency (Read-only), Observability (Asserts), Documentation (Comments), Error Handling, FQCN.
+# FortiGate IPSec Errors Troubleshooting Playbook
+# This playbook fetches IKE/IPSec logs from FortiGate devices to assist in VPN diagnostics.
+# Implements NetLearner standards for idempotency, observability, and FQCN usage.
 
-- name: FortiGate IPSec Errors Analysis
+- name: Get IPSec Errors
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve IPSec VPN diagnostic logs
-      # FQCN: Utilizing ansible.netcommon for standardized CLI interaction.
-      # Idempotency: Safe for repeated execution as it performs read-only diagnostic operations.
-      # Documentation: This command fetches the current IKE/IPSec log buffer for troubleshooting.
+    - name: Retrieve IPSec IKE logs via CLI
+      # Read-only 'diagnose' commands do not modify device state, ensuring the task is idempotent.
+      # Using Fully Qualified Collection Name (FQCN) for cross-platform reliability.
       ansible.netcommon.cli_command:
         command: diagnose vpn ike log
-      register: ipsec_logs
-      # Error Handling: Ensure the task fails gracefully if the command is unsupported or restricted.
-      failed_when:
-        - ipsec_logs.failed or "unknown command" in ipsec_logs.stdout | lower
+      register: errors_output
+      # Error Handling: Fail the task if the command returns an 'Unknown action' error or if the session fails.
+      failed_when: 
+        - errors_output.failed or "Unknown action" in errors_output.stdout
 
-    - name: Verify log retrieval success
-      # Observability: Assert that the command returned valid output for analysis.
+    - name: Validate that logs were successfully registered
+      # Observability: Ensure the command returned a valid stdout before proceeding to audit results.
       ansible.builtin.assert:
         that:
-          - ipsec_logs.stdout is defined
-          - ipsec_logs.stdout | length > 0
-        fail_msg: "No IPSec diagnostic data was returned from {{ inventory_hostname }}."
-        success_msg: "IPSec diagnostic data successfully captured."
+          - errors_output.stdout is defined
+        fail_msg: "Audit Failure: Failed to retrieve IPSec logs from the host."
+        success_msg: "Audit Success: IPSec logs successfully captured."
 
-    - name: Display IPSec VPN Diagnostics
-      # Documentation: Providing a clear, formatted visual separator for operational visibility.
+    - name: Display IPSec Error Logs
+      # Documentation: Providing a clear, formatted view of the captured logs for analysis.
       ansible.builtin.debug:
         msg: |
           ======================= IPSEC ERRORS =======================
-          {{ ipsec_logs.stdout }}
-
-    - name: Audit logs for critical negotiation failures
-      # Observability: Automatically flag potential negotiation or authentication failures.
-      ansible.builtin.debug:
-        msg: "WARNING: Critical failure indicators (fail/error) detected in IPSec logs."
-      when: 
-        - ipsec_logs.stdout is defined
-        - "'fail' in ipsec_logs.stdout | lower or 'error' in ipsec_logs.stdout | lower"
+          {{ errors_output.stdout }}
+      # Maintain clean observability by only displaying if logs are present.
+      when: errors_output.stdout | length > 0

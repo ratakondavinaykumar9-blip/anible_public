@@ -1,36 +1,33 @@
 ---
-# Description: This playbook retrieves and displays flash memory information 
-# from Cisco ASA/Firepower devices. It adheres to Standard:s 
-# for idempotency, observability, and robust error handling.
-
-- name: Get Flash Information
+- name: "Network Audit: Retrieve and Validate Flash Storage Information"
   hosts: asa_firepower
   gather_facts: false
-  connection: ansible.netcommon.network_cli
+  # Idempotency: This playbook is inherently idempotent as it only performs read-only 'show' operations.
 
   tasks:
-    - name: Retrieve flash memory details from the device
-      # FQCN used for maintainability. This operation is idempotent as it is read-only.
+    - name: "Retrieve flash information using FQCN"
+      # Best Practices: Using Fully Qualified Collection Name (FQCN)
       ansible.netcommon.cli_command:
         command: show flash
       register: flash_result
-      # Define failure conditions to prevent silent failures on invalid commands
+      # Error Handling: Fail the task if the command is not recognized or execution fails
       failed_when: 
-        - flash_result.failed
+        - flash_result.failed | default(false)
         - "'Invalid input' in flash_result.stdout"
 
-    - name: Validate flash information retrieval
-      # Assert provides observability by verifying the command returned data
+    - name: "Validate command output"
+      # Observability: Assert that the output contains expected keywords (e.g., 'bytes')
       ansible.builtin.assert:
         that:
-          - flash_result.stdout is defined
-          - flash_result.stdout | length > 0
-        fail_msg: "The 'show flash' command returned no data or failed to execute."
-        success_msg: "Flash information successfully captured."
+          - "flash_result.stdout is defined"
+          - "'bytes' in flash_result.stdout"
+        fail_msg: "Flash information could not be verified or is empty."
+        success_msg: "Flash information successfully retrieved and validated."
 
-    - name: Display formatted flash details
-      # Debug task provides immediate feedback during manual or automated execution
+    - name: "Display formatted Flash report"
+      # Documentation: Displaying the output for visibility and logging purposes
       ansible.builtin.debug:
         msg: |
-          ======================= FLASH INFORMATION =======================
+          ======================= FLASH REPORT: {{ inventory_hostname }} =======================
           {{ flash_result.stdout }}
+          ====================================================================

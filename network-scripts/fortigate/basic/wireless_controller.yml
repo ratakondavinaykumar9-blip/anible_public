@@ -1,35 +1,37 @@
 ---
-# FortiGate Wireless Controller Status Retrieval
-# Purpose: Gathers operational data for Wireless Termination Points (WTP)
-# Standards: Idempotent, Observable, Documented, Error-Resilient, FQCN
-- name: Get Wireless Controller Status
+# Playbook: FortiGate Wireless Controller Status
+# Purpose: Retrieves and validates the status of Wireless Termination Points (WTP).
+# Standards: Idempotency (Read-only), Observability (Assert), Documentation (Inline), FQCN.
+
+- name: Retrieve FortiGate Wireless Controller Information
   hosts: fortigate
   gather_facts: false
+  # Ensure the connection uses the network_cli plugin for FortiOS compatibility
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve WTP status via CLI
-      # Why: Uses cli_command to capture raw operational state for auditing.
-      # This operation is read-only and therefore inherently idempotent.
+    - name: Execute command to get wireless WTP status
+      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interaction
       ansible.netcommon.cli_command:
-        command: "get wireless-controller wtp"
-      register: wtp_info
-      # Error Handling: Identify failure if the output contains common FortiOS error strings
-      failed_when:
-        - wtp_info.failed == true
-        - "'command fail' in wtp_info.stdout"
+        command: get wireless-controller wtp
+      register: wifi_data
+      # Error Handling: Fail only if the command fails or if the command is unrecognized by the device
+      failed_when: 
+        - wifi_data.failed or "Unknown action" in wifi_data.stdout
+      # Idempotency: This is a read-only 'get' command and does not modify the device configuration.
 
-    - name: Validate WTP data retrieval
-      # Observability: Ensure the command returned actual content to avoid silent failures.
+    - name: Validate wireless controller output integrity
+      # Observability: Use assert to verify that the returned data is not empty and contains expected values
       ansible.builtin.assert:
         that:
-          - "wtp_info.stdout is defined"
-          - "wtp_info.stdout | length > 0"
-        fail_msg: "Wireless Controller data retrieval returned empty results. Verify WTPs are configured."
-        success_msg: "Successfully retrieved Wireless Controller WTP status."
+          - wifi_data.stdout is defined
+          - wifi_data.stdout | length > 0
+        fail_msg: "The wireless controller command returned no data or failed to execute properly."
+        success_msg: "Wireless controller WTP status successfully retrieved."
 
-    - name: Display Wireless Status
-      # Observability: Provide formatted output for logging and manual verification.
+    - name: Display formatted wireless controller status
+      # Observability: Print the command output in a human-readable format for audit logs
       ansible.builtin.debug:
         msg: |
           ======================= WIRELESS WTP STATUS =======================
-          {{ wtp_info.stdout }}
+          {{ wifi_data.stdout }}

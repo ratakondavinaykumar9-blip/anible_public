@@ -1,35 +1,36 @@
 ---
-- name: Get Expanded Access Control List
+# Improved Ansible Playbook for Retrieving Expanded Cisco ASA Access Lists
+# This playbook adheres to NetLearner Architect standards for network automation.
+- name: Get Expanded Access Control List Details
   hosts: asa_firepower
   gather_facts: false
-  # Documentation: This playbook retrieves the expanded version of an ACL to reveal specific object-group members.
-  # Read-only 'show' commands are inherently idempotent as they do not modify the device state.
   vars:
-    # Best Practice: Defaulting variable to empty string to avoid undefined errors if not provided
+    # Optional variable to specify a single ACL. If empty, all expanded ACLs are retrieved.
     acl_name: ""
 
   tasks:
-    - name: Execute show access-list expanded command
-      # Best Practice: Using Fully Qualified Collection Name (FQCN)
-      ansible.netcommon.cli_command:
-        command: "{{ 'show access-list ' + acl_name + ' expanded' if acl_name | length > 0 else 'show access-list expanded' }}"
-      # Observability: Register command output for subsequent validation and auditing
-      register: expanded_acl
-      # Error Handling: Explicitly fail if the device returns syntax errors or missing ACL messages
-      failed_when: >
-        'Invalid input' in expanded_acl.stdout or
-        'does not exist' in expanded_acl.stdout
+    - name: Execute 'show access-list' command on ASA
+      # Using FQCN (Fully Qualified Collection Name) for cisco.asa to ensure predictability.
+      cisco.asa.asa_command:
+        commands:
+          - "{{ 'show access-list ' + acl_name + ' expanded' if acl_name | length > 0 else 'show access-list expanded' }}"
+      register: expanded_acl_output
+      # Idempotency: 'show' commands do not modify device state and are safe for repeated execution.
+      # Error Handling: Fail explicitly if the CLI returns an error or indicates the ACL is missing.
+      failed_when:
+        - "'ERROR' in expanded_acl_output.stdout[0]"
+        - "'Invalid' in expanded_acl_output.stdout[0]"
 
-    - name: Validate command output observability
-      # Observability: Use assert to verify that the command returned meaningful content
+    - name: Validate command execution and output presence
+      # Observability: Verify that the command returned data to ensure operational success.
       ansible.builtin.assert:
         that:
-          - "expanded_acl.stdout is defined"
-          - "expanded_acl.stdout | length > 0"
-        fail_msg: "No ACL data was returned. Verify the ACL name exists on the target device."
-        success_msg: "Expanded ACL data successfully retrieved and verified."
+          - "expanded_acl_output.stdout is defined"
+          - "expanded_acl_output.stdout[0] | length > 0"
+        fail_msg: "The ASA command failed to return any output or the result was undefined."
+        success_msg: "Successfully retrieved expanded ACL data."
 
-    - name: Display expanded ACL results
-      # Observability: Output the lines for human readability
+    - name: Display the expanded ACL details
+      # Documentation: Providing clear visibility into the retrieved configuration for the operator.
       ansible.builtin.debug:
-        msg: "{{ expanded_acl.stdout_lines }}"
+        msg: "{{ expanded_acl_output.stdout[0] }}"

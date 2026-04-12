@@ -1,35 +1,32 @@
 ---
-# Playbook: Get MAC Address Table
-# Purpose: Retrieves and validates the Layer 2 MAC address table from Cisco ASA/Firepower devices.
-# Standards: Implements idempotency (read-only), observability via assertions, and follows FQCN best practices.
-- name: Get MAC Table
+- name: NetLearner - ASA/Firepower MAC Address Table Collection
   hosts: asa_firepower
   gather_facts: false
+  # This playbook is idempotent as it performs read-only operations without modifying device state.
+  # Fully Qualified Collection Names (FQCN) are used to ensure long-term compatibility.
 
   tasks:
-    - name: Execute 'show mac-address-table' on target device
-      # Using Fully Qualified Collection Name (FQCN) for reliability.
-      # This operation is inherently idempotent as it is a read-only 'show' command.
+    - name: Retrieve MAC address table via CLI
+      # Using FQCN for cli_command to ensure the correct module is invoked across different environments.
       ansible.netcommon.cli_command:
         command: show mac-address-table
       register: mac_output
-      # Error Handling: Explicitly fail if the device returns common error strings despite a 0 return code.
+      # Error Handling: Explicitly fail if the command is unrecognized or execution fails.
       failed_when: 
-        - mac_output.failed or "Invalid input" in mac_output.stdout or "ERROR" in mac_output.stdout
+        - mac_output.failed or "Invalid input" in mac_output.stdout
 
-    - name: Validate MAC address table data integrity
-      # Observability: Ensure the command returned actual data rather than an empty string.
+    - name: Validate MAC table data retrieval
+      # Observability: Asserting that the command returned data to ensure the device is responding as expected.
       ansible.builtin.assert:
         that:
-          - mac_output.stdout is defined
-          - mac_output.stdout | length > 0
-        fail_msg: "The MAC address table retrieval failed or the table is currently empty."
-        success_msg: "MAC address table successfully captured and verified."
+          - "mac_output.stdout is defined"
+          - "mac_output.stdout | length > 0"
+        fail_msg: "The MAC address table could not be retrieved or is currently empty."
+        success_msg: "MAC address table successfully captured."
 
-    - name: Display formatted MAC table output
-      # Provides human-readable observability for the network operator.
+    - name: Display formatted MAC address table
+      # Provides visibility into the operational state of the network device.
       ansible.builtin.debug:
         msg: |
-          ======================= MAC ADDRESS TABLE =======================
+          ======================= MAC TABLE =======================
           {{ mac_output.stdout }}
-          =================================================================

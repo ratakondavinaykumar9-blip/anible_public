@@ -1,35 +1,33 @@
 ---
-# Playbook to retrieve and validate ASA/Firepower service objects.
-# Adheres to Standard:s for Idempotency, Observability, and Best Practices.
-- name: Get Service Objects
+- name: Audit Cisco ASA Service Objects
   hosts: asa_firepower
   gather_facts: false
+  # Purpose: Safely retrieve and validate service object configurations for network auditing.
 
   tasks:
-    - name: Retrieve service objects from running-config
-      # This task is read-only, ensuring idempotency as it never modifies the device state.
-      # Using FQCN (ansible.netcommon.cli_command) for portability.
-      ansible.netcommon.cli_command:
-        command: show running-config object service
-      register: service_result
-      # Error Handling: Ensure the task fails on common Cisco CLI error indicators.
+    - name: Fetch service object configuration
+      # Standard 5: Use platform-specific FQCN (Fully Qualified Collection Name)
+      cisco.asa.asa_command:
+        commands:
+          - show running-config object service
+      register: asa_service_output
+      # Standard 1: Ensure idempotency; read-only commands should never report 'changed'
+      changed_when: false
+      # Standard 4: Robust error handling to catch CLI-specific errors or execution failures
       failed_when:
-        - service_result.failed or "Invalid input" in service_result.stdout
-      # Ensure data collection persists even when running in --check mode.
-      check_mode: false
+        - asa_service_output.failed or "Invalid input" in asa_service_output.stdout[0]
 
-    - name: Verify successful data retrieval
-      # Observability: Assert that the command returned valid output to prevent silent failures.
+    - name: Verify configuration capture success
+      # Standard 2: Observability; use assertions to verify the output exists
       ansible.builtin.assert:
         that:
-          - service_result.stdout is defined
-          - service_result.stdout | length > 0
-        fail_msg: "No service objects were found or the command failed to return data."
-        success_msg: "Service objects successfully captured."
+          - asa_service_output.stdout[0] is defined
+        fail_msg: "Data capture failed for {{ inventory_hostname }}. Verify connectivity and credentials."
+        quiet: true
 
-    - name: Display service object configuration
-      # Documentation: Providing a clean visual separator for logs and observability.
+    - name: Display formatted service object details
+      # Standard 2: Enhanced observability for manual verification and logging
       ansible.builtin.debug:
         msg: |
-          ======================= SERVICE OBJECTS =======================
-          {{ service_result.stdout }}
+          ======================= SERVICE OBJECTS: {{ inventory_hostname }} =======================
+          {{ asa_service_output.stdout[0] }}

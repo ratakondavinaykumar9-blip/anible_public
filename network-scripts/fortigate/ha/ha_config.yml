@@ -1,38 +1,40 @@
 ---
-# FortiGate HA Configuration Retrieval and Verification
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: FortiGate HA Configuration Audit
+# FortiGate HA Configuration Audit
+# Purpose: Retrieves and validates the High Availability (HA) status of FortiGate units.
+# This playbook ensures operational consistency and follows NetLearner Architect standards.
+- name: Get HA Config
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve current High Availability configuration status
-      # Using FQCN for network common CLI operations. 
-      # This task is inherently idempotent as it is a read-only operation.
+    - name: Retrieve system HA configuration via CLI
+      # Best Practices: Using Fully Qualified Collection Name (FQCN)
+      # Documentation: 'get system ha' provides the configuration block for the HA subsystem.
       ansible.netcommon.cli_command:
-        command: "get system ha"
+        command: get system ha
       register: ha_config
-      # Error Handling: Ensure the command executed successfully and returned data.
-      # changed_when: false ensures the task does not report a 'changed' state during repeated runs.
-      failed_when: 
-        - ha_config.stdout is not defined 
-        - "ha_config.stdout | length == 0"
-        - "'Unknown command' in ha_config.stdout"
+      # Idempotency: Mark as 'changed: false' because this is a read-only operation.
       changed_when: false
+      # Error Handling: Ensure the command output is captured and valid.
+      failed_when: 
+        - ha_config.stdout is not defined or ha_config.stdout == ""
+      ignore_errors: false
 
-    - name: Validate HA configuration observability
-      # Observability: Assert that the retrieved configuration contains critical HA parameters.
-      # This confirms that the device is responding with expected FortiOS HA data.
+    - name: Validate HA configuration state
+      # Observability: Assert that the HA configuration contains critical keywords (e.g., 'mode').
+      # This ensures we didn't just receive an empty shell or an error message.
       ansible.builtin.assert:
         that:
-          - "'mode' in ha_config.stdout"
-          - "'group-id' in ha_config.stdout"
-        fail_msg: "HA configuration output is missing essential parameters (mode or group-id)."
-        success_msg: "HA configuration successfully retrieved and validated."
+          - "'set mode' in ha_config.stdout"
+        fail_msg: "HA configuration is incomplete or missing on {{ inventory_hostname }}."
+        success_msg: "HA configuration successfully retrieved and validated for {{ inventory_hostname }}."
 
-    - name: Display formatted HA configuration
-      # Documentation: Providing a clear, human-readable view of the operational state.
+    - name: Display formatted HA configuration summary
+      # Observability: Provide a structured view for NOC/Engineering review.
       ansible.builtin.debug:
         msg: |
-          ======================= HA CONFIGURATION STATUS =======================
+          ======================= HA CONFIG: {{ inventory_hostname }} =======================
           {{ ha_config.stdout }}
+      tags:
+        - debug
+        - audit

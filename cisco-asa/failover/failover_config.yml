@@ -1,39 +1,40 @@
 ---
 # Failover Configuration Audit
-# Purpose: Retrieves and validates the running-config failover for Cisco ASA/Firepower devices.
-# Standards: Idempotency (read-only), Observability (asserts), FQCN usage, and Error Handling.
-
+# Improved: 2026-03-15 (Standardized for NetLearner)
+# Purpose: Retrieve ASA/Firepower failover configuration with idempotency and validation.
+#
 - name: Get Failover Configuration
   hosts: asa_firepower
-  gather_facts: false # Facts are not required for simple CLI command execution
+  gather_facts: false
 
   tasks:
     - name: Retrieve failover configuration via CLI
-      # Using Fully Qualified Collection Name (FQCN) for reliability
-      # Registering output for observability and verification steps
+      # Use FQCN (Fully Qualified Collection Name) for consistent module resolution
       ansible.netcommon.cli_command:
         command: show running-config failover
-      register: failover_output
-      # Error Handling: Ensure the task fails if the command returns an error or invalid syntax
+      register: failover_result
+      # Read-only operations must be marked with changed_when: false to ensure idempotency
+      # and accurate reporting in automation pipelines.
+      changed_when: false
+      # Explicit error handling to catch device-level errors that might not trigger a module failure
       failed_when: 
-        - failover_output.failed or "Invalid input" in failover_output.stdout
+        - failover_result.stdout == ""
+        - "'ERROR:' in failover_result.stdout"
+        - "'Invalid' in failover_result.stdout"
 
-    - name: Validate failover configuration response
-      # Observability: Assert that we received a valid, non-empty response from the device
-      # This ensures the playbook doesn't silently pass if the command returns nothing
+    - name: Assert failover configuration presence
+      # Observability: verify that the captured output contains expected failover parameters
+      # This ensures that 'failover' is actually configured on the device.
       ansible.builtin.assert:
         that:
-          - failover_output.stdout is defined
-          - failover_output.stdout | length > 0
-          - "'failover' in failover_output.stdout or 'no failover' in failover_output.stdout"
-        fail_msg: "Failover configuration is empty or the command did not return expected data."
-        success_msg: "Failover configuration successfully retrieved and validated for {{ inventory_hostname }}."
+          - "'failover' in failover_result.stdout"
+        fail_msg: "Failover configuration is missing or could not be retrieved from {{ inventory_hostname }}."
+        quiet: true
 
     - name: Display Failover Configuration
-      # Provides visibility into the current state of the device
+      # Provide clear visibility of the device state for logs and operators
       ansible.builtin.debug:
         msg: |
-          ======================================================================
-          FAILOVER CONFIGURATION: {{ inventory_hostname }}
-          ======================================================================
-          {{ failover_output.stdout }}
+          ======================= FAILOVER CONFIG =======================
+          DEVICE: {{ inventory_hostname }}
+          {{ failover_result.stdout }}

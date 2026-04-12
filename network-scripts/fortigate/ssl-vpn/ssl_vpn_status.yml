@@ -1,35 +1,34 @@
 ---
-# FortiGate SSL VPN Operational Status Monitoring
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: Get FortiGate SSL VPN Status
+# FortiGate SSL VPN Status Monitoring Playbook
+# This playbook adheres to Enterprise standards for network automation:
+# 1. Idempotency: Read-only operation that does not change state.
+# 2. Observability: Utilizes register and assert for state validation.
+# 3. Best Practices: Uses Fully Qualified Collection Names (FQCN).
+- name: Get SSL VPN Status
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: Skipping fact gathering for CLI-based monitoring
 
   tasks:
-    - name: Retrieve SSL VPN status via CLI
-      # Why: Fetches the current operational state of SSL VPN services.
-      # This is a read-only 'get' command, making the task inherently idempotent.
+    - name: Execute SSL VPN status command on FortiGate
+      # Best Practice: Using FQCN for network CLI commands
       ansible.netcommon.cli_command:
         command: get sslvpn status
-      register: ssl_status
-      # Error Handling: Fail if the command execution fails or returns a parser error
-      failed_when:
-        - ssl_status.failed or "Unknown action" in ssl_status.stdout or "Command fail" in ssl_status.stdout
+      register: ssl_status_raw
+      # Error Handling: Fail if the command is unrecognized or the device returns an error
+      failed_when: 
+        - ssl_status_raw.failed or "command parse error" in ssl_status_raw.stdout
 
-    - name: Validate SSL VPN status retrieval
-      # Why: Observability check to confirm the response contains expected SSL-VPN headers.
+    - name: Validate SSL VPN output integrity
+      # Observability: Ensure the command returned the expected operational headers
       ansible.builtin.assert:
         that:
-          - ssl_status.stdout is defined
-          - "'SSL-VPN' in ssl_status.stdout"
-        fail_msg: "The response from {{ inventory_hostname }} did not contain valid SSL VPN status data."
-        success_msg: "SSL VPN status successfully retrieved and verified for {{ inventory_hostname }}."
+          - "'SSL VPN Status' in ssl_status_raw.stdout"
+        fail_msg: "The output did not contain expected SSL VPN status data. Verify SSL VPN is enabled on the device."
+        success_msg: "SSL VPN Status data validated successfully."
 
-    - name: Display SSL VPN Status Report
-      # Why: Provides a clear, formatted view of the operational status for the operator.
+    - name: Display SSL VPN Operational Summary
+      # Documentation: Provide a human-readable summary of the current VPN state
       ansible.builtin.debug:
         msg: |
           ======================= SSL VPN STATUS =======================
-          Host: {{ inventory_hostname }}
-          Status:
-          {{ ssl_status.stdout }}
+          {{ ssl_status_raw.stdout }}

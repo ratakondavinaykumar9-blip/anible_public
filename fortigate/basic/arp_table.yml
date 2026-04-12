@@ -1,36 +1,40 @@
 ---
 # FortiGate ARP Table Retrieval
-# Purpose: Fetches the Address Resolution Protocol (ARP) cache from FortiOS devices.
-# Standards: Idempotent (read-only), Observable (assertions), and FQCN compliant.
-- name: Get FortiGate ARP Table
+# Improved: 2026-03-15
+# Author: NetLearner Architect
+#
+# Standards compliance:
+# 1. Idempotency: Read-only operation is safe for repeated execution.
+# 2. Observability: Uses 'register' and 'assert' to verify data integrity.
+# 3. Documentation: Clear comments explaining task logic and error handling.
+# 4. Error Handling: Uses 'failed_when' to catch specific device-level errors.
+# 5. Best Practices: Uses Fully Qualified Collection Names (FQCN).
+
+- name: Retrieve and Validate FortiGate ARP Table
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Fetch ARP table using CLI command
-      # FQCN: ansible.netcommon.cli_command is used for generic network CLI interaction.
-      # This operation is inherently idempotent as it does not modify device state.
+    - name: Fetch ARP table from device
+      # FQCN: Using ansible.netcommon for standardized network CLI command execution.
       ansible.netcommon.cli_command:
-        command: "get system arp"
-      register: arp_result
-      # Error Handling: Ensure the task fails if the command returns an error or empty result.
-      failed_when: 
-        - arp_result.failed
-        - "'command parse error' in arp_result.stdout | lower"
-        - "'unknown command' in arp_result.stdout | lower"
+        command: get system arp
+      register: arp_output
+      # Error Handling: Ensure we fail if the device explicitly returns a "Command fail" message 
+      # or if the execution itself fails.
+      failed_when: (arp_output.failed) or ("Command fail" in arp_output.stdout)
 
-    - name: Verify ARP data integrity
-      # Observability: Assert that we received a valid response to prevent silent downstream failures.
+    - name: Validate ARP table data
+      # Observability: Confirm the command returned content and contains expected column headers.
       ansible.builtin.assert:
         that:
-          - "arp_result.stdout is defined"
-          - "arp_result.stdout | length > 0"
-        fail_msg: "The ARP table could not be retrieved or the output is unexpectedly empty."
-        quiet: true
+          - arp_output.stdout | length > 0
+          - "'Address' in arp_output.stdout or 'Interface' in arp_output.stdout"
+        fail_msg: "ARP table validation failed: Output is empty or has an unexpected format."
+        success_msg: "ARP table successfully retrieved and verified."
 
-    - name: Display Formatted ARP Table
-      # Observability: Output the results for logging and manual audit.
+    - name: Display ARP Table
       ansible.builtin.debug:
         msg: |
-          ======================= ARP TABLE: {{ inventory_hostname }} =======================
-          {{ arp_result.stdout }}
+          ======================= FORTIGATE ARP TABLE =======================
+          {{ arp_output.stdout }}

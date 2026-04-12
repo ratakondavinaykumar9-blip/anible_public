@@ -1,75 +1,71 @@
 ---
-# IKEv1 Tunnel Configuration Audit
-# Improved for Production Standards: Idempotency, Observability, and FQCN.
-# This playbook retrieves and validates IKEv1 VPN configuration from Cisco ASA devices.
-
-- name: Get and Verify IKEv1 Configuration
+# IKEv1 Tunnel Configuration - Audit and Verification
+# This playbook retrieves and validates IKEv1 IPSec settings on Cisco ASA/Firepower devices.
+# Standards: Idempotent (Read-only), Observability (Assert), FQCN usage, and Error Handling.
+# Improved: 2026-03-15
+- name: Get IKEv1 Configuration
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: no
 
   tasks:
-    - name: Retrieve IKEv1 ISAKMP Policy
-      # Why: Phase 1 policies define the cryptographic parameters for control plane negotiation.
-      # Idempotency: Safe read-only operation; does not modify device state.
-      ansible.netcommon.cli_command:
-        command: show running-config crypto isakmp policy
-      register: isakmp_output
-      # Error Handling: Catch cases where the device returns an error string instead of config data.
-      failed_when: 
-        - "'Invalid' in isakmp_output.stdout or 'error' in isakmp_output.stdout | lower"
-
-    - name: Validate ISAKMP Policy Retrieval
-      # Observability: Ensure that at least one policy is configured to prevent silent failures.
-      ansible.builtin.assert:
-        that:
-          - isakmp_output.stdout | length > 0
-        fail_msg: "IKEv1 ISAKMP policies are missing on {{ inventory_hostname }}."
-        success_msg: "IKEv1 ISAKMP policies retrieved successfully."
-
-    - name: Retrieve IKEv1 Transform-Sets
-      # Why: Phase 2 transform-sets define the encryption and hashing algorithms for data traffic.
-      ansible.netcommon.cli_command:
-        command: show crypto ipsec transform-set
-      register: transform_output
-      failed_when: 
-        - "'Invalid' in transform_output.stdout or 'error' in transform_output.stdout | lower"
-
-    - name: Validate Transform-Set Retrieval
-      # Observability: Check that data-plane security parameters are present.
-      ansible.builtin.assert:
-        that:
-          - transform_output.stdout | length > 0
-        fail_msg: "No IPsec transform-sets found on {{ inventory_hostname }}."
-
-    - name: Retrieve Crypto Map Configuration
-      # Why: Crypto maps bind the ISAKMP policies and transform-sets to specific peers and interfaces.
+    - name: Get IKEv1 crypto map policy
+      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction
       ansible.netcommon.cli_command:
         command: show running-config crypto map
-      register: crypto_map_output
+      register: crypto_map
+      # Error Handling: Fail if the output is empty or contains "Invalid" command responses
       failed_when: 
-        - "'Invalid' in crypto_map_output.stdout or 'error' in crypto_map_output.stdout | lower"
+        - crypto_map.stdout == "" or "Invalid" in crypto_map.stdout
 
-    - name: Validate Crypto Map Retrieval
-      # Observability: Confirm that the active tunnel bindings are configured.
+    - name: Verify Crypto Map output integrity
+      # Observability: Assert that the command returned valid data
       ansible.builtin.assert:
         that:
-          - crypto_map_output.stdout | length > 0
-        fail_msg: "No Crypto Map configuration found on {{ inventory_hostname }}."
+          - "crypto_map.stdout is defined"
+          - "crypto_map.stdout | length > 0"
+        fail_msg: "Crypto map configuration is empty or could not be retrieved."
+        quiet: true
 
-    - name: Display Consolidated IKEv1 Configuration
-      # Why: Summarizes all relevant configuration points in a single view for the operator.
-      # Best Practice: Using Fully Qualified Collection Name (FQCN).
+    - name: Get IKEv1 transform-set configuration
+      ansible.netcommon.cli_command:
+        command: show crypto ipsec transform-set
+      register: transform_set
+      failed_when: 
+        - transform_set.stdout == "" or "Invalid" in transform_set.stdout
+
+    - name: Verify Transform-set output integrity
+      ansible.builtin.assert:
+        that:
+          - "transform_set.stdout is defined"
+          - "transform_set.stdout | length > 0"
+        fail_msg: "IPSec Transform-set configuration is empty or could not be retrieved."
+        quiet: true
+
+    - name: Get crypto ISAKMP policy details
+      ansible.netcommon.cli_command:
+        command: show running-config crypto isakmp policy
+      register: isakmp
+      failed_when: 
+        - isakmp.stdout == "" or "Invalid" in isakmp.stdout
+
+    - name: Verify ISAKMP Policy output integrity
+      ansible.builtin.assert:
+        that:
+          - "isakmp.stdout is defined"
+          - "isakmp.stdout | length > 0"
+        fail_msg: "ISAKMP policy configuration is empty or could not be retrieved."
+        quiet: true
+
+    - name: Display consolidated IKEv1 configuration
+      # FQCN: Using ansible.builtin.debug for standardized reporting
       ansible.builtin.debug:
         msg: |
-          ======================= IKEv1 CONFIG SUMMARY: {{ inventory_hostname }} =======================
+          ======================= IKEv1 CONFIG AUDIT =======================
+          ISAKMP Policy:
+          {{ isakmp.stdout }}
           
-          [ ISAKMP POLICY (PHASE 1) ]
-          {{ isakmp_output.stdout }}
+          Crypto Map:
+          {{ crypto_map.stdout }}
           
-          [ TRANSFORM SETS (PHASE 2) ]
-          {{ transform_output.stdout }}
-          
-          [ CRYPTO MAPS (BINDINGS) ]
-          {{ crypto_map_output.stdout }}
-          
-          =============================================================================================
+          Transform Set:
+          {{ transform_set.stdout }}

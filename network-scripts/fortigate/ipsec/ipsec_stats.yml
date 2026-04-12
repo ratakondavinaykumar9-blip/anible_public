@@ -1,35 +1,35 @@
 ---
-# FortiGate IPSec Statistics Retrieval and Validation
-# This playbook retrieves real-time IPSec VPN statistics for monitoring purposes.
+# FortiGate IPSec Statistics - Production Grade
+# This playbook retrieves and validates IPSec VPN statistics from FortiGate devices.
 - name: Get IPSec Stats
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve IPSec statistics via CLI
-      # Best Practice: Using FQCN for network command execution
-      # Idempotency: Read-only 'get' commands do not modify state and are safe for repeated execution
+    - name: Retrieve IPSec VPN statistics via CLI
+      # FQCN: Using ansible.netcommon for broad compatibility across network devices
       ansible.netcommon.cli_command:
         command: get vpn ipsec stats
-      register: stats_output
-      # Error Handling: Catch cases where the command is not recognized or fails on the device
-      failed_when:
-        - stats_output.stdout is not defined
-        - "'Unknown command' in stats_output.stdout"
-        - "'Command fail' in stats_output.stdout"
+      register: stats
+      # Idempotency: Ensure read-only commands do not trigger 'changed' state in reporting
+      changed_when: false
+      # Error Handling: Catch specific FortiOS CLI failure strings or missing output
+      failed_when: 
+        - stats.stdout is not defined or stats.stdout | length == 0
+        - "'Command fail' in stats.stdout or 'Unknown action' in stats.stdout"
 
-    - name: Validate IPSec statistics data
-      # Observability: Assert that the command returned content to ensure the data is actionable
+    - name: Validate IPSec statistics integrity
+      # Observability: Assert that the output contains expected VPN keywords to verify success
       ansible.builtin.assert:
         that:
-          - stats_output.stdout | length > 0
-          - "'IPsec' in stats_output.stdout"
-        fail_msg: "IPSec statistics retrieval returned empty or invalid data."
-        success_msg: "IPSec statistics successfully validated."
+          - "'IPsec' in stats.stdout"
+          - "'SA' in stats.stdout"
+        fail_msg: "The command output did not contain expected IPSec metrics. Verification failed."
+        success_msg: "IPSec statistics successfully retrieved and verified."
 
     - name: Display IPSec Statistics
-      # Observability: Provide clear visibility into the command output for the operator
+      # Documentation: Formatted output for human-readable monitoring
       ansible.builtin.debug:
         msg: |
           ======================= IPSEC STATS =======================
-          {{ stats_output.stdout }}
+          {{ stats.stdout }}

@@ -1,40 +1,38 @@
 ---
-# FortiGate Memory Monitoring - Standard:
-# Purpose: This playbook performs a non-intrusive status check of the system memory utilization.
-# It ensures the device is responsive and returns valid performance metrics for observability.
-- name: Monitor FortiGate Memory Utilization
+# FortiGate Memory Monitoring - NetLearner Architect Standard
+# This playbook retrieves and validates memory usage from Fortinet devices using best practices.
+- name: Monitor FortiGate Memory Usage
   hosts: fortigate
-  gather_facts: false # Gathering facts is disabled to optimize performance for monitoring tasks
+  gather_facts: false # Optimization: Standard facts are not required for CLI-based monitoring.
 
   tasks:
-    - name: Retrieve memory performance status from FortiGate CLI
-      # Using Fully Qualified Collection Name (FQCN) for network command execution
-      # This operation is inherently idempotent as it only retrieves state without modifying configuration
+    - name: Fetch memory statistics from FortiGate CLI
+      # Best Practice: Use Fully Qualified Collection Names (FQCN) for reliability.
+      # Idempotency: This is a read-only operation; changed_when is set to false to prevent false 'changed' states.
       ansible.netcommon.cli_command:
-        command: "get system performance status | grep memory"
-      register: mem_output
-      # Idempotency: Explicitly marking as unchanged since 'get' commands are read-only
-      changed_when: false
-      # Error Handling: Ensure the task fails if the command results in an error or connection issue
+        command: "get system performance status | grep -i memory"
+      register: mem_raw
+      # Error Handling: Define failure if the command fails or returns an empty string.
       failed_when: 
-        - mem_output.failed
-        - "'error' in mem_output.stdout | lower"
+        - mem_raw.failed
+        - mem_raw.stdout | length == 0
+      changed_when: false
 
-    - name: Validate memory output integrity
-      # Observability: Verify that the command returned data and contains the expected metrics
+    - name: Validate memory data integrity
+      # Observability: Assert that the command output contains expected keywords to ensure valid data capture.
       ansible.builtin.assert:
         that:
-          - mem_output.stdout | length > 0
-          - "'memory' in mem_output.stdout | lower"
-        fail_msg: "The memory status command returned invalid or empty data for {{ inventory_hostname }}."
-        success_msg: "Memory metrics successfully validated for {{ inventory_hostname }}."
+          - "'memory' in mem_raw.stdout | lower"
+        fail_msg: "Memory statistics could not be parsed from the device output."
+        success_msg: "Memory statistics successfully retrieved and verified."
 
-    - name: Display formatted memory utilization report
-      # Observability: Providing human-readable output for logging and audit trails
+    - name: Display Memory Monitoring Report
+      # Documentation: Providing a clear, formatted summary for operational visibility.
       ansible.builtin.debug:
         msg: |
-          ======================= MEMORY MONITORING =======================
+          ======================= MEMORY MONITORING REPORT =======================
           Device: {{ inventory_hostname }}
-          Timestamp: {{ lookup('pipe', 'date +%Y-%m-%d\ %H:%M:%S') }}
-          Details:
-          {{ mem_output.stdout }}
+          Status: SUCCESS
+          
+          {{ mem_raw.stdout }}
+          ========================================================================

@@ -1,37 +1,36 @@
 ---
-# Architect:Improved Playbook
-# Purpose: Retrieves and validates interface descriptions for Cisco ASA/Firepower devices.
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
-
+# Playbook: Get Interface Descriptions
+# Author: NetLearner Architect
+# Purpose: Retrieves and validates interface descriptions from Cisco ASA/Firepower devices.
+# Idempotency: Inherently idempotent as it performs a read-only state inspection.
 - name: Get Interface Descriptions
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve interface descriptions from the device
-      # Standard: Use Fully Qualified Collection Names (FQCN).
-      # Why: This command fetches the operational state and descriptions of all interfaces.
+    - name: Retrieve interface descriptions from device
+      # Use FQCN for better maintainability and to avoid module name conflicts
       ansible.netcommon.cli_command:
         command: show interface description
-      register: interface_output
-      # Standard: Idempotency.
-      # Why: Explicitly marking as not changed since this is a read-only "show" operation.
-      changed_when: false
-      # Standard: Error Handling.
-      # Why: Fail the task if the device returns an error message or the execution fails.
-      failed_when: 
-        - interface_output.failed or "Invalid input" in interface_output.stdout
+      register: desc_result
+      # Error Handling: Ensure we fail if the command is not recognized or permitted
+      failed_when:
+        - desc_result.failed | default(false)
+        - "'Invalid input' in desc_result.stdout"
 
-    - name: Verify command execution success and output presence
-      # Standard: Observability (assert).
-      # Why: Ensures the playbook validates that meaningful data was returned.
+    - name: Verify data integrity and observability
+      # Observability: Confirm the output contains the expected 'Interface' header
       ansible.builtin.assert:
         that:
-          - interface_output.stdout is defined
-          - interface_output.stdout | length > 0
-        fail_msg: "Interface description output is empty or undefined."
-        success_msg: "Successfully retrieved interface descriptions."
+          - desc_result.stdout is defined
+          - desc_result.stdout | length > 0
+          - "'Interface' in desc_result.stdout"
+        fail_msg: "Failed to retrieve valid interface description data or output was empty."
+        success_msg: "Interface descriptions successfully retrieved and validated."
 
-    - name: Display Interface Descriptions
-      # Standard: Observability (debug).
-      # Why: Provides a clear, formatted view of the system state for the operator.
+    - name: Display formatted interface descriptions
+      # Documentation: Clear visual separation for operator visibility in logs
+      ansible.builtin.debug:
+        msg: |
+          ======================= INTERFACE DESCRIPTIONS =======================
+          {{ desc_result.stdout }}

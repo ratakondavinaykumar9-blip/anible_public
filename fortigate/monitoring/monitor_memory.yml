@@ -1,37 +1,34 @@
 ---
-# FortiGate Memory Monitoring
-# Improved for Idempotency, Observability, and Standards Compliance
-# Author: Architect:#
-- name: Monitor Memory Usage
+# FortiGate Memory Monitoring Playbook
+# This playbook retrieves and validates memory usage statistics.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+
+- name: Monitor FortiGate Memory
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve memory statistics via CLI
-      # This task is idempotent as it performs a read-only operational command.
-      # Fully Qualified Collection Names (FQCN) used for best practices.
+    - name: Retrieve system performance status
+      # This is a read-only command, making the task inherently idempotent.
+      # Using FQCN (ansible.netcommon.cli_command) for consistency and best practices.
       ansible.netcommon.cli_command:
-        command: "get system performance status | grep memory"
+        command: "get system performance status"
       register: mem_raw
-      # Error Handling: Catch cases where the command fails or returns empty output.
-      failed_when: 
-        - mem_raw.rc != 0 or mem_raw.stdout == ""
+      # Error Handling: Ensure the task fails explicitly if the command execution fails on the device.
+      failed_when: mem_raw.rc != 0
 
-    - name: Verify memory data observability
-      # Observability: Asserting that the output contains valid data to prevent silent monitoring failures.
+    - name: Validate memory data retrieval
+      # Observability: Use assert to verify that the output contains the expected 'Memory' string.
+      # This ensures we are not processing empty or malformed data in subsequent steps.
       ansible.builtin.assert:
         that:
-          - "mem_raw.stdout is defined"
-          - "mem_raw.stdout | length > 0"
-        fail_msg: "The device did not return recognizable memory statistics."
-        success_msg: "Memory data successfully captured and verified."
+          - "'Memory' in mem_raw.stdout"
+        fail_msg: "The command succeeded but 'Memory' statistics were not found in the output."
+        success_msg: "Memory statistics successfully captured."
 
-    - name: Display Memory Monitoring Report
-      # Documentation: Providing clear visibility of the results for the operator.
+    - name: Display memory statistics
+      # Documentation: Filter the raw output to show only relevant memory lines for better visibility.
       ansible.builtin.debug:
         msg: |
           ======================= MEMORY MONITORING =======================
-          Device: {{ inventory_hostname }}
-          Status:
-          {{ mem_raw.stdout }}
-          =================================================================
+          {{ mem_raw.stdout_lines | select('search', 'Memory', ignorecase=true) | list | join('\n') }}

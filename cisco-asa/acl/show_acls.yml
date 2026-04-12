@@ -1,60 +1,51 @@
 ---
-# Name: Get Access Lists
-# Description: Gathers structured ACL configuration and real-time hit counts from Cisco ASA/Firepower.
-# Improved: 2026-03-08
-# Standards: Idempotency (read-only), FQCN, Observability (assert/register), Error Handling.
+# Improved Access List Retrieval Playbook
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Purpose: Gathers ACL configuration and real-time hit counts for audit and troubleshooting.
+
 - name: Get Access Lists
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Gather current ACL configuration (Idempotent read-only)
-      cisco.asa.asa_acls:
+    - name: Gather existing ACL configurations
+      # Use 'state: gathered' to read current device state without applying changes (Idempotency).
+      # This ensures the task is read-only and safe for repeated execution.
+      cisco.asa.asa_acl:
         state: gathered
       register: acl_output
-      # Resource modules with 'state: gathered' are idempotent as they do not modify the device state.
+      # Error Handling: Ensure we catch connectivity or module-specific execution failures.
+      failed_when: acl_output.failed | default(false)
 
-    - name: Verify ACL data was retrieved successfully
+    - name: Validate ACL data collection
+      # Observability: Assert that the module successfully returned the 'gathered' facts structure.
       ansible.builtin.assert:
         that:
           - acl_output.gathered is defined
-        fail_msg: "Failed to gather structured ACL facts from {{ inventory_hostname }}. Check connectivity and permissions."
+        fail_msg: "ACL data could not be retrieved from {{ inventory_hostname }}. Check connectivity and credentials."
+        success_msg: "Successfully gathered ACL data for {{ inventory_hostname }}."
         quiet: true
 
-    - name: Get ACL hits via CLI command (Observability)
+    - name: Fetch real-time ACL hit counts
+      # Using FQCN for operational command execution. 
+      # This captures the dynamic 'hitcnt' status which is not part of the static configuration state.
       ansible.netcommon.cli_command:
         command: show access-list | include hitcnt
       register: acl_hits
-      # Some versions may not return hitcnt if no traffic has passed; handle gracefully.
+      # Error Handling: Fail if the command returns ASA-specific error strings.
+      # Empty output is allowed as it simply means no hits have been recorded yet.
       failed_when: 
-        - acl_hits.rc is defined 
-        - acl_hits.rc != 0
-      ignore_errors: true
+        - acl_hits.failed | default(false)
+        - "'Invalid input' in acl_hits.stdout or 'ERROR:' in acl_hits.stdout"
 
-    - name: Verify CLI command execution
+    - name: Verify hit count command execution
+      # Observability: Ensure the CLI command object exists and was processed.
       ansible.builtin.assert:
         that:
           - acl_hits.stdout is defined
-        fail_msg: "CLI command 'show access-list' failed to execute on {{ inventory_hostname }}."
+        fail_msg: "The 'show access-list' command failed to return a valid response object on {{ inventory_hostname }}."
         quiet: true
 
-    - name: Summary of ACL Configuration and Usage
-      ansible.builtin.debug:
-        msg: |
-          ============================================================
-          ACL INVENTORY: {{ inventory_hostname }}
-          ============================================================
-          {% if acl_output.gathered is defined and acl_output.gathered | length > 0 %}
-          {% for acl in acl_output.gathered %}
-          {{ acl.name }}: {{ acl.aces | default([]) | length }} entries configured.
-          {% endfor %}
-          {% else %}
-          No structured ACL data found or no ACLs configured.
-          {% endif %}
-
-          HIT COUNT ANALYSIS:
-          {% if acl_hits.stdout is defined and acl_hits.stdout != "" %}
-          {{ acl_hits.stdout }}
-          {% else %}
-          No active hit counts detected or command returned empty result.
-          {% endif %}
+    - name: Generate Summary Report
+      # Documentation: Summary of results for human readability and audit logging.
+      # Uses Jinja2

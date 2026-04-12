@@ -7,38 +7,47 @@
   tasks:
     - name: Gather initial device state
       # FQCN: cisco.ios.ios_facts
-      # Purpose: Collects baseline facts to ensure the device is reachable and to support idempotency checks.
+      # Purpose: Collects baseline facts to ensure device reachability and support idempotency checks.
       cisco.ios.ios_facts:
         gather_subset:
-          - interfaces
+          - min
       register: initial_state
 
-    - name: Ensure SDA RLOC Loopback interface is configured
-      # Idempotency: Uses 'state: merged' to only apply changes if the current config differs.
+    - name: Verify device connectivity
+      # Observability: Ensures the device is responsive before attempting configuration.
+      ansible.builtin.assert:
+        that:
+          - initial_state.ansible_facts is defined
+        fail_msg: "Failed to gather facts from {{ inventory_hostname }}. Connectivity check failed."
+        success_msg: "Connectivity to {{ inventory_hostname }} verified."
+
+    - name: Configure SDA RLOC Loopback interface
+      # Idempotency: Using 'state: merged' ensures the configuration is only applied if the current state differs.
       # FQCN: cisco.ios.ios_l3_interfaces
+      # Documentation: The Loopback0 interface serves as the Routing Locator (RLOC) for the SDA Fabric.
       cisco.ios.ios_l3_interfaces:
         config:
           - name: Loopback0
-            description: "SDA RLOC Loopback"
+            description: "SDA RLOC Loopback - Managed by NetLearner"
             ipv4:
               - address: 10.255.255.1/32
         state: merged
       register: loopback_config
-      # Error Handling: Explicitly fail if the module cannot reach the device or apply the change.
+      # Error Handling: Explicitly fails if the configuration cannot be applied or the module fails.
       failed_when: loopback_config.failed | default(false)
 
-    - name: Verify Loopback configuration success
-      # Observability: Use assert to validate that the configuration is in the desired state.
+    - name: Validate Loopback configuration success
+      # Observability: Verifying the success of the previous task to prevent configuration drift.
       ansible.builtin.assert:
         that:
-          - loopback_config.failed == false
-        fail_msg: "SDA Loopback0 configuration failed to apply or verify."
+          - not loopback_config.failed
+        fail_msg: "SDA Loopback0 configuration failed on {{ inventory_hostname }}."
         success_msg: "SDA Loopback0 configuration is verified and idempotent."
 
-    - name: Configure Global LISP parameters for SDA
+    - name: Configure Global LISP for SDA Fabric
       # FQCN: cisco.ios.ios_config
-      # Idempotency: 'match: line' ensures we do not duplicate commands in the running-config.
-      # Documentation: Router LISP is the control plane protocol for the SDA fabric.
+      # Idempotency: 'match: line' prevents redundant entries in the running configuration.
+      # Documentation: LISP (Locator/ID Separation Protocol) is the control plane for the SDA fabric.
       cisco.ios.ios_config:
         lines:
           - instance-id 0
@@ -48,10 +57,28 @@
         match: line
       register: lisp_config
 
-    - name: Validate LISP configuration application
+    - name: Verify LISP configuration application
       # Observability: Registering results and asserting success ensures the playbook stops on configuration errors.
       ansible.builtin.assert:
         that:
-          - lisp_config.failed == false
-        fail_msg: "SDA LISP configuration failed."
+          - not lisp_config.failed
+        fail_msg: "SDA LISP configuration failed on {{ inventory_hostname }}."
         success_msg: "SDA LISP configuration successfully applied/verified."
+
+    - name: Enable TrustSec (CTS) Role-Based Enforcement
+      # FQCN: cisco.ios.ios_config
+      # Documentation: CTS enforcement is required for SGT-based security policies within the SDA fabric.
+      cisco.ios.ios_config:
+        lines:
+          - cts role-based enforcement
+        match: line
+        save_when: changed
+      register: cts_config
+      # Error Handling: Explicitly handling potential failure of policy-critical enforcement commands.
+      failed_when: cts_config.failed | default(false)
+
+    - name: Validate TrustSec enforcement status
+      ansible.builtin.assert:
+        that:
+          - not cts_config.failed
+        success_msg: "SDA Policy Enforcement (CTS) successfully enabled and verified."

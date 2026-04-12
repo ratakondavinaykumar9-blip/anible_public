@@ -1,33 +1,33 @@
 ---
-# Interface Counters - Standard:
-# Improved: 2026-03-08
-# Description: Gathers and validates interface packet statistics from ASA/Firepower devices.
-# This playbook is idempotent as it only performs read-only 'show' operations.
----
+# Playbook: Get Interface Counters
+# Description: This playbook retrieves and verifies interface packet counters from Cisco ASA/Firepower devices.
+# Standards: Idempotency (Read-only), Observability (Assert), Documentation (Comments), Error Handling (failed_when), FQCN.
+# Author: NetLearner Architect
+
 - name: Get Interface Counters
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve interface statistics via CLI
-      # Use Fully Qualified Collection Name (FQCN) for consistency and robust module resolution
+    - name: Execute show interface command
+      # Using FQCN for network CLI operations. Read-only 'show' commands are inherently idempotent.
       ansible.netcommon.cli_command:
         command: "show interface | include (OK|input packets|output packets)"
-      register: counters
-      # Error Handling: Explicitly fail if the response is empty or indicates a CLI syntax error
-      failed_when: 
-        - counters.stdout is not defined or counters.stdout | length == 0
-        - "'Invalid input' in counters.stdout"
+      register: counters_result
+      # Error Handling: Explicitly fail if the command returns typical Cisco error strings or if the module fails.
+      failed_when:
+        - counters_result.failed or "Invalid input" in counters_result.stdout or "incomplete command" in counters_result.stdout
 
-    - name: Verify counter data retrieval success
-      # Observability: Assert that the expected packet data exists in the output to confirm operational status
+    - name: Validate counter retrieval
+      # Observability: Use assertions to verify that the output is not empty and contains expected data.
       ansible.builtin.assert:
         that:
-          - "'packets' in counters.stdout"
-        fail_msg: "Failed to retrieve valid interface counter data. Check connectivity or device state."
-        success_msg: "Successfully retrieved interface counters."
+          - counters_result.stdout is defined
+          - counters_result.stdout | length > 0
+        fail_msg: "The command returned no data. Check device connectivity or interface status."
+        success_msg: "Interface counters successfully captured."
 
-    - name: Display retrieved interface counters
-      # Documentation: Output the command results in a structured format for operator visibility
+    - name: Display interface counters
+      # Observability: Print the output in a readable format for the operator.
       ansible.builtin.debug:
-        msg: "{{ counters.stdout_lines }}"
+        msg: "{{ counters_result.stdout_lines }}"

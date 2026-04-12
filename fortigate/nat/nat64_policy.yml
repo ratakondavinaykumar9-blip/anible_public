@@ -1,7 +1,8 @@
 ---
-# FortiGate NAT64 Policies Retrieval
-# This playbook fetches the NAT64 policy configuration from FortiGate devices.
-# Improved for: Idempotency, Observability, Documentation, Error Handling, and FQCN usage.
+# FortiGate NAT64 Policy Retrieval and Validation
+# This playbook retrieves NAT64 configurations while ensuring operational observability,
+# error handling, and adherence to Ansible best practices (FQCN).
+# Idempotency: This is a read-only operation and does not modify device state.
 
 - name: Get NAT64 Policies
   hosts: fortigate
@@ -9,28 +10,31 @@
 
   tasks:
     - name: Retrieve NAT64 configuration via CLI
-      # Use FQCN (ansible.netcommon.cli_command) for best practices.
-      # Idempotency: Set changed_when to false because this is a read-only operation.
+      # Using FQCN for best practices and consistency across environments.
       ansible.netcommon.cli_command:
         command: get firewall nat64
-      register: nat64_raw
-      changed_when: false
-      # Error Handling: Ensure the task fails if the command is not recognized or returns an error.
+      register: nat64_output
+      # Error Handling: Fail only if the command itself fails or returns a parser error.
+      # We allow empty results as valid configuration states.
       failed_when: 
-        - nat64_raw.stdout is not defined or nat64_raw.stdout == ""
-        - "'Command fail' in nat64_raw.stdout or 'Unknown action' in nat64_raw.stdout"
+        - nat64_output.failed | default(false)
+        - "'command parse error' in nat64_output.stdout | lower"
 
-    - name: Validate NAT64 output content
-      # Observability: Assert that the command returned data to verify successful execution.
+    - name: Validate retrieval success (Observability)
+      # Assert ensures the task path stops if the expected data structure is missing.
       ansible.builtin.assert:
         that:
-          - nat64_raw.stdout | length > 0
-        fail_msg: "NAT64 configuration retrieval returned no data. Check device connectivity or feature status."
+          - "nat64_output.stdout is defined"
+        fail_msg: "Critical Error: Failed to capture stdout from the NAT64 command."
         success_msg: "NAT64 configuration successfully captured."
+        quiet: true
 
-    - name: Display NAT64 Policies
-      # Documentation: Provide clear visibility into the retrieved state for audit logs.
+    - name: Display NAT64 Configuration Details
+      # Documentation: Providing formatted output for human-readable audit logs.
       ansible.builtin.debug:
         msg: |
-          ======================= NAT64 STATUS =======================
-          {{ nat64_raw.stdout }}
+          ======================= NAT64 POLICY SUMMARY =======================
+          Device: {{ inventory_hostname }}
+          Status: SUCCESS
+          Data:
+          {{ nat64_output.stdout | default('No NAT64 policies found or configured.') }}

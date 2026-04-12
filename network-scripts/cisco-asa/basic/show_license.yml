@@ -1,32 +1,41 @@
 ---
-# Standard: Playbook: License Retrieval
-# Purpose: Gathers and validates license information from Cisco ASA/Firepower devices.
-- name: Get License Details
+# NetLearner Architect - Improved License Discovery Playbook
+# This playbook retrieves and validates license information from Cisco ASA/Firepower devices.
+# Standards applied: Idempotency (Read-only), Observability (Assert/Register), Documentation, Error Handling, FQCN.
+- name: Get ASA/Firepower License Details
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute 'show version' to gather license and hardware data
-      # Using FQCN: ansible.netcommon.cli_command is preferred for generic CLI interaction.
-      # Read-only operation ensures idempotency as it does not modify device state.
+    - name: Retrieve license information via CLI command
+      # FQCN: Using ansible.netcommon.cli_command for cross-platform network compatibility.
+      # Idempotency: 'show' commands are read-only and inherently idempotent.
       ansible.netcommon.cli_command:
         command: show version
-      register: asa_version_output
-      # Error Handling: Fail explicitly if the command execution fails or returns empty results.
-      failed_when: asa_version_output.failed or not asa_version_output.stdout
+      register: license_data
+      # Error Handling: Explicitly fail if the output is empty or the command execution failed.
+      failed_when: 
+        - license_data.stdout is not defined
+        - license_data.stdout | length == 0
+      ignore_errors: false
 
-    - name: Verify the integrity of retrieved license data
-      # Observability: Validating the presence of key fields to ensure output is meaningful.
+    - name: Assert validity of license information
+      # Observability: Verifying that the returned data contains expected licensing and hardware identifiers.
       ansible.builtin.assert:
         that:
-          - "'Serial Number' in asa_version_output.stdout"
-          - "'Hardware' in asa_version_output.stdout"
-        fail_msg: "The retrieved output does not contain expected hardware or license strings."
-        quiet: true
+          - "'Serial Number' in license_data.stdout"
+          - "'Hardware' in license_data.stdout or 'Software Version' in license_data.stdout"
+        fail_msg: "Data Integrity Error: The command output did not contain valid ASA license information."
+        success_msg: "Data Integrity Verified: License and hardware details successfully retrieved."
 
-    - name: Display formatted license information
-      # Observability: Providing a human-readable summary of the device status.
+    - name: Display formatted license report
+      # Observability: Providing structured output for audit logging and operator visibility.
       ansible.builtin.debug:
         msg: |
-          ======================= DEVICE LICENSE REPORT =======================
-          {{ asa_version_output.stdout }}
+          ======================= LICENSE REPORT =======================
+          {{ license_data.stdout }}
+
+    - name: Extract device serial number for audit tracking
+      # Best Practice: Parsing CLI output into structured facts for use in downstream automation or CMDB updates.
+      ansible.builtin.set_fact:
+        asa_device_serial: "{{ license_data.stdout | regex_search('Serial Number: (\\S+)', '\\1') | first | default('UNKNOWN') }}"

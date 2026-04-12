@@ -1,37 +1,37 @@
 ---
-# FortiGate NAT46 Policy Retrieval and Validation
-# This playbook retrieves NAT46 configuration from FortiGate devices, 
-# ensuring observability and structural integrity of the output.
-- name: FortiGate NAT46 Audit
+# NAT46 Policy Retrieval and Verification
+# Auto-improved: 2026-03-15
+# Author: NetLearner Architect
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling
+---
+- name: FortiGate NAT46 Policy Audit
   hosts: fortigate
   gather_facts: false
 
   tasks:
     - name: Retrieve NAT46 configuration via CLI
-      # Using FQCN for consistent cross-platform network command execution
+      # Use Fully Qualified Collection Names (FQCN) for cross-platform consistency.
+      # This read-only retrieval ensures idempotency across repeated execution.
       ansible.netcommon.cli_command:
         command: get firewall nat46
       register: nat46_result
-      # Error Handling: Ensure the command is supported and executed successfully
+      # Error Handling: Fail if command fails but allow for scenarios where feature is disabled.
       failed_when: 
         - nat46_result.rc != 0
         - "'Unknown action' in nat46_result.stdout"
-        - "'Command fail' in nat46_result.stdout"
+      ignore_errors: false
 
-    - name: Validate NAT46 data presence
-      # Observability: Confirm the device returned non-empty configuration
+    - name: Validate NAT46 data integrity
+      # Observability: Assert that the device responded correctly and output is registered.
       ansible.builtin.assert:
         that:
           - nat46_result.stdout is defined
-          - nat46_result.stdout | length > 0
-        fail_msg: "NAT46 configuration retrieval returned empty or undefined results."
-        success_msg: "NAT46 configuration successfully captured for analysis."
+        fail_msg: "Failed to capture NAT46 output from {{ inventory_hostname }}."
+        success_msg: "NAT46 configuration data successfully registered for analysis."
 
-    - name: Display NAT46 Policy Details
-      # Documentation: Format output for human-readability in logs/CI/CD pipelines
+    - name: Display formatted NAT46 policy state
+      # Documentation: Provide a clear, human-readable summary of the current operational state.
       ansible.builtin.debug:
         msg: |
-          ======================= NAT46 CONFIGURATION START =======================
-          {{ nat46_result.stdout }}
-          ======================= NAT46 CONFIGURATION END =========================
-      when: nat46_result.stdout is defined
+          ======================= NAT46 - {{ inventory_hostname }} =======================
+          {{ nat46_result.stdout if nat46_result.stdout | length > 0 else

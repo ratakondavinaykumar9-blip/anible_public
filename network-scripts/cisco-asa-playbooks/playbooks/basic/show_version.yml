@@ -1,57 +1,56 @@
 ---
-# Playbook: Get ASA Version Information
-# Purpose: Retrieves hardware and software metadata from Cisco ASA devices with strict adherence to 
-# Standard:s (Idempotency, Observability, Documentation, Error Handling, and FQCN).
+# NetLearner Architect Improved Playbook
+# Purpose: Retrieve and validate Cisco ASA version information for inventory and monitoring.
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
+
 - name: Get ASA Version Information
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Default output format; can be overridden at runtime via --extra-vars "output_format=json"
+    # Default output format; can be overridden at runtime (e.g., -e "output_format=json")
     output_format: text
 
   tasks:
-    - name: Retrieve version information from ASA
-      # Why: Fetches critical system metadata (version, model, serial) using the collection-specific module.
+    - name: Retrieve ASA version details using FQCN
+      # Using cisco.asa collection to interface with the device
       cisco.asa.asa_version:
       register: version_output
-      # Error Handling: Fail explicitly if the module cannot communicate with the device.
-      failed_when: version_output.failed | default(false)
+      # Explicit failure condition if the module fails to return expected facts
+      failed_when: 
+        - version_output.failed | default(false)
+        - version_output.ansible_facts.asa_version is not defined
 
-    - name: Verify integrity of retrieved version facts
-      # Observability: Ensures the returned data structure contains the required fields before proceeding.
+    - name: Validate version data integrity (Observability)
+      # Ensure that the expected keys exist in the returned facts before proceeding to reporting
       ansible.builtin.assert:
         that:
           - version_output.ansible_facts.asa_version.version is defined
           - version_output.ansible_facts.asa_version.serial is defined
           - version_output.ansible_facts.asa_version.model is defined
-        fail_msg: "The retrieved facts from {{ inventory_hostname }} are incomplete or missing required keys."
-        success_msg: "Successfully validated telemetry for {{ inventory_hostname }}."
-        quiet: true
+        fail_msg: "Failed to retrieve complete version information from {{ inventory_hostname }}"
+        success_msg: "Successfully retrieved and verified version data for {{ inventory_hostname }}"
 
-    - name: Export version facts to JSON for external systems (e.g., SolarWinds)
-      # Why: External monitoring platforms often require structured JSON files for ingestion.
-      # Idempotency: ansible.builtin.copy only modifies the destination file if the content changes.
+    - name: Persist version data as JSON for external integration (SolarWinds/CMDB)
+      # This task is idempotent as ansible.builtin.copy only updates the file if content differs
       ansible.builtin.copy:
-        content: "{{ version_output.ansible_facts.asa_version | to_nice_json }}"
+        content: "{{ version_output | ansible.builtin.to_nice_json }}"
         dest: "/tmp/asa_version_{{ inventory_hostname }}.json"
-        owner: root
-        group: root
         mode: '0644'
-      when: output_format == 'json'
+      when: output_format | default('text') == 'json'
 
-    - name: Generate human-readable system summary
-      # Why: Provides the network operator with a clean, formatted view of the device state in the terminal.
+    - name: Generate human-readable report (Text mode)
+      # Conditional formatting for CLI/Logs output
       ansible.builtin.debug:
         msg: |
           ============================================================
-          ASA SYSTEM SUMMARY: {{ inventory_hostname }}
+          ASA SYSTEM REPORT: {{ inventory_hostname }}
           ============================================================
-          Software Version : {{ version_output.ansible_facts.asa_version.version }}
-          Hardware Model   : {{ version_output.ansible_facts.asa_version.model }}
-          Serial Number    : {{ version_output.ansible_facts.asa_version.serial }}
-          Device ID        : {{ version_output.ansible_facts.asa_version.device_id | default('N/A') }}
-          Hardware Specs   : {{ version_output.ansible_facts.asa_version.hardware }}
-          Flash Size       : {{ version_output.ansible_facts.asa_version.flash }}
-          Running Mode     : {{ version_output.ansible_facts.asa_version.running_mode }}
+          Version:      {{ version_output.ansible_facts.asa_version.version }}
+          Model:        {{ version_output.ansible_facts.asa_version.model }}
+          Serial:       {{ version_output.ansible_facts.asa_version.serial }}
+          Hardware:     {{ version_output.ansible_facts.asa_version.hardware }}
+          Flash:        {{ version_output.ansible_facts.asa_version.flash }}
+          Running Mode: {{ version_output.ansible_facts.asa_version.running_mode }}
+          Device ID:    {{ version_output.ansible_facts.asa_version.device_id }}
           ============================================================
-      when: output_format == 'text'
+      when: output_format | default('text') == 'text'

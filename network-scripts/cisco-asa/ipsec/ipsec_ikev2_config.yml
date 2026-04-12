@@ -1,53 +1,52 @@
 ---
-# IKEv2 and IPsec Profile Configuration Retrieval
-# Standards: Idempotent, Observable, Documented, Error-Resilient, FQCN
-- name: Get IKEv2 and IPsec Configuration
+# IKEv2 Tunnel Configuration Audit
+# This playbook retrieves and validates IKEv2 and IPsec profile configurations
+# to ensure cryptographic settings are correctly applied and visible on the device.
+- name: Audit IKEv2 and IPsec Configuration
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Get IKEv2 profile configuration
-      # Using FQCN for Cisco ASA specific command module
-      cisco.asa.asa_command:
-        commands:
-          - show running-config crypto ikev2
+    - name: Retrieve IKEv2 policy and proposal configuration
+      # FQCN: Using ansible.netcommon for platform-agnostic CLI command execution
+      ansible.netcommon.cli_command:
+        command: show running-config crypto ikev2
       register: ikev2_output
-      # Error Handling: Fail if the command returns a Cisco-specific error string
+      # Error Handling: Ensure the command was recognized by the device
       failed_when: 
-        - '"Invalid input" in ikev2_output.stdout[0]'
-        - '"ERROR" in ikev2_output.stdout[0]'
+        - ikev2_output.failed 
+        - "'invalid' in ikev2_output.stdout | lower"
 
-    - name: Verify IKEv2 configuration retrieval
-      # Observability: Ensure the command returned data
+    - name: Validate that IKEv2 configuration exists
+      # Observability: Assert that the security policy is actually defined and not an empty return
       ansible.builtin.assert:
         that:
-          - ikev2_output.stdout is defined
-          - ikev2_output.stdout | length > 0
-        fail_msg: "Failed to retrieve IKEv2 configuration or output is empty."
-        success_msg: "Successfully retrieved IKEv2 configuration."
+          - "ikev2_output.stdout | length > 0"
+        fail_msg: "IKEv2 configuration is missing or could not be retrieved from the device."
+        success_msg: "IKEv2 configuration successfully verified."
 
-    - name: Get crypto ipsec profile configuration
-      cisco.asa.asa_command:
-        commands:
-          - show running-config crypto ipsec profile
+    - name: Retrieve Crypto IPsec profile configuration
+      ansible.netcommon.cli_command:
+        command: show running-config crypto ipsec profile
       register: ipsec_profile_output
       failed_when: 
-        - '"Invalid input" in ipsec_profile_output.stdout[0]'
-        - '"ERROR" in ipsec_profile_output.stdout[0]'
+        - ipsec_profile_output.failed 
+        - "'invalid' in ipsec_profile_output.stdout | lower"
 
-    - name: Verify IPsec profile retrieval
+    - name: Validate that IPsec profiles exist
+      # Observability: Ensure profiles are configured to prevent downstream VPN failures
       ansible.builtin.assert:
         that:
-          - ipsec_profile_output.stdout is defined
-        fail_msg: "Failed to retrieve IPsec profile configuration."
-        success_msg: "Successfully retrieved IPsec profile configuration."
+          - "ipsec_profile_output.stdout | length > 0"
+        fail_msg: "IPsec profile configuration is missing or could not be retrieved."
+        success_msg: "IPsec profile configuration successfully verified."
 
-    - name: Display Security Configuration Summary
-      # Documentation: Providing a structured view of the gathered state
+    - name: Display consolidated cryptographic configuration
+      # Documentation: Provide a formatted view of the running configuration for audit logs
       ansible.builtin.debug:
-        msg:
-          - "======================= IKEv2 CONFIG ======================="
-          - "{{ ikev2_output.stdout[0] }}"
-          - "======================= IPSEC PROFILE ======================"
-          - "{{ ipsec_profile_output.stdout[0] }}"
-...
+        msg: |
+          ======================= IKEv2 CONFIG =======================
+          {{ ikev2_output.stdout }}
+
+          ======================= IPSEC PROFILE CONFIG =======================
+          {{ ipsec_profile_output.stdout }}

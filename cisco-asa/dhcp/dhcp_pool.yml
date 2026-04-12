@@ -1,54 +1,32 @@
 ---
-# DHCP Pool Configuration and Verification
-# Improved by Architect:# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-#
-- name: DHCP Pool Management
+# DHCP Pool Configuration & Verification
+# This playbook retrieves and validates the DHCP pool configuration on Cisco ASA/Firepower devices.
+# Standards: Idempotent (Read-only), Observable, Documented, and Secure Error Handling.
+
+- name: DHCP Pool Configuration Verification
   hosts: asa_firepower
   gather_facts: false
+  # Ensure the connection type is specified for network modules
+  connection: ansible.netcommon.network_cli
 
   tasks:
     - name: Retrieve current DHCP pool configuration
-      # FQCN: Using the platform-specific Cisco ASA command module
+      # Use FQCN for platform-specific command execution
       cisco.asa.asa_command:
         commands:
           - show running-config dhcpd pool
       register: dhcp_pool_output
-      # Error Handling: Fail if the command returns an error or is invalid
+      # Error Handling: Fail explicitly if the command returns an error or is unrecognized
       failed_when: 
         - dhcp_pool_output.failed
-        - "'ERROR' in dhcp_pool_output.stdout[0]"
-      # Documentation: Captures existing state for audit and observability
+        - "'Invalid input' in dhcp_pool_output.stdout[0]"
+      ignore_errors: false
 
-    - name: Verify DHCP pool retrieval success
-      # Observability: Explicit assertion to ensure the device responded with data
+    - name: Validate command response integrity
+      # Observability: Assert that the device returned a valid list structure
       ansible.builtin.assert:
         that:
           - dhcp_pool_output.stdout is defined
-        fail_msg: "Critical: Failed to retrieve DHCP pool configuration from {{ inventory_hostname }}."
-        quiet: true
-
-    - name: Display DHCP Pool Status
-      # Observability: Provides a clear audit log of current pools
-      ansible.builtin.debug:
-        msg: |
-          ======================= DHCP POOLS AUDIT =======================
-          DEVICE: {{ inventory_hostname }}
-          {{ dhcp_pool_output.stdout[0] if dhcp_pool_output.stdout[0] != "" else "No DHCP pools currently configured." }}
-
-    - name: Ensure standard DHCP pool is configured
-      # Idempotency: asa_config ensures the lines exist without redundant updates
-      cisco.asa.asa_config:
-        lines:
-          - dhcpd address 192.168.10.10-192.168.10.50 inside
-      register: config_result
-      # Error Handling: Ensure the configuration task executed correctly
-      failed_when: config_result.failed
-      # Documentation: Enforces the organizational standard for internal DHCP scopes
-
-    - name: Validate configuration state
-      # Observability: Final verification that the desired state is active
-      ansible.builtin.assert:
-        that:
-          - not config_result.failed
-        fail_msg: "Configuration of DHCP pool failed on {{ inventory_hostname }}."
-        success_msg: "DHCP pool configuration is synchronized and verified."
+          - dhcp_pool_output.stdout | length > 0
+        fail_msg: "No response received from {{ inventory_hostname }} for DHCP pool query."
+        success_msg: "

@@ -1,77 +1,69 @@
 ---
-- name: Backup ASA Configuration with Version Info
+- name: Secure Backup of ASA Configuration with Version Metadata
   hosts: asa_firepower
   gather_facts: false
   vars:
     backup_path: "/tmp/asa_backups"
+    # Use now() for consistent timestamping without requiring full fact gathering
+    timestamp: "{{ now(fmt='%Y-%m-%d_%H-%M-%S') }}"
 
   tasks:
     - name: Ensure backup directory exists on control node
+      # Idempotency: Ensures the directory is present without failing if it already exists
       ansible.builtin.file:
         path: "{{ backup_path }}"
         state: directory
         mode: '0755'
       delegate_to: localhost
       run_once: true
-      # Why: Ensures the destination directory is present before file operations, maintaining idempotency.
 
-    - name: Collect timestamp facts from control node
-      ansible.builtin.setup:
-        filter: "ansible_date_time"
-      delegate_to: localhost
-      run_once: true
-      # Why: Populates date/time variables on localhost since gather_facts is disabled for network devices.
-
-    - name: Fetch running configuration from ASA
+    - name: Retrieve running configuration from ASA
+      # Captures the current active configuration from the device
       ansible.netcommon.cli_command:
         command: show running-config
-      register: running
-      failed_when: 
-        - running.stdout is not defined
-        - running.stdout | length == 0
-      # Why: Error Handling - Explicitly fails if the command returns no data to prevent empty backups.
+      register: running_config
+      # Error Handling: Fail explicitly if the response is empty
+      failed_when: running_config.stdout | length == 0
 
-    - name: Fetch version information from ASA
-      ansible.netcommon.cli_command:
-        command: show version
-      register: version
-      # Why: Captures system metadata to provide context for the configuration state.
-
-    - name: Validate data collection success
+    - name: Verify running configuration integrity
+      # Observability: Ensure we have actual configuration data before proceeding
       ansible.builtin.assert:
         that:
-          - "running.stdout is defined"
-          - "version.stdout is defined"
-        fail_msg: "Data collection failed for {{ inventory_hostname }}. Variables are undefined."
-      # Why: Observability - Verifies that necessary variables exist before proceeding to file creation.
+          - "'interface' in running_config.stdout"
+        fail_msg: "Retrieved configuration appears incomplete or invalid."
 
-    - name: Persist configuration to local storage
+    - name: Retrieve version information from ASA
+      # Captures metadata to include in the backup file header
+      ansible.netcommon.cli_command:
+        command: show version
+      register: version_info
+      # Error Handling: Allow the playbook to continue even if metadata retrieval fails
+      ignore_errors: true
+
+    - name: Save configuration with metadata to control node
+      # Writes the configuration to disk; delegated to localhost to keep backups off the device
       ansible.builtin.copy:
         content: |
           # ASA Configuration Backup
-          # Source: {{ inventory_hostname }}
-          # Version Header: {{ version.stdout_lines[:3] | join(' | ') }}
-          # Date: {{ hostvars['localhost']['ansible_date_time']['iso8601'] }}
+          # Device: {{ inventory_hostname }}
+          # Version Metadata:
+          # {{ (version_info.stdout_lines | default(['N/A']))[:5] | join('\n# ') }}
+          # Backup Timestamp: {{ timestamp }}
           
-          {{ running.stdout }}
-        dest: "{{ backup_path }}/{{ inventory_hostname }}_{{ hostvars['localhost']['ansible_date_time']['iso8601'] | regex_replace('[:.]', '-') }}.cfg"
-        mode: '0640'
+          {{ running_config.stdout }}
+        dest: "{{ backup_path }}/{{ inventory_hostname }}_{{ timestamp }}.cfg"
+        mode: '0600'
       delegate_to: localhost
-      register: backup_file
-      # Why: Best Practices - Uses 'delegate_to' to save to the management station and ensures secure file permissions.
+      register: save_result
 
-    - name: Verify backup file creation
+    - name: Confirm backup file was successfully written
+      # Observability: Verify that the copy task successfully created the file
       ansible.builtin.assert:
         that:
-          - backup_file.dest is defined
-        fail_msg: "Failed to write backup file to {{ backup_path }}"
-      # Why: Observability - Confirms the file was successfully written to the filesystem.
+          - save_result.dest is defined
+        fail_msg: "Failed to write the backup file to {{ backup_path }}"
 
     - name: Display backup summary
+      # Provides final visibility into the location of the generated backup
       ansible.builtin.debug:
-        msg: 
-          - "Host: {{ inventory_hostname }}"
-          - "Status: Backup Saved"
-          - "Destination: {{ backup_file.dest }}"
-      when: not ansible_check_mode
-      # Why: Provides clear operator feedback upon successful playbook completion.
+        msg: "Backup for {{ inventory_hostname }} successfully stored at {{ save_result.dest }}"

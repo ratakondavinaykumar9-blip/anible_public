@@ -6,24 +6,24 @@
   gather_facts: false
 
   tasks:
-    - name: Retrieve system DNS settings via CLI
+    - name: Get System DNS Settings via CLI
       # Use FQCN (ansible.netcommon) for portability and adherence to best practices
-      # Register is used for observability and downstream validation of results
+      # Registering results enables observability and downstream validation of configuration state
       ansible.netcommon.cli_command:
         command: "get system dns"
       register: dns_result
-      # Idempotency: Read-only 'get' commands should never trigger a 'changed' status
+      # Idempotency: Read-only 'get' commands should never trigger a 'changed' status in Ansible
       changed_when: false
-      # Error Handling: Ensure the command was recognized and executed successfully
-      # Catches specific FortiOS error strings that indicate a command or parsing failure
+      # Error Handling: Ensure the command was recognized and executed successfully by FortiOS
+      # Catches specific error strings that indicate command failures or parsing errors
       failed_when: >
         (dns_result.rc is defined and dns_result.rc != 0) or
         "Command fail" in dns_result.stdout or
         "Unknown action" in dns_result.stdout
 
     - name: Verify system DNS data retrieval
-      # Observability: Assert ensures the command returned meaningful data
-      # Verifies operational success by checking for expected keywords in the output
+      # Observability: Assert ensures the command returned meaningful data from the device
+      # Verifies operational success by checking for expected keywords in the CLI output
       ansible.builtin.assert:
         that:
           - dns_result.stdout is defined
@@ -33,9 +33,8 @@
         quiet: true
 
     - name: Display system DNS settings output
-      # Observability: Provides clear visibility into the results for the operator and logs
+      # Observability: Provides clear visibility into the results for the operator and audit logs
       ansible.builtin.debug:
         msg: |
           ======================= DNS ({{ inventory_hostname }}) =======================
-          {{ dns_result.stdout }}
-          ==============================================================================
+          {{ dns_result

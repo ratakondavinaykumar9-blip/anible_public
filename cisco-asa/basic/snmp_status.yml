@@ -1,36 +1,37 @@
 ---
-# Architect: Improved SNMP Status Playbook
-# This playbook retrieves and validates the SNMP configuration status on ASA/Firepower devices.
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+# SNMP Status Verification Playbook
+# Improved for enterprise standards: Idempotency, Observability, and Error Handling.
+# This playbook retrieves the SNMP server configuration from Cisco ASA/Firepower devices
+# to ensure monitoring state is visible and verifiable.
 
 - name: Get SNMP Status
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve SNMP configuration from device
-      # FQCN: Using ansible.netcommon to ensure consistent behavior across environments.
-      # Idempotency: 'show' commands are inherently idempotent as they do not modify state.
+    - name: Retrieve SNMP server configuration
+      # Use FQCN (Fully Qualified Collection Name) for the command module.
+      # This operation is read-only, ensuring idempotency as it does not modify device state.
       ansible.netcommon.cli_command:
         command: show snmp-server
       register: snmp_result
-      # Error Handling: Catch cases where the command might be unsupported or rejected.
+      # Use failed_when to explicitly handle cases where the command might be unsupported or restricted.
       failed_when: 
         - snmp_result.failed
         - "'Invalid input' in snmp_result.stdout"
 
-    - name: Validate SNMP retrieval success
-      # Observability: Asserting that the output is populated to ensure the device responded correctly.
+    - name: Validate SNMP configuration retrieval
+      # Observability: Assert that the command returned valid data to ensure the subsequent steps have context.
       ansible.builtin.assert:
         that:
           - snmp_result.stdout is defined
           - snmp_result.stdout | length > 0
-        fail_msg: "Failed to retrieve a valid SNMP configuration output."
-        success_msg: "SNMP configuration successfully retrieved and verified."
+        fail_msg: "Failed to retrieve SNMP configuration or the output was empty."
+        success_msg: "SNMP configuration successfully retrieved from {{ inventory_hostname }}."
 
-    - name: Display formatted SNMP status
-      # Documentation: Clear separation of output for better human readability during execution.
+    - name: Display SNMP Configuration
+      # Formatted output for improved operator visibility.
       ansible.builtin.debug:
         msg: |
-          ======================= SNMP STATUS =======================
+          ======================= SNMP STATUS: {{ inventory_hostname }} =======================
           {{ snmp_result.stdout }}

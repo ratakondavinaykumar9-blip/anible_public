@@ -1,36 +1,35 @@
 ---
-# DHCP Statistics Retrieval Playbook
-# This playbook retrieves and validates DHCP statistics from Cisco ASA/Firepower devices.
-# It adheres to senior network automation standards including observability and FQCN usage.
-
-- name: Retrieve and Validate DHCP Statistics
+# DHCP Stats - Improved Version
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Note: This playbook is inherently idempotent as it only performs read-only 'show' operations.
+- name: DHCP Stats
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute 'show dhcpd statistics' on the target device
-      # Using FQCN for vendor-agnostic network command execution.
-      # This task is inherently idempotent as it performs a read-only operation.
+    - name: Retrieve DHCP statistics from the security appliance
+      # Using FQCN for consistent behavior across different Ansible versions
       ansible.netcommon.cli_command:
         command: show dhcpd statistics
-      register: dhcp_stats_result
-      # Ensure the task fails if the command returns an error or is unrecognized.
-      failed_when: 
-        - dhcp_stats_result.failed | default(false)
-        - "'Invalid input' in dhcp_stats_result.stdout"
+      register: dhcp_stats
+      # Error Handling: Catch specific CLI error strings that don't trigger a non-zero exit code
+      failed_when: >
+        dhcp_stats.failed or
+        "Invalid input" in dhcp_stats.stdout or
+        "ERROR" in dhcp_stats.stdout
 
-    - name: Verify DHCP statistics retrieval success
-      # Observability: Assert that the output contains expected data to ensure operational visibility.
+    - name: Validate DHCP statistics retrieval
+      # Observability: Ensure the command returned data before proceeding
       ansible.builtin.assert:
         that:
-          - dhcp_stats_result.stdout is defined
-          - dhcp_stats_result.stdout | length > 0
-        fail_msg: "DHCP statistics output is empty or undefined. Verify DHCP configuration on the device."
-        success_msg: "DHCP statistics successfully retrieved and validated."
+          - dhcp_stats.stdout is defined
+          - dhcp_stats.stdout | length > 0
+        fail_msg: "DHCP statistics output is empty. Verify DHCP is configured and active."
+        success_msg: "DHCP statistics successfully captured."
 
-    - name: Display formatted DHCP statistics
-      # Provides a clean, readable output of the retrieved operational state.
+    - name: Display DHCP statistics
+      # Documentation: Provide formatted output for easier log analysis and troubleshooting
       ansible.builtin.debug:
         msg: |
-          ======================= DHCP OPERATIONAL STATS =======================
-          {{ dhcp_stats_result.stdout }}
+          ======================= DHCP STATS =======================
+          {{ dhcp_stats.stdout }}

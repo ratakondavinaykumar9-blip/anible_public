@@ -1,34 +1,36 @@
 ---
-# FortiGate IPSec Monitor
-# This playbook retrieves operational status of VPN tunnels.
-# Standards: Idempotency (read-only), Observability, Documentation, Error Handling, FQCN.
-
-- name: IPSec Monitor
+# IPSec Monitor - Production Grade
+# This playbook retrieves IPSec VPN tunnel status from FortiGate devices.
+# It is inherently idempotent as it only executes a 'get' (read-only) command.
+- name: FortiGate IPSec Monitor
   hosts: fortigate
-  gather_facts: false # Performance: Skipping fact gathering as it is not required for CLI monitoring.
+  gather_facts: false
 
   tasks:
-    - name: Get IPSec monitor status via CLI
-      # Using FQCN (Fully Qualified Collection Name) for consistency and portability.
+    - name: Retrieve IPSec monitor status
+      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction
       ansible.netcommon.cli_command:
         command: get vpn ipsec monitor
-      register: ipsec_mon
-      # Error Handling: Explicitly check for task failure or specific error strings in output.
+      register: mon
+      # Error Handling: Ensure the task fails if the device returns an error string
       failed_when: 
-        - ipsec_mon.failed or "Command fail" in ipsec_mon.stdout
+        - mon.failed | default(false)
+        - "'Command fail' in mon.stdout or 'Unknown action' in mon.stdout"
 
-    - name: Validate retrieval of IPSec data
-      # Observability: Use assert to verify that the response is not empty before proceeding.
+    - name: Verify monitor data integrity
+      # Observability: Assert that the command returned valid data to prevent silent failures
       ansible.builtin.assert:
         that:
-          - ipsec_mon.stdout is defined
-          - ipsec_mon.stdout | length > 0
-        fail_msg: "IPSec monitor command failed or returned empty data."
-        success_msg: "IPSec monitor data retrieved successfully."
+          - mon.stdout is defined
+          - mon.stdout | length > 0
+        fail_msg: "IPSec monitor data is missing or could not be retrieved."
+        success_msg: "IPSec monitor data successfully captured."
 
-    - name: Display IPSec monitor results
-      # Documentation: Providing a clear, formatted output for the end-user or operator.
+    - name: Display IPSec tunnel status report
+      # Documentation: Formatted output for clear operational visibility
       ansible.builtin.debug:
         msg: |
-          ======================= IPSEC MONITOR =======================
-          {{ ipsec_mon.stdout }}
+          ============================================================
+          IPSEC MONITOR REPORT - {{ inventory_hostname }}
+          ============================================================
+          {{ mon.stdout }}

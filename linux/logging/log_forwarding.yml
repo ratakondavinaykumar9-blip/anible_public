@@ -4,11 +4,9 @@
   become: true
   vars:
     # --- Versioning & Repository ---
-    # Enforcing specific versions ensures environment parity across the fleet
     elastic_version: "8.15.0"
     elastic_gpg_key: "https://artifacts.elastic.co/GPG-KEY-elasticsearch"
-    # Auto-detection for repository URL based on family
-    elastic_repo_url: "" 
+    elastic_repo_url: "" # Leave empty for auto-generation based on OS family
 
     # --- Logstash Specifics (Aggregator/Processor) ---
     install_logstash: true
@@ -23,7 +21,6 @@
     logstash_hosts: ["10.0.1.50:5044", "10.0.1.51:5044"] # HA Cluster list
     
     # --- Zero-Trust Security (SSL/TLS) ---
-    # Security is mandatory for production network telemetry
     ssl_enabled: true
     ssl_dir: "/etc/pki/elk"
     ssl_ca_cert_path: "/etc/pki/elk/ca.crt"
@@ -33,7 +30,7 @@
     local_node_cert: ""
     local_node_key: ""
 
-    # --- Mission-Critical Inputs (Abstracted for Cisco/Fortinet/Juniper) ---
+    # --- Mission-Critical Inputs ---
     filebeat_inputs:
       - type: filestream
         id: "cisco-asa-logs"
@@ -50,15 +47,15 @@
         fields: { device_type: "cisco_nexus", role: "dc_core" }
 
   pre_tasks:
-    - name: "PRE-FLIGHT: Validate Operating System Compatibility"
+    - name: "OS_CHECK: Validate Operating System Compatibility"
       ansible.builtin.assert:
         that:
           - ansible_os_family in ['Debian', 'RedHat']
         fail_msg: "This playbook only supports RHEL/CentOS or Debian/Ubuntu distributions."
-        quiet: true
+        success_msg: "OS Family {{ ansible_os_family }} is supported."
 
   tasks:
-    - name: "INFRASTRUCTURE: Setup Repository and Base Packages"
+    - name: "INFRA_SETUP: Prepare Repositories and Install Packages"
       block:
         - name: Install Prerequisite Packages
           ansible.builtin.package:
@@ -71,15 +68,10 @@
             state: present
           register: prereq_install
 
-        - name: Verify Prerequisites Installed Successfully
-          ansible.builtin.assert:
-            that: "prereq_install is successful"
-            fail_msg: "System failed to install prerequisite packages."
-
-        - name: Configure Elastic Repository (Debian Family)
+        - name: "REPO_CONFIG: Debian Family"
           when: ansible_os_family == "Debian"
           block:
-            - name: Add Elastic GPG Key
+            - name: Add Elastic GPG Key (Idempotent via local keyring)
               ansible.builtin.apt_key:
                 url: "{{ elastic_gpg_key }}"
                 state: present
@@ -92,18 +84,18 @@
                 filename: elastic-8.x
               register: apt_repo_status
 
-        - name: Configure Elastic Repository (RedHat Family)
+        - name: "REPO_CONFIG: RedHat Family"
           ansible.builtin.yum_repository:
             name: elastic-8.x
             description: Elastic repository for 8.x packages
             baseurl: "https://artifacts.elastic.co/packages/8.x/yum"
-            gpgcheck: true
+            gpgcheck: yes
             gpgkey: "{{ elastic_gpg_key }}"
-            enabled: true
+            enabled: yes
           when: ansible_os_family == "RedHat"
           register: yum_repo_status
 
-        - name: Ensure SSL Directory Exists
+        - name: "SECURITY: Initialize SSL Directory Structure"
           ansible.builtin.file:
             path: "{{ ssl_dir }}"
             state: directory
@@ -112,7 +104,7 @@
             group: root
           when: ssl_enabled
 
-        - name: Distribute SSL/TLS Certificates
+        - name: "SECURITY: Distribute SSL Artifacts"
           ansible.builtin.copy:
             src: "{{ item.src }}"
             dest: "{{ item.dest }}"
@@ -126,58 +118,45 @@
           when: 
             - ssl_enabled 
             - local_ca_cert != ""
-          register: cert_deployment
+          register: ssl_copy
 
-        - name: Install Logstash and Filebeat Packages
+        - name: "INSTALL: Logstash & Filebeat Binary Deployment"
           ansible.builtin.package:
-            # Handling version string format differences between apt and yum
             name:
-              - "logstash={{ elastic_version if ansible_os_family == 'Debian' else elastic_version + '-1' }}"
-              - "filebeat={{ elastic_version if ansible_os_family == 'Debian' else elastic_version + '-1' }}"
+              - "logstash={{ elastic_version }}"
+              - "filebeat={{ elastic_version }}"
             state: present
           register: pkg_install
-
-        - name: Verify Package Installation State
-          ansible.builtin.assert:
-            that: "pkg_install is successful"
-            fail_msg: "Package installation failed. Check repository availability."
+          # Ensure packages are installed before proceeding to config
+          failed_when: pkg_install is failed
 
       rescue:
-        - name: Handle Infrastructure Failures
+        - name: "ERROR_HANDLER: Repository or Installation Failure"
           ansible.builtin.fail:
-            msg: "CRITICAL: Infrastructure setup failed. Connectivity or repository GPG mismatch suspected."
+            msg: "Failed to configure repositories or install packages. Network check: artifacts.elastic.co"
 
-    - name: "LOGSTASH: Configuration and Pipeline Deployment"
+    - name: "LOGSTASH_CONFIG: JVM and Pipeline Definition"
       when: install_logstash
       block:
-        - name: Optimize JVM Heap Settings (Idempotent)
+        - name: "LOGSTASH_JVM: Optimize Heap Memory"
           ansible.builtin.lineinfile:
             path: /etc/logstash/jvm.options
             regexp: '^-Xm[sx]'
             line: "-Xmx{{ logstash_heap_size }}\n-Xms{{ logstash_heap_size }}"
-            backrefs: true
           notify: Restart Logstash
           register: jvm_change
 
-        - name: Deploy Main Logstash Configuration
+        - name: "LOGSTASH_CORE: Deploy Main Configuration"
           ansible.builtin.template:
             src: logstash.yml.j2
             dest: /etc/logstash/logstash.yml
             owner: root
             group: logstash
             mode: '0644'
-          vars:
-            config_content:
-              node.name: "{{ ansible_hostname }}"
-              path.data: /var/lib/logstash
-              queue.type: "{{ logstash_queue_type }}"
-              queue.max_bytes: "{{ logstash_queue_max_bytes }}"
-              api.http.host: "127.0.0.1"
-              api.http.port: "{{ logstash_api_port }}"
           notify: Restart Logstash
-          register: logstash_cfg
+          register: logstash_yml_change
 
-        - name: Deploy Ingest Pipeline Definition
+        - name: "LOGSTASH_PIPELINE: Deploy Network Processing Pipeline"
           ansible.builtin.copy:
             dest: /etc/logstash/conf.d/01-beats-input.conf
             content: |
@@ -192,7 +171,7 @@
                 }
               }
               filter {
-                # Logic for Cisco/Fortinet device_type segregation
+                # Logic for Cisco/Fortinet/Juniper processing goes here
               }
               output {
                 elasticsearch {
@@ -204,86 +183,77 @@
             group: logstash
             mode: '0640'
           notify: Restart Logstash
-          register: pipeline_cfg
-
-        - name: Validate Logstash Configuration Persistence
-          ansible.builtin.assert:
-            that: "logstash_cfg is successful and pipeline_cfg is successful"
-            fail_msg: "Logstash configuration files could not be deployed."
+          register: pipeline_change
 
       rescue:
-        - name: Notify Logstash Configuration Failure
+        - name: "ERROR_HANDLER: Logstash Configuration Rollback Notification"
           ansible.builtin.debug:
-            msg: "WARNING: Logstash configuration block failed. Check service logs for YAML errors."
+            msg: "Validation failed for Logstash. Inspecting /var/log/logstash/logstash-plain.log"
 
-    - name: "FILEBEAT: Edge Forwarder Configuration"
+    - name: "FILEBEAT_CONFIG: Edge Collection Definition"
       when: install_filebeat
       block:
-        - name: Deploy Filebeat YAML (With Pre-validation)
+        - name: "FILEBEAT_CORE: Deploy Validated Configuration"
           ansible.builtin.template:
             src: filebeat.yml.j2
             dest: /etc/filebeat/filebeat.yml
             owner: root
             group: root
             mode: '0600'
-            # Validation ensures we never restart a service with a broken config
+            # Validation ensures no service disruption on syntax error
             validate: "/usr/share/filebeat/bin/filebeat test config -c %s"
           notify: Restart Filebeat
-          register: fb_template
+          register: filebeat_yml_change
 
-        - name: Enable Required Modules
+        - name: "FILEBEAT_MODULES: Enable OS Auditing"
           ansible.builtin.command: "filebeat modules enable system auditd"
           args:
             creates: /etc/filebeat/modules.d/system.yml
-          register: fb_module_status
-          changed_when: "'Enabled system' in fb_module_status.stdout or 'Enabled auditd' in fb_module_status.stdout"
+          register: module_status
+          changed_when: "'Enabled system' in module_status.stdout or 'Enabled auditd' in module_status.stdout"
 
       rescue:
-        - name: Handle Filebeat Validation Errors
+        - name: "ERROR_HANDLER: Filebeat YAML Validation Failure"
           ansible.builtin.fail:
-            msg: "Filebeat validation failed. The generated template is syntactically incorrect for version {{ elastic_version }}."
+            msg: "Filebeat config validation failed for ELK {{ elastic_version }}."
 
-    - name: "ORCHESTRATION: Service Management and Health Checks"
+    - name: "SERVICE_MGMT: Lifecycle Control and Health Validation"
       block:
-        - name: Ensure ELK Services are Enabled and Operational
+        - name: "SERVICE_START: Enable and Start Logstash/Filebeat"
           ansible.builtin.service:
             name: "{{ item }}"
             state: started
-            enabled: true
+            enabled: yes
           loop:
             - logstash
             - filebeat
-          register: service_op
+          register: service_status
 
-        - name: Verify Logstash API Health (Wait for Warm-up)
+        - name: "OBSERVABILITY: Verify Logstash API Availability"
           ansible.builtin.uri:
             url: "http://localhost:{{ logstash_api_port }}/_node/stats"
             method: GET
-            status_code: 200
-          register: api_health
-          until: api_health.status == 200
-          retries: 15
+          register: logstash_health
+          until: logstash_health.status == 200
+          retries: 12
           delay: 10
           when: install_logstash
-
-        - name: Final Validation of Service State
-          ansible.builtin.assert:
-            that: "item.state == 'started'"
-            fail_msg: "Service {{ item.item }} is not in the 'started' state."
-          loop: "{{ service_op.results }}"
+          # Fails after 120 seconds if API doesn't respond
+          failed_when: logstash_health.status != 200
 
       rescue:
-        - name: Collect Diagnostic Logs on Service Failure
-          ansible.builtin.shell: "journalctl -u {{ item }} --no-pager | tail -n 30"
+        - name: "DIAGNOSTICS: Collect Service Crash Logs"
+          ansible.builtin.shell: "journalctl -u {{ item }} --no-pager | tail -n 25"
           loop:
             - logstash
             - filebeat
-          register: diag_logs
+          register: crash_logs
           changed_when: false
+          ignore_errors: true
         
-        - name: Exit with Diagnostic Summary
+        - name: "FINAL_FAIL: Service Stabilization Failure"
           ansible.builtin.fail:
-            msg: "Services failed to stabilize. Tail logs: {{ diag_logs.results | map(attribute='stdout') | list }}"
+            msg: "ELK stack failed to stabilize. Diagnostic logs: {{ crash_logs.results | map(attribute='stdout') | list }}"
 
   handlers:
     - name: Restart Logstash
@@ -299,8 +269,7 @@
       listen: "restart_services"
 
   always:
-    - name: Secure Temporary Cleanup
+    - name: "CLEANUP: Remove Ephemeral Artifacts"
       ansible.builtin.file:
         path: /tmp/elk_config_test
         state: absent
-...

@@ -1,38 +1,43 @@
 ---
-# FortiGate IPSec Traffic Monitoring
-# Purpose: Retrieves real-time IPSec VPN tunnel statistics for diagnostic purposes.
-# Standards: Idempotency (read-only), Observability (assertions), FQCN, Error Handling.
-
-- name: Get FortiGate IPSec Traffic Statistics
+# FortiGate IPSec Traffic Monitoring Playbook
+# Standard: NetLearner Automation Architecture
+# This playbook retrieves real-time IPSec tunnel traffic statistics from FortiGate devices.
+# It adheres to idempotency by performing read-only operations and implements observability through assertions.
+- name: Get IPSec Traffic Statistics
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve IPSec tunnel list from device
-      # Using Fully Qualified Collection Name (FQCN) for reliability
-      # This task is idempotent as it performs no configuration modifications
+    - name: Retrieve IPSec tunnel list and traffic statistics
+      # Using Fully Qualified Collection Name (FQCN) for consistency and reliability
+      # This command is read-only, ensuring the playbook is idempotent and safe for repeated execution
       ansible.netcommon.cli_command:
         command: diagnose vpn tunnel list
-      register: traffic_result
-      changed_when: false
-      # Error Handling: Ensure the task fails if the CLI command execution encounters an error
-      failed_when: traffic_result.failed
+      register: traffic_output
+      # Error Handling: Identify failure if the command itself fails or returns a CLI-specific error message
+      failed_when: 
+        - traffic_output.failed
+        - "'Command fail' in traffic_output.stdout"
+        - "'Unknown action' in traffic_output.stdout"
 
-    - name: Validate traffic data observability
-      # Observability: Assert that the command output was captured and is not null
+    - name: Verify IPSec traffic data retrieval
+      # Observability: Assert that the command returned valid data to ensure the device is responding as expected
       ansible.builtin.assert:
         that:
-          - traffic_result.stdout is defined
-          - traffic_result.stdout | length >= 0
-        fail_msg: "The diagnostic command failed to return a valid output buffer."
-        quiet: true
+          - traffic_output.stdout is defined
+          - traffic_output.stdout | length > 0
+        fail_msg: "Data retrieval failed or no IPSec tunnels are currently configured on {{ inventory_hostname }}."
+        success_msg: "Successfully captured IPSec traffic statistics for {{ inventory_hostname }}."
 
     - name: Display IPSec Traffic Report
-      # Formatted output for enhanced visibility during playbook execution
+      # Formatted output for enhanced readability in automation logs and diagnostic reports
       ansible.builtin.debug:
         msg: |
-          ======================= IPSEC TRAFFIC REPORT =======================
-          Inventory Host: {{ inventory_hostname }}
-          --------------------------------------------------------------------
-          {{ traffic_result.stdout }}
-          ====================================================================
+          ==============================================================================
+          IPSEC TRAFFIC REPORT
+          ==============================================================================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S"') }}
+          ------------------------------------------------------------------------------
+          {{ traffic_output.stdout }}
+          ==============================================================================

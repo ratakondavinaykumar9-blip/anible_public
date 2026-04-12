@@ -1,39 +1,45 @@
 ---
-# Architect:Improved Playbook: FortiGate SSL VPN Configuration Retrieval
-# Purpose: Safely retrieves and validates SSL VPN settings from FortiGate devices.
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
-
-- name: Get SSL VPN Config
+# ==============================================================================
+# Playbook: FortiGate SSL VPN Configuration Retrieval
+# Standards: Idempotency, Observability, FQCN, and Error Handling
+# ==============================================================================
+- name: Retrieve and Validate FortiGate SSL VPN Settings
   hosts: fortigate
-  gather_facts: false # Performance: Gathering facts is not required for this task
+  gather_facts: false
+  vars:
+    # Define expected patterns to ensure we are receiving valid data
+    expected_pattern: "SSL VPN"
 
   tasks:
-    - name: Execute CLI command to retrieve SSL VPN settings
-      # Using Fully Qualified Collection Name (FQCN) for reliability
-      # Idempotency: This is a read-only operation and is safe to run multiple times
+    - name: Get SSL VPN operational settings from FortiGate
+      # Using FQCN for network common CLI execution
       ansible.netcommon.cli_command:
         command: get sslvpn settings
-      register: config_output
-      # Error Handling: Explicitly fail if the device returns common error strings
-      failed_when:
-        - config_output.failed or 
-          "command fail" in config_output.stdout | lower or 
-          "unknown command" in config_output.stdout | lower
+      register: ssl_vpn_config
+      # Error Handling: Fail if the command returns a typical FortiOS error string
+      failed_when: 
+        - ssl_vpn_config.failed or "Command fail" in ssl_vpn_config.stdout
+      # Idempotency: 'get' commands are inherently read-only and idempotent
 
-    - name: Validate configuration retrieval (Observability)
-      # Assert ensures the output is populated and contains relevant data
+    - name: Validate SSL VPN configuration integrity
+      # Observability: Assert that the output is not empty and contains expected keywords
       ansible.builtin.assert:
         that:
-          - config_output.stdout is defined
-          - config_output.stdout | length > 0
-        fail_msg: "Observability Error: Failed to retrieve SSL VPN settings from {{ inventory_hostname }}."
-        success_msg: "Observability Success: SSL VPN settings successfully captured."
+          - ssl_vpn_config.stdout is defined
+          - ssl_vpn_config.stdout | length > 0
+          - expected_pattern in ssl_vpn_config.stdout
+        fail_msg: "The SSL VPN configuration output was empty or invalid."
+        success_msg: "SSL VPN configuration successfully retrieved and validated."
 
-    - name: Display SSL VPN Configuration (Observability)
+    - name: Display SSL VPN configuration details
+      # Documentation: Providing a clean, formatted view for audit/visibility
       ansible.builtin.debug:
         msg: |
-          ======================= SSL VPN CONFIG =======================
-          Device: {{ inventory_hostname }}
-          Status: Successfully Retrieved
-          --------------------------------------------------------------
-          {{ config_output.stdout }}
+          ===========================================================
+          SSL VPN SETTINGS REPORT
+          ===========================================================
+          DEVICE: {{ inventory_hostname }}
+          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          -----------------------------------------------------------
+          {{ ssl_vpn_config.stdout }}
+          ===========================================================

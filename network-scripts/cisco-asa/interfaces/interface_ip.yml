@@ -1,35 +1,35 @@
 ---
-# Playbook: Cisco ASA Interface IP Configuration Audit
-# This playbook retrieves and validates interface IP configurations.
-# Idempotency: Read-only operations ensure the playbook is safe for repeated execution.
+# Interface IP Configuration Audit
+# This playbook retrieves and validates interface IP settings on ASA/Firepower devices.
 - name: Interface IP Config
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve IP address configuration from device
-      # Best Practices: Using platform-specific FQCN for Cisco ASA operations
+    - name: Retrieve current interface IP configuration
+      # Use FQCN for platform-specific command execution
+      # This task is inherently idempotent as it only reads the device state
       cisco.asa.asa_command:
         commands:
           - show ip address
       register: ip_output
-      # Error Handling: Ensure the command was successful and returned valid output
+      # Error handling: fail if the command execution fails or returns an error string
       failed_when: 
-        - ip_output.failed or "Invalid input" in ip_output.stdout[0]
+        - ip_output.failed
+        - "'Invalid' in ip_output.stdout[0]"
 
-    - name: Validate that IP data was successfully retrieved
-      # Observability: Asserting that the command returned non-empty results
+    - name: Verify retrieval of interface data
+      # Observability: Assert that the output contains expected headers to ensure data integrity
       ansible.builtin.assert:
         that:
-          - ip_output.stdout is defined
-          - ip_output.stdout[0] | length > 0
-        fail_msg: "Failed to retrieve IP address information from {{ inventory_hostname }}."
-        success_msg: "Successfully retrieved IP address configuration."
+          - "'Interface' in ip_output.stdout[0]"
+          - "'IP-Address' in ip_output.stdout[0]"
+        fail_msg: "The 'show ip address' command returned unexpected or empty results."
+        success_msg: "Interface IP configuration successfully retrieved and validated."
 
-    - name: Display interface IP configuration details
-      # Documentation: Formatting output for human-readable audit logs
+    - name: Display Interface IP Configuration
+      # Documentation: Provide a formatted view of the operational state for the operator
       ansible.builtin.debug:
         msg: |
           ======================= INTERFACE IP =======================
-          DEVICE: {{ inventory_hostname }}
           {{ ip_output.stdout[0] }}

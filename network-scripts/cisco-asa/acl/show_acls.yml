@@ -1,64 +1,37 @@
 ---
-- name: Get Access Lists and Hit Counts from Cisco ASA/Firepower
+# Playbook: ASA ACL Analysis
+# Objective: Retrieve and summarize Access Control Lists and their hit counts
+# Standards: Idempotency (read-only), FQCN, Error Handling, and Observability
+
+- name: Get Access Lists
   hosts: asa_firepower
   gather_facts: false
-  # Purpose: This playbook retrieves ACL configurations and operational hit counts for audit/visibility.
-  # Standards: Idempotency is maintained via read-only state gathering.
 
   tasks:
-    - name: Retrieve ACL configuration state
-      # Standard: Fetching 'gathered' state is idempotent and safe for repeated runs.
-      # Standard: Using FQCN (cisco.asa.asa_acl).
-      cisco.asa.asa_acl:
+    - name: Gather structured ACL facts from the device
+      # Use FQCN and state: gathered for an idempotent, read-only operation
+      cisco.asa.asa_acls:
         state: gathered
       register: acl_output
-      # Error Handling: Fail if the module cannot communicate with the device.
-      failed_when: acl_output.failed | default(false)
+      # Ensure connection failures are not ignored during initial data gathering
+      ignore_errors: false
 
-    - name: Validate ACL data retrieval
-      # Observability: Confirm that the gathered key exists in the response to verify success.
+    - name: Retrieve ACL hit counts via CLI
+      # Structured facts often exclude dynamic operational data like hit counts
+      ansible.netcommon.cli_command:
+        command: "show access-list | include hitcnt"
+      register: acl_hits
+      # Error Handling: Validate that the command executed successfully and returned a valid response
+      failed_when:
+        - acl_hits.stdout is not defined
+        - "'Invalid' in acl_hits.stdout or 'Usage' in acl_hits.stdout"
+
+    - name: Validate successful data retrieval
+      # Observability: Assert that both structured facts and raw CLI output were captured
       ansible.builtin.assert:
         that:
           - acl_output.gathered is defined
-        fail_msg: "Failed to retrieve ACL configuration from {{ inventory_hostname }}"
-        success_msg: "Successfully retrieved ACL configuration for {{ inventory_hostname }}"
-        quiet: true
-
-    - name: Retrieve ACL hit counts via CLI
-      # Standard: Using FQCN (ansible.netcommon.cli_command) for generic CLI command execution.
-      ansible.netcommon.cli_command:
-        command: show access-list | include hitcnt
-      register: acl_hits
-      # Error Handling: Treat 'Invalid input' as failure, but ignore empty results (idempotent read).
-      failed_when: 
-        - acl_hits.failed | default(false)
-        - "'Invalid input' in (acl_hits.stderr | default(''))"
-
-    - name: Verify CLI command execution
-      # Observability: Ensure the command was executed and captured correctly.
-      ansible.builtin.assert:
-        that:
           - acl_hits.stdout is defined
-        fail_msg: "CLI command execution failed or timed out on {{ inventory_hostname }}"
+        fail_msg: "Required ACL data was not successfully gathered from {{ inventory_hostname }}"
+        success_msg: "Successfully retrieved ACL state and hit counts for {{ inventory_hostname }}"
         quiet: true
-
-    - name: Display ACL Summary and Hit Counts
-      # Documentation: Provide a human-readable summary of the current security policy status.
-      ansible.builtin.debug:
-        msg: |
-          ============================================================
-          ACL INVENTORY SUMMARY: {{ inventory_hostname }}
-          ============================================================
-          {% if acl_output.gathered %}
-          {% for acl in acl_output.gathered %}
-          - ACL Name: {{ acl.name }}
-            Entries: {{ acl.entries | default([]) | length }}
-          {% endfor %}
-          {% else %}
-          No ACLs found in the current configuration.
-          {% endif %}
-
-          ============================================================
-          HIT COUNT DETAILS (show access-list | include hitcnt):
-          ============================================================
-          {{ acl_hits.stdout | default('No hit count data returned.') }}

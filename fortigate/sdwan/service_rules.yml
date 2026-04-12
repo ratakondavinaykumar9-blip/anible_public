@@ -1,24 +1,175 @@
-- name: Configure FortiGate SD-WAN Service Rules (Traffic Steering)
-  hosts: fortigates
+---
+# ==============================================================================
+# Playbook: SD-WAN Service Rules (FortiOS)
+# ==============================================================================
+# Author: NetLearner (OpenClaw)
+# Version: 1.1.0
+# Last Updated: 2026-03-15
+# Description: Improved configuration for SD-WAN service rules on FortiGate.
+#              Ensures idempotency, observability, and robust error handling.
+#
+# Standards Applied:
+#   - FQCN: All modules use Fully Qualified Collection Names.
+#   - Idempotency: Modules use 'state: present' and specific identifiers.
+#   - Observability: Every major step is registered and validated via assertions.
+#   - Error Handling: Block/Rescue pattern used to capture and report failures.
+# ==============================================================================
+
+- name: Configure SD-WAN Service Rules
+  hosts: fortigate
+  gather_facts: false
   connection: httpapi
+
   vars:
     vdom: "root"
+    
+    # SD-WAN service rules configuration
+    service_rules:
+      - name: "Business_Critical"
+        mode: "priority"
+        role: "primary"
+        health_check: "Internet_Ping"
+        members:
+          - seq_num: 1
+            interface: "wan1"
+            priority: 1
+            gateway: "{{ wan1_gateway | default('0.0.0.0') }}"
+          - seq_num: 2
+            interface: "wan2"
+            priority: 2
+            gateway: "{{ wan2_gateway | default('0.0.0.0') }}"
+        dst: "all"
+        protocol: 0
+        config_slas:
+          - health_check: "Internet_Ping"
+            id: 1
+
+      - name: "Video_Streaming"
+        mode: "sla"
+        role: "sla"
+        health_check: "Internet_HTTP"
+        members:
+          - seq_num: 1
+            interface: "wan1"
+            priority: 1
+          - seq_num: 2
+            interface: "wan2"
+            priority: 2
+        src: "{{ video_sources | default('all') }}"
+        dst: "all"
+        protocol: 6
+        dst_port: 443
+
+      - name: "Internet_Browsing"
+        mode: "load-balance"
+        load_balance: "source-ip-based"
+        members:
+          - seq_num: 1
+            interface: "wan1"
+            weight: 1
+          - seq_num: 2
+            interface: "wan2"
+            weight: 1
+        dst: "all"
+        config_slas:
+          - health_check: "Internet_Ping"
+            id: 1
+
+    # SD-WAN zones definition
+    sdwan_zones:
+      - name: "INFORMATION_SUPERHIGHWAY"
+
   tasks:
-    - name: Create SD-WAN Rule for Office365 Steering
-      fortinet.fortios.fortios_system_sdwan:
-        vdom: "{{ vdom }}"
-        system_sdwan:
-          service:
-            - id: 1
-              name: "Office365_Steering"
-              mode: "priority"
-              protocol: 6
-              start_port: 443
-              end_port: 443
-              dst:
-                - name: "Office365_Subnets" # Pre-defined address object
-              priority_members:
-                - 1 # ISP-A
-                - 2 # ISP-B
-              health_check: "Google_DNS"
-              link_cost_threshold: 10
+    - name: Pre-flight | Validate variable structure
+      ansible.builtin.assert:
+        that:
+          - service_rules is defined
+          - service_rules | length > 0
+          - vdom is defined
+        fail_msg: "CRITICAL: 'service_rules' must be defined and non-empty. Check inventory/vars."
+        success_msg: "Pre-flight checks passed: {{ service_rules | length }} rules found."
+
+    - name: Deployment | Configure SD-WAN Stack
+      block:
+        - name: SD-WAN | Ensure SD-WAN Zones exist
+          # Why: Zones provide logical containers for interfaces, simplifying firewall policy management.
+          fortinet.fortios.fortios_system_sdwan_zone:
+            vdom: "{{ vdom }}"
+            state: "present"
+            system_sdwan_zone:
+              name: "{{ item.name }}"
+          loop: "{{ sdwan_zones }}"
+          register: zone_config
+
+        - name: SD-WAN | Configure SD-WAN Members (Interfaces)
+          # Why: Interfaces must be initialized as SD-WAN members before they can be used in steering rules.
+          # We extract unique interfaces across all defined service rules.
+          fortinet.fortios.fortios_system_sdwan_member:
+            vdom: "{{ vdom }}"
+            state: "present"
+            system_sdwan_member:
+              seq_num: "{{ item.seq_num }}"
+              interface: "{{ item.interface }}"
+              gateway: "{{ item.gateway | default(omit) }}"
+          loop: "{{ service_rules | map(attribute='members') | flatten | unique(attribute='interface') }}"
+          register: member_config
+
+        - name: SD-WAN | Configure Service Rules (Steering)
+          # Why: Specific service modules are more idempotent than bulk system_sdwan configuration.
+          # We map the human-readable variables to the required API structure.
+          fortinet.fortios.fortios_system_sdwan_service:
+            vdom: "{{ vdom }}"
+            state: "present"
+            system_sdwan_service:
+              name: "{{ item.name }}"
+              mode: "{{ item.mode }}"
+              member: "{{ item.members | map('dictselect', ['seq_num']) | list if item.members is defined else omit }}"
+              dst: 
+                - name: "{{ item.dst | default('all') }}"
+              src:
+                - name: "{{ item.src | default('all') }}"
+              protocol: "{{ item.protocol | default(0) }}"
+              health_check: "{{ item.health_check | default(omit) }}"
+              sla: "{{ item.config_slas | default(omit) }}"
+          loop: "{{ service_rules }}"
+          register: service_config
+
+        - name: Verification | Confirm device state
+          # Why: Verifying the configuration fact confirms the device control plane has committed the changes.
+          fortinet.fortios.fortios_configuration_fact:
+            vdom: "{{ vdom }}"
+            selector: "system_sdwan_service"
+          register: sdwan_facts
+          changed_when: false
+
+        - name: Verification | Assert rule persistence
+          ansible.builtin.assert:
+            that:
+              - sdwan_facts.meta.results | length >= service_rules | length
+            fail_msg: "State mismatch: Device rule count does not match intended configuration."
+            success_msg: "SD-WAN Service Rules successfully deployed and verified."
+
+      rescue:
+        - name: Error Handling | Log failure details
+          ansible.builtin.debug:
+            msg: 
+              - "FATAL ERROR: SD-WAN deployment failed on {{ inventory_hostname }}"
+              - "Reason: {{ ansible_failed_result.msg | default('Unknown execution error') }}"
+              - "Task: {{ ansible_failed_task.name }}"
+
+        - name: Error Handling | Abort Playbook
+          ansible.builtin.fail:
+            msg: "Configuration failed. See debug output for specific error details."
+
+    - name: Finalize | Display Success Summary
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          SD-WAN DEPLOYMENT SUMMARY
+          ============================================================
+          Target Host: {{ inventory_hostname }}
+          VDOM: {{ vdom }}
+          Rules Processed: {{ service_rules | length }}
+          Configuration Changed: {{ (zone_config.changed or member_config.changed or service_config.changed) | default(false) }}
+          ============================================================
+      when: service_config is succeeded

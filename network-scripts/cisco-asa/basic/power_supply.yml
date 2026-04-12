@@ -1,35 +1,32 @@
 ---
-# Playbook: Get Power Supply Status
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
-# Purpose: This playbook retrieves and validates the power supply status on Cisco ASA/Firepower devices.
-
-- name: Get Power Supply Status
+- name: Cisco ASA/Firepower Power Supply Status Audit
   hosts: asa_firepower
   gather_facts: false
+  # This playbook is idempotent as it performs read-only operations to audit hardware status.
 
   tasks:
-    - name: Retrieve power supply status via CLI
-      # FQCN: ansible.netcommon.cli_command.
-      # Idempotency: "show" commands are read-only and inherently idempotent.
-      ansible.netcommon.cli_command:
-        command: show power
+    - name: Execute 'show power' command on the target device
+      # Using Fully Qualified Collection Name (FQCN) to ensure best practices and portability
+      cisco.asa.asa_command:
+        commands:
+          - show power
       register: power_output
-      # Error Handling: Explicitly fail if the command returns no data.
-      failed_when: 
-        - power_output.stdout is not defined or power_output.stdout | length == 0
+      # Error Handling: Fail explicitly if the command is unrecognized or returns an error string
+      failed_when:
+        - power_output.failed or "Invalid input" in power_output.stdout[0]
 
-    - name: Validate power supply information
-      # Observability: Ensure the output contains expected keywords to confirm data validity.
+    - name: Verify that power supply data was successfully captured
+      # Observability: Assert that the command returned non-empty output to ensure data integrity
       ansible.builtin.assert:
         that:
-          - "'Power' in power_output.stdout or 'supply' in power_output.stdout"
-        fail_msg: "Power supply status retrieval failed: Unexpected output format."
-        success_msg: "Power supply status successfully retrieved and validated."
-        quiet: true
+          - power_output.stdout is defined
+          - power_output.stdout[0] | length > 0
+        fail_msg: "Power supply status could not be retrieved or the output is empty."
+        success_msg: "Power supply status successfully retrieved from the device."
 
-    - name: Display power supply status
-      # Observability: Outputting the result for manual inspection or logging.
+    - name: Display the formatted power supply status
+      # Documentation: Providing a clear, human-readable view of the hardware status for audit logs
       ansible.builtin.debug:
         msg: |
           ======================= POWER SUPPLY STATUS =======================
-          {{ power_output.stdout }}
+          {{ power_output.stdout[0] }}

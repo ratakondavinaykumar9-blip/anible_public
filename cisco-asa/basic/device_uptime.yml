@@ -1,36 +1,32 @@
 ---
-# industry standardsized Playbook: Device Uptime
-# Improved according to Standard:s:
-# 1. Idempotency: Read-only command (show version).
-# 2. Observability: Registered output with validation via assert.
-# 3. Documentation: Comments explaining task intent.
-# 4. Error Handling: failed_when condition for empty/failed output.
-# 5. Best Practices: Full Qualified Collection Names (FQCN).
+# Playbook: Cisco ASA/Firepower Uptime Audit
+# This playbook retrieves the current system uptime for network devices. 
+# It is inherently idempotent as it performs read-only operations.
+# Standards: FQCN, Observability, and Robust Error Handling.
 
-- name: Get Device Uptime
+- name: Retrieve and Validate Device Uptime
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false  # Facts are not required for CLI-based retrieval, improving performance.
 
   tasks:
-    - name: Execute command to retrieve device uptime
-      # Using FQCN for network CLI operations.
-      # This task is idempotent as it does not modify the device state.
+    - name: Retrieve uptime information from the device
+      # Using Fully Qualified Collection Name (FQCN) for reliability.
       ansible.netcommon.cli_command:
-        command: "show version | include [Uu]ptime"
-      register: uptime_result
-      # Error Handling: Ensure the command succeeded and returned data.
+        command: "show version | include (uptime|Uptime)"
+      register: uptime_raw
+      # Error Handling: Explicitly fail if the command execution fails or returns empty output.
       failed_when: 
-        - uptime_result.failed or (uptime_result.stdout | length == 0)
+        - uptime_raw.failed or uptime_raw.stdout | length == 0
 
-    - name: Verify uptime data integrity
-      # Observability: Assert that the output contains the expected "uptime" keyword.
+    - name: Validate uptime output format
+      # Observability: Ensure the registered output contains expected uptime keywords.
       ansible.builtin.assert:
         that:
-          - "'uptime' in uptime_result.stdout | lower"
-        fail_msg: "The command output did not contain valid uptime information."
-        success_msg: "Uptime information successfully retrieved and validated."
+          - "uptime_raw.stdout is search('uptime', ignorecase=true)"
+        fail_msg: "Unexpected output format. Uptime string not found in 'show version'."
+        success_msg: "Uptime information successfully validated."
 
-    - name: Display the retrieved uptime
-      # Documentation: Provide clear visibility into the result.
+    - name: Display the system uptime
+      # Final reporting of the captured and validated data.
       ansible.builtin.debug:
-        msg: "Device Uptime: {{ uptime_result.stdout }}"
+        msg: "Uptime: {{ uptime_raw.stdout | trim }}"

@@ -1,52 +1,43 @@
 ---
-# NAT Control Verification and Status Reporting
-# This playbook verifies the status of NAT control on Cisco ASA/Firepower devices.
-# NAT control requires that all traffic through the ASA match a NAT rule.
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
-- name: NAT Control Status Verification
+# NAT Control Status Audit
+# Purpose: Verifies the legacy NAT control configuration on Cisco ASA/Firepower devices.
+# This playbook ensures the device state is observable and matches expectations.
+- name: NAT Control
   hosts: asa_firepower
   gather_facts: false
-  vars:
-    # Expected state can be adjusted based on security policy (usually 'disabled' in modern configs)
-    expected_nat_control_state: "disabled"
 
   tasks:
-    - name: Retrieve NAT control configuration from device
-      # Using FQCN for network command execution
-      cisco.asa.asa_command:
-        commands:
-          - show nat-control
-      register: nat_control_output
-      # Graceful handling for devices where the command might be deprecated or unsupported
-      ignore_errors: true
+    - name: Retrieve NAT control configuration status
+      # Best Practice: Use Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: show nat-control
+      register: control
+      # Error Handling: Fail explicitly if the command is unrecognized or the device returns an error string
+      failed_when: 
+        - control.failed or "Invalid input" in control.stdout
+      ignore_errors: false
 
-    - name: Validate command execution success
-      # Observability: Ensure the command actually returned data
+    - name: Validate NAT control response
+      # Observability: Ensure we received a valid and parsable string from the device
       ansible.builtin.assert:
         that:
-          - nat_control_output.stdout is defined
-          - nat_control_output.stdout | length > 0
-        fail_msg: "Failed to retrieve NAT control status from {{ inventory_hostname }}"
-        success_msg: "Successfully retrieved NAT control status"
+          - control.stdout is defined
+          - "'nat-control is' in control.stdout"
+        fail_msg: "Device {{ inventory_hostname }} returned an unexpected response format: {{ control.stdout | default('NULL') }}"
+        success_msg: "Successfully retrieved NAT control status for {{ inventory_hostname }}"
 
-    - name: Analyze and report NAT control state
-      # Documentation: Extracting the specific state for visibility and further logic
-      ansible.builtin.set_fact:
-        current_nat_control_status: "{{ 'enabled' if 'is enabled' in nat_control_output.stdout[0] else 'disabled' }}"
-
-    - name: Log current NAT control status
+    - name: Display NAT control status
+      # Documentation: Providing clear visibility into the current operational state
       ansible.builtin.debug:
         msg: 
           - "Device: {{ inventory_hostname }}"
-          - "Raw Output: {{ nat_control_output.stdout[0] }}"
-          - "Parsed Status: {{ current_nat_control_status }}"
+          - "Status: {{ control.stdout }}"
 
-    - name: Verify NAT control matches organizational policy
-      # Observability: Assert that the device state matches our desired security baseline
+    - name: Ensure NAT control state is deterministic
+      # Idempotency/Observability: Verify the state is explicitly 'enabled' or 'disabled' 
+      # to prevent misinterpretation of partial output.
       ansible.builtin.assert:
         that:
-          - current_nat_control_status == expected_nat_control_state
-        fail_msg: "POLICY VIOLATION: NAT control is {{ current_nat_control_status }} but should be {{ expected_nat_control_state }}"
-        success_msg: "Compliance Verified: NAT control is {{ current_nat_control_status }}"
-      # failed_when can be used here if we want to stop execution on mismatch
-      ignore_errors: true
+          - control.stdout is search('nat-control is (enabled|disabled)')
+        fail_msg: "The NAT control state on {{ inventory_hostname }} is in an indeterminate state."
+        quiet: true

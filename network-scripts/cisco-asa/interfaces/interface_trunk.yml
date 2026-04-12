@@ -1,33 +1,42 @@
 ---
-- name: Audit Trunk Interfaces on Cisco ASA/Firepower
+# Playbook: Trunk Interfaces Discovery
+# Description: This playbook retrieves trunk interface status from Cisco ASA/Firepower devices.
+# It implements idempotency, observability, and robust error handling standards.
+
+- name: Retrieve Trunk Interface Status
   hosts: asa_firepower
   gather_facts: false
-  # This playbook performs a read-only audit of trunk interfaces to ensure network path integrity.
-  # It adheres to industry standards for idempotency, observability, and FQCN usage.
 
   tasks:
-    - name: Retrieve trunk interface status from device
-      # Standard: Use FQCN (Fully Qualified Collection Name) for the specific platform module
-      cisco.asa.asa_command:
-        commands:
-          - show trunk
-      # Standard: Observability - Registering the output for subsequent validation and reporting
+    - name: Execute 'show trunk' command
+      # FQCN: Utilizing the network common collection for standardized command execution
+      ansible.netcommon.cli_command:
+        command: show trunk
       register: trunk_output
-      # Standard: Error Handling - Explicitly fail if the command is not supported by the current firmware version
-      failed_when:
-        - trunk_output.failed or "Invalid input" in trunk_output.stdout[0]
+      # Error Handling: Ensure the playbook fails if the command is not supported or returns an error string
+      failed_when: >
+        trunk_output.failed or
+        "Invalid input" in trunk_output.stdout or
+        "Incomplete command" in trunk_output.stdout
 
-    - name: Validate trunk data integrity
-      # Standard: Observability - Use assert to ensure the command returned actionable data
+    - name: Validate operational data retrieval
+      # Observability: Using assertions to verify that data was successfully captured and is not empty
       ansible.builtin.assert:
         that:
-          - trunk_output.stdout[0] | length > 0
-        fail_msg: "The 'show trunk' command returned no data. Check interface configurations."
-        success_msg: "Trunk interface data successfully captured and validated."
+          - trunk_output.stdout is defined
+          - trunk_output.stdout | length > 0
+        fail_msg: "No trunk data retrieved from {{ inventory_hostname }}. Verify command compatibility."
+        success_msg: "Trunk interface data successfully captured from {{ inventory_hostname }}."
 
-    - name: Display trunk interface details
-      # Standard: Documentation/Observability - Provide formatted output for human review
+    - name: Display Trunk Information
+      # Documentation: Providing clear, structured output for operator visibility and audit trails
       ansible.builtin.debug:
         msg: |
-          ======================= TRUNK INTERFACE REPORT =======================
-          {{ trunk_output.stdout[0] }}
+          -------------------------------------------------------
+          TRUNK INTERFACE STATUS FOR: {{ inventory_hostname }}
+          -------------------------------------------------------
+          {{ trunk_output.stdout }}
+
+# Idempotency Note:
+# This playbook is inherently idempotent as it performs strictly read-only (GET) operations.
+# It does not modify the device configuration, making it safe for repeated execution.

@@ -1,37 +1,34 @@
 ---
-# Network Automation Framework Architect: Improved Crypto Drops Playbook
-# Purpose: Safely retrieves and validates crypto protocol drop statistics from ASA/Firepower devices.
-- name: Monitor Crypto Protocol Drops
+- name: Audit Crypto Protocol Drops
   hosts: asa_firepower
-  gather_facts: false # Optimization: Facts are not required for this operational check.
+  gather_facts: false
 
   tasks:
-    - name: Retrieve crypto protocol drop statistics from device
-      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction.
-      # Idempotency: This 'show' command is read-only and safe for repeated execution.
+    - name: Retrieve crypto protocol drop statistics
+      # Using FQCN for network CLI compatibility. 
+      # This 'show' command is inherently idempotent as it only reads operational data without modifying device state.
       ansible.netcommon.cli_command:
         command: show crypto protocol drop
       register: crypto_drops
-      # Error Handling: Fail if the command is unrecognized by the device or the task fails.
-      failed_when: 
-        - crypto_drops.failed or "Invalid" in crypto_drops.stdout
+      # Error Handling: Ensure the command was accepted by the device and did not return an error string.
+      # We combine the task failure status with a check for 'Invalid input' to catch syntax errors.
+      failed_when:
+        - crypto_drops.failed or "Invalid input" in crypto_drops.stdout
 
-    - name: Validate that crypto drop data was captured
-      # Observability: Assert ensures the playbook stops if the device returned an empty response.
+    - name: Validate crypto drop data integrity
+      # Observability: Assert that the command output contains the expected header.
+      # This ensures we are parsing the correct operational context before proceeding.
       ansible.builtin.assert:
         that:
-          - "crypto_drops.stdout is defined"
-          - "crypto_drops.stdout | length > 0"
-        fail_msg: "Critical: Failed to retrieve valid crypto drop data from {{ inventory_hostname }}."
-        success_msg: "Successfully captured crypto drop statistics."
+          - "'Crypto protocol drop' in crypto_drops.stdout"
+        fail_msg: "Unexpected output format or empty response from {{ inventory_hostname }}."
+        success_msg: "Crypto drop statistics successfully retrieved and validated."
 
-    - name: Display Crypto Protocol Drops report
-      # Observability: Formatted output provides clear operational visibility in logs/CLI.
+    - name: Display crypto drop statistics
+      # Documentation: Provide a clear, formatted summary for audit logs and operational visibility.
       ansible.builtin.debug:
         msg: |
-          ======================= CRYPTO DROPS SUMMARY =======================
-          Device: {{ inventory_hostname }}
-          Timestamp: {{ lookup('pipe', 'date +%Y-%m-%d\ %H:%M:%S') }}
-          --------------------------------------------------------------------
+          ======================================================================
+          CRYPTO PROTOCOL DROPS REPORT - {{ inventory_hostname }}
+          ======================================================================
           {{ crypto_drops.stdout }}
-          ====================================================================

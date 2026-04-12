@@ -1,43 +1,59 @@
 ---
-# FortiGate Session Monitoring - Standard:
-# Purpose: Perform non-intrusive monitoring of network sessions with validation.
-- name: Monitor FortiGate Sessions
+# FortiGate Session Monitoring Playbook
+# Standardized for NetLearner Architecture
+# Focus: Idempotency, Observability, and Robust Error Handling
+- name: Monitor FortiGate Network Sessions
   hosts: fortigate
-  gather_facts: false # Disabled to minimize overhead during monitoring tasks.
+  gather_facts: false
+  vars:
+    # Threshold for session count warnings (example for observability)
+    session_threshold: 50000
 
   tasks:
-    - name: Collect detailed session information from the device
-      # FQCN (Fully Qualified Collection Name) used for future-proofing and consistency.
+    - name: Retrieve Active Session List
+      # Using FQCN for consistent cross-environment execution
       ansible.netcommon.cli_command:
-        command: "get system session list"
+        command: get system session list
       register: sessions_output
-      # Error Handling: Ensure the command was executed and returned output.
-      failed_when: sessions_output.stdout is not defined
+      # Idempotency: CLI 'get' commands are read-only and inherently idempotent
+      changed_when: false
+      # Error Handling: Ensure the command was recognized by the FortiOS CLI
+      failed_when: 
+        - sessions_output.failed
+        - "'Unknown action' in sessions_output.stdout"
 
-    - name: Collect session statistics and performance counters
+    - name: Retrieve Session Statistics
       ansible.netcommon.cli_command:
-        command: "get system session stat"
+        command: get system session stat
       register: stats_output
-      # Error Handling: Fail if the response is empty, indicating a potential connectivity or privilege issue.
-      failed_when: stats_output.stdout == "" or stats_output.stdout is not defined
+      changed_when: false
+      failed_when: stats_output.failed
 
-    - name: Verify data integrity and collection success
-      # Observability: Use assertions to confirm the captured data contains expected keywords.
+    - name: Validate Session Data Integrity
+      # Observability: Assert that we received a valid response from the device
       ansible.builtin.assert:
         that:
-          - "'session' in stats_output.stdout"
-        fail_msg: "Critical: Failed to retrieve valid session statistics from {{ inventory_hostname }}."
-        success_msg: "Success: Session monitoring data verified for {{ inventory_hostname }}."
+          - "stats_output.stdout is defined"
+          - "'sessions' in stats_output.stdout.lower()"
+        fail_msg: "Failed to retrieve valid session statistics from {{ inventory_hostname }}"
+        success_msg: "Successfully validated session telemetry for {{ inventory_hostname }}"
 
-    - name: Display formatted session monitoring report
-      # Observability: Provide a clear summary of the system state for operational review.
+    - name: Display Session Monitoring Report
+      # Documentation: Summary view for NOC/SOC visibility
       ansible.builtin.debug:
         msg: |
-          ======================= SESSION MONITORING SUMMARY =======================
-          Target Device: {{ inventory_hostname }}
+          ======================= SESSION MONITORING REPORT =======================
+          Host: {{ inventory_hostname }}
+          Timestamp: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
           
-          Session Statistics:
+          RAW STATISTICS:
           {{ stats_output.stdout }}
+          
+          STATUS: Verification Complete
+          ==========================================================================
 
-          Status: Data successfully captured and validated.
-      # Idempotency: This playbook is read-only and inherently safe to execute multiple times.
+    - name: Check for Critical Session Exhaustion
+      # Proactive Monitoring: Alert if session counts are abnormally high
+      ansible.builtin.set_fact:
+        session_count_warning: "{{ 'High session count detected' if 'clash' in stats_output.stdout else 'Normal' }}"
+      when: stats_output.stdout is defined

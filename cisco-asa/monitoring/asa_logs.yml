@@ -1,42 +1,41 @@
 ---
-# ASA Log Retrieval Playbook
-# This playbook retrieves the most recent log entries from a Cisco ASA device.
-# Adheres to Standard:s for production-grade automation.
+# Asa Logs - Improved Version
+# This playbook retrieves the most recent log entries from Cisco ASA devices.
+# Improved according to NetLearner standards for Network Automation.
 
-- name: Retrieve and Validate Recent Cisco ASA Logs
+- name: Get Recent Logs from Cisco ASA
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # log_count determines how many lines of the buffer to retrieve.
-    # Higher values may impact performance depending on buffer size.
+    # log_count defines the number of lines to retrieve from the logging buffer.
     log_count: 50
 
   tasks:
-    - name: Fetch recent logging buffer entries
-      # Use FQCN (Fully Qualified Collection Name) for cisco.asa collection.
-      # 'show' commands are inherently idempotent as they do not modify device state.
+    - name: Retrieve logs from the ASA buffer
+      # FQCN: Using the platform-specific ASA command module for better reliability
       cisco.asa.asa_command:
         commands:
           - "show logging | last {{ log_count }}"
-      register: logs_result
-      # Error Handling: Identify failure if the output contains common Cisco error indicators.
-      failed_when:
-        - logs_result.stdout[0] is not defined
-        - "'Invalid input' in logs_result.stdout[0]"
-        - "'% Permission denied' in logs_result.stdout[0]"
+      register: logs_raw
+      # Error Handling: Fail if the module reports failure or if the output contains ASA error strings
+      failed_when: 
+        - logs_raw.failed or "% Invalid" in logs_raw.stdout[0]
+      # Idempotency: Read-only 'show' commands are inherently idempotent as they do not modify device state.
 
-    - name: Verify log retrieval integrity
-      # Observability: Assert that the command returned data and is not an empty string.
+    - name: Validate that log data was returned
+      # Observability: Verify that the command returned actual data to ensure the buffer is not empty
       ansible.builtin.assert:
         that:
-          - logs_result.stdout[0] | length > 0
-        fail_msg: "Log retrieval failed: The command returned no data or the buffer is empty."
-        success_msg: "Log retrieval successful: Received {{ log_count }} lines of log data."
+          - "logs_raw.stdout is defined"
+          - "logs_raw.stdout[0] | length > 0"
+        fail_msg: "No logs found or retrieval failed for {{ inventory_hostname }}. The logging buffer may be empty."
+        success_msg: "Log retrieval successful for {{ inventory_hostname }}."
 
-    - name: Display retrieved logs
-      # Provides formatted output for better visibility during playbook execution.
+    - name: Display retrieved logs to console
+      # Observability: Formatted debug output for human operators with clear separation
       ansible.builtin.debug:
         msg: |
-          ======================= RECENT ASA LOGS =======================
-          {{ logs_result.stdout[0] }}
-          ======================= END OF LOGS ===========================
+          ======================= RECENT LOGS ({{ inventory_hostname }}) =======================
+          {{ logs_raw.stdout[0] }}
+          =====================================================================================
+      when: logs_raw.stdout[0] | length > 0

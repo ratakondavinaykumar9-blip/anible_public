@@ -1,44 +1,37 @@
 ---
-# Cisco ASA/Firepower Group Policy Audit
-# Purpose: Retrieves and validates the current group-policy configuration.
-# Idempotency: Read-only operations are inherently idempotent and safe for repeated execution.
-- name: Audit Group Policies
+# Group Policies Configuration Audit
+# Improved: 2026-03-15
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
+- name: Audit Cisco ASA Group Policies
   hosts: asa_firepower
-  gather_facts: false # Facts are not required for CLI command execution
+  gather_facts: false
 
   tasks:
-    - name: Retrieve group-policy configuration from device
-      # FQCN: Using fully qualified collection name for portability and best practices
+    - name: Retrieve group-policy configuration from running-config
+      # Using FQCN for ansible.netcommon.cli_command.
+      # This task is read-only and inherently idempotent.
       ansible.netcommon.cli_command:
         command: show running-config group-policy
       register: policies_result
-      # Error Handling: Fail if command is rejected or returns common ASA error patterns
-      failed_when:
-        - policies_result.failed or "'Invalid input' in policies_result.stdout"
-        - "'ERROR:' in policies_result.stdout"
+      # Error Handling: Catch ASA-specific error strings that may not trigger a CLI return code failure.
+      failed_when: 
+        - policies_result.failed or "% Invalid input" in policies_result.stdout or "ERROR:" in policies_result.stdout
+      # Idempotency: Ensure this read-only task does not report a 'changed' status in the play recap.
+      changed_when: false
 
-    - name: Validate configuration capture
-      # Observability: Assert that the command returned valid data before proceeding
+    - name: Validate that group policy configuration was retrieved successfully
+      # Observability: Assert that the command returned content to ensure device state is accessible.
       ansible.builtin.assert:
         that:
-          - "policies_result.stdout is defined"
-          - "policies_result.stdout | length > 0"
-        fail_msg: "Data retrieval failed or group-policy configuration is empty."
-        quiet: true
+          - policies_result.stdout is defined
+          - policies_result.stdout | length > 0
+        fail_msg: "Failed to retrieve Group Policies or no Group Policies are configured on {{ inventory_hostname }}."
+        success_msg: "Group Policy configuration successfully retrieved."
 
-    - name: Display formatted Group Policy configuration
-      # Documentation: Provides structured visibility for audit logs and operators
+    - name: Display Group Policy configuration for audit purposes
+      # Documentation: Providing a structured output for human review and logging.
       ansible.builtin.debug:
         msg: |
-          ======================= START GROUP POLICIES =======================
+          ======================= GROUP POLICIES: {{ inventory_hostname }} =======================
           {{ policies_result.stdout }}
-          ======================== END GROUP POLICIES ========================
-
-    - name: Check for Default Group Policy existence
-      # Observability: Verify standard configuration markers are present in the output
-      ansible.builtin.set_fact:
-        has_default_policy: "{{ 'group-policy DfltGrpPolicy' in policies_result.stdout }}"
-
-    - name: Report Configuration Integrity
-      ansible.builtin.debug:
-        msg: "Default Group Policy (DfltGrpPolicy) is present: {{ has_default_policy }}"

@@ -1,35 +1,34 @@
 ---
-# FortiGate SSL VPN Session Monitoring
-# This playbook retrieves active SSL VPN sessions to provide operational visibility.
-# It adheres to idempotency by marking read-only commands as 'changed_when: false'.
+# FortiGate SSL VPN Session Monitoring Playbook
+# This playbook retrieves and validates active SSL VPN sessions from FortiGate devices.
 - name: Get SSL VPN Sessions
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Optimization: Fact gathering is not required for this operational check
 
   tasks:
-    - name: Retrieve SSL VPN sessions from device
-      # Use FQCN for reliability and clarity
+    - name: Fetch active SSL VPN sessions via CLI
+      # Use FQCN (Fully Qualified Collection Name) to adhere to Ansible enterprise standards
       ansible.netcommon.cli_command:
         command: get sslvpn session
-      register: vpn_sessions
-      # Idempotency: Read-only commands should not report a 'changed' state
-      changed_when: false
-      # Error Handling: Detect if the command was rejected or failed on the device
-      failed_when:
-        - vpn_sessions.rc != 0
-        - "'Command fail' in vpn_sessions.stdout"
+      register: sessions
+      # Error Handling: Detect if the command was unrecognized by the FortiOS shell
+      failed_when: 
+        - sessions.failed or "Unknown action" in sessions.stdout
+      # Idempotency: Read-only 'get' commands are inherently idempotent and safe to run repeatedly
+      # check_mode: false ensures this task executes even during dry-runs to provide visibility
+      check_mode: false
 
-    - name: Verify session data integrity
-      # Observability: Use assert to ensure we received a valid response object
+    - name: Validate that session data was retrieved
+      # Observability: Assert that the command returned valid output to prevent downstream errors
       ansible.builtin.assert:
         that:
-          - vpn_sessions.stdout is defined
-        fail_msg: "SSL VPN session data could not be retrieved from the host."
-        success_msg: "SSL VPN session data successfully captured."
+          - sessions.stdout is defined
+        fail_msg: "Failed to retrieve SSL VPN session data. Ensure SSL VPN is configured and active."
+        quiet: true
 
-    - name: Display session details
-      # Documentation: Provides a formatted view of the current state for the operator
+    - name: Display formatted SSL VPN session details
+      # Documentation: Providing clear, human-readable visibility into the current operational state
       ansible.builtin.debug:
         msg: |
           ======================= SSL VPN SESSIONS =======================
-          {{ vpn_sessions.stdout }}
+          {{ sessions.stdout | default('No active SSL VPN sessions found.') }}

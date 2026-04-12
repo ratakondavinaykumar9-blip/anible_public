@@ -1,48 +1,46 @@
 ---
-# Playbook: Collect Cisco ASA/Firepower Tech Support
-# Why: Automates the collection of diagnostic data for troubleshooting and compliance audits.
-- name: Get Tech Support Info
+- name: "OPERATIONAL: Retrieve and Archive Cisco ASA/Firepower Tech Support Information"
   hosts: asa_firepower
   gather_facts: false
+  # Why: Gathering facts is disabled to speed up execution as we only need CLI access.
 
   tasks:
-    - name: Execute 'show tech-support' on the security appliance
-      # Why: Aggregates multiple diagnostic commands; timeout is increased for large output.
-      # FQCN: Using ansible.netcommon.cli_command for broad compatibility.
+    - name: "DATA_COLLECTION: Execute 'show tech-support' on the remote device"
       ansible.netcommon.cli_command:
         command: show tech-support
-      register: tech_result
-      vars:
-        ansible_command_timeout: 600
+      register: tech_support_output
+      # Why: Capture the command output for validation and subsequent file writing.
+      # Error Handling: Fail if output is missing or contains common Cisco CLI error strings.
+      failed_when: >
+        tech_support_output.stdout is not defined or
+        'Invalid input' in tech_support_output.stdout or
+        '% Invalid' in tech_support_output.stdout
 
-    - name: Validate tech support data retrieval
-      # Observability: Ensures the command returned non-empty content before proceeding.
+    - name: "OBSERVABILITY: Validate that the tech-support output is not empty"
       ansible.builtin.assert:
         that:
-          - tech_result.stdout is defined
-          - tech_result.stdout | length > 0
-        fail_msg: "Tech support collection failed or returned empty for {{ inventory_hostname }}."
-        success_msg: "Diagnostic data successfully captured from {{ inventory_hostname }}."
+          - "tech_support_output.stdout | length > 0"
+        fail_msg: "The tech-support output was empty. Check device status or connectivity."
+        success_msg: "Successfully captured tech-support data."
+      # Why: Ensure we have actual data before attempting to persist it to the filesystem.
 
-    - name: Persist diagnostic data to the local control node
-      # Why: Saves output locally for offline analysis.
-      # Idempotency: ansible.builtin.copy ensures the file content matches the captured output.
+    - name: "PERSISTENCE: Save captured tech-support data to a local file"
       ansible.builtin.copy:
-        content: "{{ tech_result.stdout }}"
+        content: "{{ tech_support_output.stdout }}"
         dest: "/tmp/asa_tech_support_{{ inventory_hostname }}.txt"
         mode: '0644'
-      delegate_to: localhost
-      register: save_status
+      register: file_save_status
+      # Why: The copy module is idempotent; it only updates the file if the content has changed.
+      # Using a local path allows for centralized collection and offline analysis.
 
-    - name: Verify file write operation
-      # Observability: Confirm the file was successfully written to the local filesystem.
+    - name: "OBSERVABILITY: Confirm file write operation status"
       ansible.builtin.assert:
         that:
-          - save_status.dest is defined
-          - not save_status.failed
-        fail_msg: "Failed to save diagnostic file to {{ save_status.dest | default('destination') }}"
+          - "file_save_status.dest is defined"
+        fail_msg: "Failed to save the tech-support file to /tmp. Check local permissions."
+      # Why: Explicitly verify that the data was successfully written to the management station.
 
-    - name: Display operation summary
-      # Why: Provides immediate feedback on the location of the generated report.
+    - name: "REPORTING: Display the summary of the capture operation"
       ansible.builtin.debug:
-        msg: "Tech support capture for {{ inventory_hostname }} is saved at: {{ save_status.dest }}"
+        msg: "Tech support capture complete. File saved at: {{ file_save_status.dest }}"
+      # Why: Provide immediate feedback to the operator with the exact location of the artifact.

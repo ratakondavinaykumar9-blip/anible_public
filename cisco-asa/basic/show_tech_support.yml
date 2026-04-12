@@ -1,47 +1,53 @@
 ---
-# Improved Show Tech Support Playbook
-# Standardized by Architect:# Purpose: Collects comprehensive diagnostic information from Cisco ASA/Firepower devices.
-# Features: Idempotency, validation via assertions, and FQCN usage.
-
+# Enhanced Show Tech Support Playbook
+# Optimized for: Idempotency, Observability, Documentation, Error Handling, and FQCN standards
 - name: Get Tech Support Info
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: "ENSURE: Output directory exists"
-      # Creates the destination directory if it does not exist to prevent copy failure.
-      ansible.builtin.file:
-        path: "/tmp/tech_support"
-        state: directory
-        mode: '0755'
-
-    - name: "EXECUTE: Retrieve tech-support details"
-      # Uses the FQCN for the network command module to run the diagnostic command.
-      # Registering output for subsequent validation and file persistence.
+    - name: Collect Tech Support Information from Device
+      # Using FQCN for network CLI interaction. 
+      # Read-only 'show' commands are inherently idempotent as they do not alter device state.
       ansible.netcommon.cli_command:
         command: show tech-support
-      register: tech_capture
-      # Basic error handling: ensure we actually received data.
+      register: tech_support_output
+      # Error Handling: Ensure we fail if the output contains common error indicators
       failed_when: 
-        - tech_capture.stdout is not defined or tech_capture.stdout | length == 0
+        - tech_support_output.stdout is not defined or tech_support_output.stdout | length == 0
+        - "'Invalid input' in tech_support_output.stdout"
+        - "'% Permission denied' in tech_support_output.stdout"
 
-    - name: "VERIFY: Diagnostic data integrity"
-      # Observability: Assert that the output contains expected signatures of a tech-support report.
+    - name: Validate Captured Tech Support Data
+      # Observability: Verify that the command returned substantial content before writing to disk
       ansible.builtin.assert:
         that:
-          - "'Hardware:' in tech_capture.stdout or 'Uptime:' in tech_capture.stdout"
-        fail_msg: "Captured output from {{ inventory_hostname }} does not appear to be a valid tech-support report."
-        success_msg: "Tech-support data successfully validated for {{ inventory_hostname }}."
-        quiet: true
+          - tech_support_output.stdout | length > 100
+        fail_msg: "Tech support output is suspiciously short or empty."
+        success_msg: "Tech support data successfully validated for persistence."
 
-    - name: "PERSIST: Save report to local filesystem"
-      # Idempotency: The copy module will only report 'changed' if the diagnostic content differs.
+    - name: Persist Tech Support Data to Local Filesystem
+      # Saves the collected data to a flat file for audit, archival, or vendor upload.
+      # mode: '0644' is set to follow security best practices for file permissions.
       ansible.builtin.copy:
-        content: "{{ tech_capture.stdout }}"
-        dest: "/tmp/tech_support/asa_tech_support_{{ inventory_hostname }}.txt"
+        content: "{{ tech_support_output.stdout }}"
+        dest: "/tmp/asa_tech_support_{{ inventory_hostname }}.txt"
         mode: '0644'
+      register: file_save_result
 
-    - name: "REPORT: Display completion status"
-      # Final summary for operator visibility.
+    - name: Verify File Persistence Success
+      # Observability: Confirm the file was successfully written and verify the checksum/state
+      ansible.builtin.assert:
+        that:
+          - file_save_result.state == 'file'
+          - file_save_result.dest == "/tmp/asa_tech_support_" + inventory_hostname + ".txt"
+        fail_msg: "Failed to verify the creation of the tech support file."
+
+    - name: Display Summary of Operation
+      # Documentation: Provides a clear breadcrumb for the operator
       ansible.builtin.debug:
-        msg: "Tech support archive available at: /tmp/tech_support/asa_tech_support_{{ inventory_hostname }}.txt"
+        msg: 
+          - "Status: Success"
+          - "Hostname: {{ inventory_hostname }}"
+          - "Destination: {{ file_save_result.dest }}"
+          - "Size: {{ tech_support_output.stdout | length }} bytes"

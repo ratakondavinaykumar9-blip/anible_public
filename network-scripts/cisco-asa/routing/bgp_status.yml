@@ -1,39 +1,41 @@
 ---
-# Standard:ized Playbook: ASA BGP Status Verification
-# This playbook retrieves and validates BGP summary information from Cisco ASA/Firepower devices.
-- name: Get BGP Status
+# NetLearner Architect Improved BGP Status Playbook
+# Purpose: This playbook retrieves and validates BGP routing status on Cisco ASA/Firepower devices.
+# Standards: Idempotency (Read-only), Observability (Assert/Register), FQCN usage, and Robust Error Handling.
+
+- name: Retrieve BGP Operational Status
   hosts: asa_firepower
   gather_facts: false
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve BGP summary from device
-      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interactions
+    - name: "OPERATIONAL: Execute BGP summary command"
+      # Using FQCN (Fully Qualified Collection Name) for cross-platform consistency.
+      # This task is read-only and thus naturally idempotent.
       ansible.netcommon.cli_command:
         command: show bgp summary
-      register: bgp_result
-      # Error Handling: Fail if the command is unrecognized or the device returns an error string.
-      # We allow "BGP not active" as it is a valid operational state to report.
+      register: bgp_summary_result
+      # Define explicit failure conditions to catch unconfigured BGP or syntax issues.
       failed_when:
-        - bgp_result.stdout is not defined
-        - "'Invalid input' in bgp_result.stdout"
-        - "'% ERROR' in bgp_result.stdout"
-      # Idempotency: This is a read-only 'show' command, ensuring the playbook is safe to run repeatedly.
+        - bgp_summary_result.stdout is not defined
+        - "('Invalid' in bgp_summary_result.stdout) or ('BGP not enabled' in bgp_summary_result.stdout)"
 
-    - name: Validate BGP summary output integrity
-      # Observability: Use assert to verify that we received a non-empty response from the control plane.
+    - name: "OBSERVABILITY: Assert BGP summary data integrity"
+      # Verifies that the output contains expected data before proceeding.
       ansible.builtin.assert:
         that:
-          - bgp_result.stdout is defined
-          - bgp_result.stdout | length > 0
-        fail_msg: "BGP status retrieval failed: Received empty or undefined output from {{ inventory_hostname }}."
-        success_msg: "BGP status successfully captured from {{ inventory_hostname }}."
+          - bgp_summary_result.stdout | length > 0
+          - "'BGP router identifier' in bgp_summary_result.stdout"
+        fail_msg: "BGP is either not configured or not returning valid summary data on {{ inventory_hostname }}."
+        success_msg: "BGP summary successfully validated for {{ inventory_hostname }}."
 
-    - name: Display formatted BGP status report
-      # Documentation: Provide a clean, human-readable terminal output for network operators.
+    - name: "VISIBILITY: Display BGP Status"
+      # Provides clear, formatted output for operator review.
       ansible.builtin.debug:
         msg: |
-          ======================= BGP STATUS REPORT =======================
-          DEVICE: {{ inventory_hostname }}
-          ------------------------------------------------------------------
-          {{ bgp_result.stdout }}
-          ==================================================================
+          ==========================================================
+          BGP OPERATIONAL STATUS: {{ inventory_hostname }}
+          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          ==========================================================
+          {{ bgp_summary_result.stdout }}
+          ==========================================================

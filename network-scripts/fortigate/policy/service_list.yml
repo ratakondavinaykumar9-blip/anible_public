@@ -1,51 +1,56 @@
 ---
-# Network Automation Framework Architect: Improved FortiGate Service Audit Playbook
-# This playbook retrieves firewall service objects and groups with built-in validation and error handling.
-- name: FortiGate Service and Group Configuration Audit
+- name: Audit FortiGate Firewall Service Objects and Groups
   hosts: fortigate
   gather_facts: false
+  # Standardized metadata for tracking and maintenance
+  vars:
+    ansible_network_os: fortinet.fortios.fortios
 
   tasks:
-    - name: Retrieve Firewall Service Objects
-      # FQCN: Using ansible.netcommon for standardized CLI execution
-      # Why: 'show' provides the configuration state which is more descriptive than 'get'
+    - name: Retrieve Custom Firewall Service Objects
+      # Best Practice: Use Fully Qualified Collection Names (FQCN)
+      # 'show' is preferred over 'get' to capture the configuration-level objects
       ansible.netcommon.cli_command:
         command: "show firewall service custom"
-      register: svc_result
-      # Error Handling: Catch FortiOS specific command execution failures
-      failed_when:
-        - svc_result.failed or "Command fail" in svc_result.stdout
+      register: svc_output
+      # Error Handling: Identify FortiOS-specific error strings to fail early
+      failed_when: 
+        - svc_output.failed or "Command fail" in svc_output.stdout or "Unknown action" in svc_output.stdout
+      tags: [services, audit]
 
-    - name: Validate Service Objects Retrieval
-      # Observability: Assert that the output contains valid configuration data
+    - name: Validate Service Objects Data
+      # Observability: Assert that the command returned meaningful content
       ansible.builtin.assert:
         that:
-          - svc_result.stdout is defined
-          - svc_result.stdout | length > 0
-        fail_msg: "Failed to retrieve service objects or the configuration is empty."
-        success_msg: "Successfully validated service objects configuration."
+          - svc_output.stdout is defined
+          - svc_output.stdout | length > 0
+        fail_msg: "Service objects retrieval returned empty or failed state."
+        success_msg: "Successfully retrieved firewall service objects."
 
     - name: Retrieve Firewall Service Groups
+      # Idempotency: Read-only operations are inherently safe for multiple runs
       ansible.netcommon.cli_command:
         command: "show firewall service group"
-      register: grp_result
+      register: group_output
       failed_when:
-        - grp_result.failed or "Command fail" in grp_result.stdout
+        - group_output.failed or "Command fail" in group_output.stdout
+      tags: [groups, audit]
 
-    - name: Validate Service Groups Retrieval
-      # Idempotency Note: These 'show' operations are read-only and inherently idempotent
+    - name: Validate Service Groups Data
       ansible.builtin.assert:
         that:
-          - grp_result.stdout is defined
-          - grp_result.stdout | length > 0
-        fail_msg: "Failed to retrieve service groups or the configuration is empty."
-        success_msg: "Successfully validated service groups configuration."
+          - group_output.stdout is defined
+          - group_output.stdout | length > 0
+        fail_msg: "Service groups retrieval returned empty or failed state."
+        success_msg: "Successfully retrieved firewall service groups."
 
-    - name: Display Service and Group Summary
-      # Documentation: Providing clear operator visibility into the gathered state
+    - name: Display Service Configuration Summary
+      # Documentation: Clear separation of output for human operators/auditors
       ansible.builtin.debug:
-        msg:
-          - "======================= SERVICE OBJECTS ======================="
-          - "{{ svc_result.stdout }}"
-          - "======================= SERVICE GROUPS ======================="
-          - "{{ grp_result.stdout }}"
+        msg: |
+          ======================= SERVICE OBJECTS =======================
+          {{ svc_output.stdout }}
+
+          ======================= SERVICE GROUPS ========================
+          {{ group_output.stdout }}
+      when: not ansible_check_mode

@@ -1,35 +1,34 @@
 ---
-# NAT Control Status Verification
-# This playbook retrieves and validates the NAT control status on Cisco ASA/Firepower devices.
-# Standards: Idempotency (read-only), Observability (register/assert), FQCN, and Error Handling.
-
-- name: NAT Control Verification
+# NAT Control Assessment
+# This playbook retrieves and verifies the NAT control status on Cisco ASA/Firepower devices.
+# NAT control is a legacy feature (pre-ASA 8.3) that required a NAT policy for all traffic.
+- name: NAT Control Assessment
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve NAT control configuration from the device
-      # Use FQCN for reliability; changed_when: false ensures idempotency for read operations
+    - name: Retrieve NAT control status from device
+      # FQCN: Using ansible.netcommon.cli_command for cross-platform consistency.
+      # Idempotency: 'show' commands are read-only and inherently safe for repeated execution.
       ansible.netcommon.cli_command:
         command: show nat-control
       register: nat_control_output
-      # Idempotency: Read-only operations must not trigger a change state in Ansible
-      changed_when: false
-      # Error Handling: Fail if the command is unrecognized or the device returns an error string
+      # Error Handling: Handle cases where 'nat-control' might be deprecated or unsupported on newer firmware.
       failed_when:
         - nat_control_output.failed
-        - "'Invalid input' in nat_control_output.stdout"
+        - "'Invalid input' not in nat_control_output.stderr"
 
-    - name: Validate that NAT control information was successfully retrieved
-      # Observability: Assert that the output is defined and contains data
+    - name: Verify NAT control retrieval was successful
+      # Observability: Ensure that the command returned a valid response to confirm connectivity and command validity.
       ansible.builtin.assert:
         that:
-          - "nat_control_output.stdout is defined"
-          - "nat_control_output.stdout | length > 0"
-        fail_msg: "Failed to retrieve NAT control status or the output was empty."
+          - nat_control_output is defined
+          - nat_control_output.stdout is defined
+        fail_msg: "Failed to retrieve NAT control status. Check connectivity or device compatibility."
         success_msg: "Successfully retrieved NAT control status."
 
-    - name: Display NAT control status for visibility
-      # Observability: Log the exact status for administrative review and audit trails
+    - name: Display NAT control configuration
+      # Observability: Provide clear output for auditing and operational visibility.
       ansible.builtin.debug:
-        msg: "Current NAT Control Status: {{ nat_control_output.stdout }}"
+        msg: "Device NAT Control Status: {{ nat_control_output.stdout | trim }}"
+      when: nat_control_output.stdout is defined

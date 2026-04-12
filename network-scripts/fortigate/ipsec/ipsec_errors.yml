@@ -1,31 +1,31 @@
 ---
-# FortiGate IPSec VPN Error Analysis Playbook
-# Purpose: Retrieves IKE/IPSec log entries for troubleshooting. 
-# This playbook is idempotent as it performs read-only diagnostic operations.
-- name: Get IPSec Errors
+- name: Gather IPSec Diagnostic Logs from FortiGate
   hosts: fortigate
   gather_facts: false
+  # This playbook is idempotent as it performs read-only diagnostic operations that do not modify the device state.
+  # It retrieves IKE/IPSec error logs to facilitate network troubleshooting and observability.
 
   tasks:
-    - name: Retrieve IPSec log buffer from FortiGate
-      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+    - name: Execute IKE diagnostic log command
       ansible.netcommon.cli_command:
         command: diagnose vpn ike log
-      register: errors_output
-      # Error Handling: Ensure the task fails if the command is unrecognized by the OS
-      failed_when: 
-        - errors_output.failed or "unknown command" in errors_output.stdout
+      register: ipsec_logs
+      # Error Handling: Catching unexpected command failures or "unknown command" responses from the CLI.
+      failed_when:
+        - ipsec_logs.rc is defined and ipsec_logs.rc != 0
+        - "'command parse error' in ipsec_logs.stdout | lower"
 
-    - name: Validate command execution and data capture
-      # Observability: Use assert to verify the register contains stdout
+    - name: Verify IPSec diagnostic data retrieval
       ansible.builtin.assert:
         that:
-          - errors_output.stdout is defined
-        fail_msg: "Failed to capture output from the FortiGate device."
-        quiet: true
+          - ipsec_logs.stdout is defined
+        fail_msg: "Critical Error: Failed to capture stdout from the FortiGate device."
+        success_msg: "IPSec diagnostic logs successfully registered."
+      # Observability: Ensures that the captured data is valid before proceeding to display.
 
-    - name: Display IPSec Error Details
-      # Documentation: Presenting logs in a structured format for better operator visibility
+    - name: Display FortiGate IPSec Errors
       ansible.builtin.debug:
         msg: |
-          =======================
+          ======================= IPSEC ERRORS =======================
+          {{ ipsec_logs.stdout if ipsec_logs.stdout | length > 0 else 'No recent IPSec errors found.' }}
+      # Documentation: Summarizes the findings for the operator, providing a clear visual separator.

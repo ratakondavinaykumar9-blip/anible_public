@@ -1,37 +1,40 @@
 ---
+# Playbook: Cisco ASA - Compiled ACL Verification
+# Purpose: This playbook retrieves the status of Compiled ACLs (TurboACL) to ensure the 
+# firewall's lookup engine is optimized and identifies potential compilation or memory issues.
 - name: Retrieve and Validate Compiled ACL Configuration
   hosts: asa_firepower
   gather_facts: false
-  # Documentation: This playbook retrieves the compiled access-list configuration 
-  # from Cisco ASA/Firepower devices for auditing. It ensures data integrity 
-  # through explicit validation and error handling.
 
   tasks:
-    - name: Execute 'show compile-cfg' command
-      # Best Practices: Using Fully Qualified Collection Name (FQCN)
-      ansible.netcommon.cli_command:
-        command: show compile-cfg
-      register: compiled_result
-      # Error Handling: Fail if the output contains typical Cisco error patterns 
-      # or if the module itself reports a failure.
-      failed_when:
-        - compiled_result.failed or "Invalid input" in compiled_result.stdout
-        - "'incomplete command' in compiled_result.stdout.lower()"
+    - name: Get compiled configuration from the device
+      # FQCN: Using the specialized Cisco ASA command module for better platform integration
+      # Idempotency: Read-only "show" commands are inherently idempotent and safe for repeated execution
+      cisco.asa.asa_command:
+        commands:
+          - show compile-cfg
+      register: compiled_raw
+      # Error Handling: Catch platform-specific errors or unsupported command scenarios
+      failed_when: 
+        - "compiled_raw.failed"
+        - "'Invalid' in compiled_raw.stdout[0]"
+        - "'ERROR' in compiled_raw.stdout[0]"
 
-    - name: Validate retrieval of ACL configuration
-      # Observability: Assert that the command returned a non-empty string to verify success.
+    - name: Validate command response integrity
+      # Observability: Use assertions to ensure the output is not empty, preventing silent failures
       ansible.builtin.assert:
         that:
-          - compiled_result.stdout is defined
-          - compiled_result.stdout | length > 0
-        fail_msg: "The compiled ACL configuration could not be retrieved or is empty."
-        success_msg: "Compiled ACL configuration successfully captured from {{ inventory_hostname }}."
+          - "compiled_raw.stdout[0] is defined"
+          - "compiled_raw.stdout[0] | length > 0"
+        fail_msg: "The 'show compile-cfg' command returned no data on {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved compiled ACL data from {{ inventory_hostname }}."
 
-    - name: Display Captured Compiled ACL Configuration
-      # Observability: Use structured debug output for better visibility in logs.
+    - name: Display Compiled ACL Status
+      # Observability: Provide formatted output for logging and operational visibility
       ansible.builtin.debug:
         msg: |
-          ======================= COMPILED ACL REPORT =======================
-          DEVICE: {{ inventory_hostname }}
-          -------------------------------------------------------------------
-          {{ compiled_result.stdout }}
+          ============================================================
+          COMPILED ACL CONFIGURATION - {{ inventory_hostname }}
+          ============================================================
+          {{ compiled_raw.stdout[0] }}
+      when: compiled_raw.stdout[0] | length > 0

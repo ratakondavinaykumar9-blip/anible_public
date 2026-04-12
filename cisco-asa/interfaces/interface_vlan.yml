@@ -1,37 +1,37 @@
 ---
-# Playbook: Retrieve and Validate VLAN Interfaces
-# Description: This playbook securely collects VLAN interface status from Cisco ASA/Firepower devices.
-# Idempotency: This operation is read-only and inherently safe to execute multiple times.
-# Standards: FQCN, Observability (register/assert), Documentation, and Error Handling.
+# VLAN Interfaces - Enhanced NetLearner Playbook
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# 
+# Purpose: Safely retrieves and validates VLAN interface information from Cisco ASA/Firepower devices.
+# Idempotency: This is a read-only (GET) operation and is inherently safe for repeated execution.
 
-- name: Get VLAN Interfaces
+- name: Retrieve and Validate VLAN Interfaces
   hosts: asa_firepower
   gather_facts: false
-  # connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: "Execute 'show interface VLAN' on target device"
-      # Best Practices: Using Fully Qualified Collection Name (FQCN)
-      ansible.netcommon.cli_command:
-        command: "show interface VLAN"
+    - name: Query device for VLAN interface details
+      # FQCN: Using cisco.asa.asa_command for Cisco-specific command execution
+      cisco.asa.asa_command:
+        commands:
+          - show interface VLAN
       register: vlan_output
-      # Error Handling: Define failure conditions based on typical network device error responses
+      # Error Handling: Capture cases where the CLI returns an error message without a non-zero exit code
       failed_when: 
-        - vlan_output.failed or "'Invalid input' in vlan_output.stdout"
-      ignore_errors: false
+        - vlan_output.failed or "Invalid input" in vlan_output.stdout[0] or "ERROR:" in vlan_output.stdout[0]
 
-    - name: "Verify VLAN data collection success"
-      # Observability: Ensure the command returned data before proceeding
+    - name: Assert VLAN data integrity
+      # Observability: Verify the device returned data to prevent silent collection failures
       ansible.builtin.assert:
         that:
-          - "vlan_output.stdout is defined"
-          - "vlan_output.stdout | length > 0"
-        fail_msg: "Data collection failed: The VLAN interface output is empty or undefined."
-        success_msg: "Data collection successful: VLAN interface information retrieved."
+          - vlan_output.stdout is defined
+          - vlan_output.stdout[0] | length > 0
+        fail_msg: "The 'show interface VLAN' command returned no data. Ensure VLANs are configured and accessible."
+        success_msg: "VLAN interface data successfully retrieved and validated."
 
-    - name: "Display retrieved VLAN interface information"
-      # Documentation: Outputting the results for operator visibility
+    - name: Display VLAN Interface Information
+      # Observability: Provide clear, formatted output for the network operator
       ansible.builtin.debug:
         msg: |
           ======================= VLAN INTERFACES =======================
-          {{ vlan_output.stdout }}
+          {{ vlan_output.stdout[0] }}

@@ -1,49 +1,59 @@
 ---
-# Architect:Improved Playbook
-# Purpose: Retrieve and validate system clock and NTP synchronization status.
-# Standards: Idempotency (read-only), Observability (asserts), Documentation (inline), Error Handling.
-
-- name: Get Clock Information
+# Improved Show Clock and NTP Status Playbook
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Get Clock and NTP Information
   hosts: asa_firepower
-  gather_facts: false # Facts not required for CLI-based status checks.
+  gather_facts: false
 
   tasks:
-    - name: Retrieve system clock status
-      # Using FQCN for network common CLI execution.
+    - name: Retrieve current system clock
+      # FQCN: Using ansible.netcommon for standardized CLI command execution
       ansible.netcommon.cli_command:
         command: show clock
-      register: clock_output
-      # Ensure task fails if command response is empty or contains typical error strings.
-      failed_when: 
-        - clock_output.stdout == ""
-        - "'Invalid' in clock_output.stdout"
+      register: clock_result
+      # Error Handling: Ensure the command returned data before proceeding
+      failed_when: clock_result.stdout | length == 0
 
-    - name: Verify clock data observability
-      # Observability: Confirming the data structure is populated before proceeding.
+    - name: Validate clock data capture
+      # Observability: Explicitly asserting that the registered variable contains expected data
       ansible.builtin.assert:
         that:
-          - "clock_output.stdout is defined"
-          - "clock_output.stdout | length > 0"
-        fail_msg: "System clock information could not be retrieved."
+          - clock_result is defined
+          - clock_result.stdout is defined
+        fail_msg: "System clock information could not be retrieved from the device."
+        quiet: true
 
     - name: Retrieve NTP synchronization status
+      # Error Handling: 'ignore_errors' used because NTP might not be configured on all devices
       ansible.netcommon.cli_command:
         command: show ntp status
-      register: ntp_output
-      # Error Handling: NTP might not be configured on all nodes; continue to allow clock display.
+      register: ntp_result
       ignore_errors: true
 
-    - name: Validate NTP output structure
+    - name: Verify NTP response reliability
+      # Observability: Checking if the NTP command returned any output
       ansible.builtin.assert:
         that:
-          - "ntp_output.stdout is defined"
-        fail_msg: "NTP command failed to execute correctly."
-      when: ntp_output is not skipped
+          - ntp_result.stdout is defined
+        fail_msg: "NTP status query did not return valid output."
+        quiet: true
 
-    - name: Display synchronized system time and NTP status
-      # Documentation: Providing a clear, formatted summary for the operator.
+    - name: Display synchronized time information
+      # Documentation: Providing a clean, human-readable summary of the gathered facts
       ansible.builtin.debug:
         msg: |
           DEVICE: {{ inventory_hostname }}
-          CLOCK:  {{ clock_output.stdout | trim }}
-          NTP:    {{ ntp_output.stdout | default('NTP status unavailable') | trim }}
+          ---------------------------------------
+          CLOCK: {{ clock_result.stdout | trim }}
+          NTP STATUS: {{ ntp_result.stdout | default('NTP not configured or unreachable') | trim }}
+          ---------------------------------------
+
+    - name: Final observability check for NTP synchronization
+      # Observability: Specifically check if the clock is 'synchronized'
+      ansible.builtin.assert:
+        that:
+          - "'synchronized' in ntp_result.stdout"
+        fail_msg: "NTP is NOT synchronized on {{ inventory_hostname }}."
+        success_msg: "NTP is successfully synchronized on {{ inventory_hostname }}."
+      when: ntp_result.stdout is defined and ntp_result.stdout != ""
+      ignore_errors: true # Do not fail the playbook if the device is just unsynchronized

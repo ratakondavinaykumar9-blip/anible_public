@@ -1,33 +1,41 @@
 ---
-# Standard: FortiGate Policy Retrieval
-# This playbook fetches the current firewall policy state using CLI commands.
-# It prioritizes observability and validation to ensure the retrieved data is actionable.
+# ==============================================================================
+# Playbook: FortiGate Policy List Retrieval
+# Description: Safely fetches and validates the firewall policy configuration
+#              from Fortinet devices.
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
+# ==============================================================================
 - name: Get Policy List
   hosts: fortigate
-  gather_facts: false # Optimization: Fact gathering is unnecessary for this operational task.
+  gather_facts: false
 
   tasks:
-    - name: Execute 'get firewall policy' command
-      # Best Practice: Using FQCN (Fully Qualified Collection Name) for cross-platform reliability.
+    - name: Execute CLI command to fetch firewall policies
+      # Use Fully Qualified Collection Name (FQCN) for reliability.
+      # 'get' provides status/summary; 'show' provides configuration.
       ansible.netcommon.cli_command:
         command: get firewall policy
       register: policy_result
-      # Error Handling: Explicitly fail if the device returns common error strings or the command execution fails.
+      # Error Handling: Identify failure if the command returns an error string 
+      # even if the exit code is technically 0.
       failed_when:
-        - policy_result.failed or "Command fail" in policy_result.stdout or "Unknown action" in policy_result.stdout
+        - policy_result.failed or "Command fail" in policy_result.stdout
+      # Idempotency: Read-only operations are inherently idempotent.
+      changed_when: false
 
-    - name: Assert policy data was successfully retrieved
-      # Observability: Validate that the command returned data to prevent downstream processing errors.
+    - name: Verify policy data integrity
+      # Observability: Assert that the output is not empty to ensure 
+      # the data is valid for downstream processing.
       ansible.builtin.assert:
         that:
           - policy_result.stdout is defined
           - policy_result.stdout | length > 0
-        fail_msg: "Data integrity check failed: The firewall returned an empty policy list or an invalid response."
-        success_msg: "Data integrity check passed: Policy data captured and ready for display."
+        fail_msg: "Firewall policy retrieval returned no data. Check connectivity or permissions."
+        success_msg: "Firewall policies successfully retrieved and validated."
 
-    - name: Display formatted policy list
-      # Documentation: Provides clear visibility into the system state for audit and troubleshooting.
+    - name: Display retrieved policies
+      # Documentation: Provide a clear, formatted view for the operator.
       ansible.builtin.debug:
         msg: |
-          ======================= POLICIES: {{ inventory_hostname }} =======================
+          ======================= FORTIGATE POLICIES =======================
           {{ policy_result.stdout }}

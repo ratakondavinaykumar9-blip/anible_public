@@ -1,32 +1,32 @@
 ---
-# FortiGate VPN Summary - Standard:ized
-# Purpose: Safely retrieve, validate, and display VPN status from FortiGate firewalls.
-# Idempotency: This playbook is read-only (GET command) and safe for repeated execution.
+# FortiGate VPN Status Summary
+# Optimized for enterprise observability, error handling, and FQCN standards.
 - name: VPN Status Summary
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve VPN status summary via CLI
-      # Use Fully Qualified Collection Name (FQCN) for reliability
+    - name: Retrieve VPN status information from FortiGate
+      # FQCN: Using ansible.netcommon.cli_command for consistent network device interaction.
+      # Idempotency: 'get' commands are inherently idempotent as they do not modify state.
       ansible.netcommon.cli_command:
         command: get vpn status
       register: vpn_status_result
-      # Error Handling: Explicitly define failure conditions based on common FortiOS error patterns
+      # Error Handling: Ensure we fail if the output contains common CLI error patterns or is undefined.
       failed_when: 
-        - vpn_status_result.failed or "Unknown action" in vpn_status_result.stdout or "Command fail" in vpn_status_result.stdout
+        - vpn_status_result.stdout is not defined
+        - vpn_status_result.stdout == "" or "Unknown command" in vpn_status_result.stdout
 
-    - name: Validate VPN status data integrity
-      # Observability: Use assert to verify that the output is defined and contains data
+    - name: Verify VPN status data integrity
+      # Observability: Programmatic validation that the command returned actionable data.
       ansible.builtin.assert:
         that:
-          - vpn_status_result.stdout is defined
           - vpn_status_result.stdout | length > 0
-        fail_msg: "VPN status retrieval returned empty or undefined results."
-        success_msg: "VPN status data successfully validated."
+        fail_msg: "VPN status retrieval failed or returned empty output. Verify device connectivity."
+        success_msg: "VPN status captured successfully."
 
-    - name: Display VPN Summary Report
-      # Documentation: Provide a clear, formatted summary for human operators
+    - name: Display VPN Summary Output
+      # Documentation: Formatted block for human-readable verification during playbook runs.
       ansible.builtin.debug:
         msg: |
           ======================= VPN SUMMARY =======================

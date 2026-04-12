@@ -1,35 +1,37 @@
 ---
 # AAA Servers Configuration Audit
-# This playbook retrieves and validates AAA server configurations on Cisco ASA/Firepower devices.
-# Implements best practices for observability, error handling, and FQCN usage.
+# Purpose: This playbook retrieves and validates the AAA server configuration on Cisco ASA/Firepower devices.
+# It ensures that administrators have visibility into authentication, authorization, and accounting settings
+# for security compliance and troubleshooting.
 
 - name: AAA Servers Audit
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve AAA server running configuration
-      # Using FQCN: ansible.netcommon.cli_command
-      # Read-only operation ensures idempotency
+    - name: Retrieve AAA Server Configuration
+      # Idempotency: This is a read-only operation and is safe for repeated execution without state change.
+      # FQCN: Using fully qualified collection names to ensure plugin resolution and stability.
       ansible.netcommon.cli_command:
         command: show running-config aaa-server
-      register: aaa_config
-      # Error Handling: Ensure the task fails if specific error markers are present in stdout
+      register: aaa_result
+      # Error Handling: Fail explicitly if the command is unrecognized by the device (e.g., wrong context/mode).
       failed_when: 
-        - aaa_config.failed or 'Invalid input detected' in aaa_config.stdout
+        - aaa_result.failed or "Invalid input" in aaa_result.stdout
 
-    - name: Verify AAA configuration retrieval
-      # Observability: Use assert to verify that configuration data was returned
+    - name: Validate Configuration Retrieval
+      # Observability: Using assert to verify that the device returned configuration data.
+      # This prevents silent failures where the command succeeds but returns an empty set.
       ansible.builtin.assert:
         that:
-          - aaa_config.stdout is defined
-          - aaa_config.stdout | length > 0
-        fail_msg: "Failed to retrieve AAA configuration or output is empty."
-        success_msg: "Successfully retrieved AAA configuration."
+          - aaa_result.stdout is defined
+          - aaa_result.stdout | length > 0
+        fail_msg: "AAA configuration retrieval returned no data. Verify AAA is configured on the target."
+        success_msg: "AAA server configuration successfully retrieved and validated."
 
     - name: Display AAA Server Configuration
-      # Documentation: Providing a clear summary of the retrieved configuration
+      # Documentation: Provides a formatted view of the current AAA settings for audit logging.
       ansible.builtin.debug:
         msg: |
           ======================= AAA SERVERS =======================
-          {{ aaa_config.stdout }}
+          {{ aaa_result.stdout }}

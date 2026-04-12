@@ -1,36 +1,37 @@
 ---
-# FortiGate Policy Status Retrieval
-# This playbook retrieves and validates the operational status of firewall policies.
-# Standards: Idempotent, Observable, Documented, Error-handled, FQCN.
-- name: Get FortiGate Policy Status
+# FortiGate Policy Status Monitoring
+# Standards-aligned version for production use
+# Improved: 2026-03-15
+# Author: NetLearner Architect
+---
+- name: Retrieve and Verify FortiGate Policy Status
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute CLI command to retrieve firewall policy status
-      # Using FQCN for cross-platform network CLI compatibility
+    - name: Execute FortiOS CLI command to get policy status
+      # FQCN: Using ansible.netcommon.cli_command for direct status retrieval.
+      # This is idempotent as it is a read-only operation.
       ansible.netcommon.cli_command:
-        command: get firewall policy status
+        command: "get firewall policy status"
       register: policy_status
-      # This operation is read-only and inherently idempotent.
-      # check_mode: false ensures the command runs even during a dry-run to provide visibility.
-      check_mode: false
-      # Enhanced error handling: catch explicit CLI failures or syntax errors
-      failed_when:
-        - policy_status.failed or "Command fail" in policy_status.stdout or "Unknown action" in policy_status.stdout
+      # Error Handling: Explicitly fail if the command is unrecognized or execution fails.
+      failed_when: 
+        - policy_status.failed or "Unknown command" in policy_status.stdout
 
-    - name: Verify policy status data integrity
-      # Standard: Observability - Ensuring the output contains data before proceeding
+    - name: Assert policy status data integrity
+      # Observability: Validating that the response contains expected data before proceeding.
       ansible.builtin.assert:
         that:
-          - policy_status.stdout is defined
-          - policy_status.stdout | length > 0
-        fail_msg: "Policy status retrieval returned empty output or failed."
-        success_msg: "Policy status successfully captured and validated."
+          - "policy_status.stdout is defined"
+          - "policy_status.stdout | length > 0"
+        fail_msg: "Policy status retrieval failed or returned empty output from the device."
+        success_msg: "Policy status data successfully captured."
 
-    - name: Display formatted policy status report
-      # Providing a clear visibility of the command results
+    - name: Display formatted Policy Status
+      # Documentation: Outputting the status in a clear, readable format for audit logs.
       ansible.builtin.debug:
         msg: |
-          ======================= POLICY STATUS REPORT =======================
+          ======================= FORTIGATE POLICY STATUS =======================
           {{ policy_status.stdout }}
+          =======================================================================

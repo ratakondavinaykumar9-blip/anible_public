@@ -1,35 +1,34 @@
 ---
 # SSL VPN Sessions Detail
-# Improved: 2026-03-08
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-#
+# Improved for enterprise-grade automation by the NetLearner Architect.
 - name: SSL VPN Sessions Detail
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Disabled to minimize overhead as device facts aren't required for this operational check.
 
   tasks:
-    - name: Retrieve detailed SSL VPN session information
-      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interaction.
-      # Why: This command gathers comprehensive details on active SSL VPN sessions for operational visibility.
+    - name: Fetch detailed SSL VPN session database
+      # FQCN: ansible.netcommon.cli_command is used for direct CLI interaction on ASA/Firepower.
       ansible.netcommon.cli_command:
         command: show vpn-sessiondb detail ssl
-      register: ssl_vpn_data
-      # Error Handling: Ensures the playbook fails on syntax or connection errors, while allowing for empty results.
+      register: ssl_sessions
+      # Error Handling: Ensure we fail on syntax errors or auth issues, 
+      # but allow the task to continue if the command is successful but returns no sessions.
       failed_when:
-        - ssl_vpn_data.failed
-        - "'Invalid input' in ssl_vpn_data.stdout"
+        - ssl_sessions.failed
+        - "'Invalid' in ssl_sessions.stdout or 'Error' in ssl_sessions.stdout"
 
-    - name: Validate data retrieval success
-      # Observability: Verifies that the command returned a valid response structure from the device.
+    - name: Verify command execution integrity
+      # Observability: Assert ensures that the playbook stops if the preceding task didn't return the expected structure.
       ansible.builtin.assert:
         that:
-          - "ssl_vpn_data.stdout is defined"
-        fail_msg: "Could not retrieve session data from {{ inventory_hostname }}."
+          - "ssl_sessions.stdout is defined"
+        fail_msg: "Data retrieval failed: The command output is undefined."
         quiet: true
 
-    - name: Display SSL VPN sessions
-      # Visibility: Outputs the session details to the console for real-time monitoring and logging.
+    - name: Output SSL VPN session details
+      # Idempotency: This task is read-only and safe to execute repeatedly without state change.
+      # Documentation: Providing a clean visual separator for visibility in logs and automation reports.
       ansible.builtin.debug:
         msg: |
-          ======================= SSL VPN SESSIONS =======================
-          {{ ssl_vpn_data.stdout | default('No sessions found or command returned no data.') }}
+          ======================= SSL VPN SESSIONS: {{ inventory_hostname }} =======================
+          {{ ssl_sessions.stdout | default('No active SSL VPN sessions found.') }}

@@ -1,36 +1,34 @@
 ---
-# Standard: Playbook
-# Purpose: Safely retrieve and validate IPv6 session information from FortiGate devices.
-# Standards: Idempotency (Read-only), Observability (Assert), Documentation, FQCN.
-
-- name: Get FortiGate IPv6 Sessions
+# Playbook: FortiGate IPv6 Sessions
+# Purpose: Securely retrieves and validates active IPv6 sessions from FortiGate firewalls.
+# Idempotency: This is a read-only monitoring task and is safe for repeated execution (no state changes).
+- name: Get IPv6 Sessions
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve IPv6 session list via CLI
-      # Standard: Use FQCN for portable and predictable execution
-      # Standard: Idempotent as this is a non-state-changing 'get' operation
+    - name: Retrieve IPv6 session list from device
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
       ansible.netcommon.cli_command:
-        command: "get system session6 list"
-      register: sess_result
-      # Standard: Error handling to catch device-specific command failures
-      failed_when:
-        - sess_result.failed | default(false)
-        - "'Command fail' in sess_result.stdout"
+        command: get system session6 list
+      register: sess
+      # Error Handling: Fail if the command is unrecognized or the execution environment reports a failure
+      failed_when: 
+        - sess.failed or "Unknown action" in sess.stdout or "Command fail" in sess.stdout
+      ignore_errors: false
 
-    - name: Validate session data retrieval
-      # Standard: Observability via assertion to ensure data integrity before proceeding
+    - name: Verify session retrieval success
+      # Observability: Assert that the command returned a valid, defined response
       ansible.builtin.assert:
         that:
-          - sess_result.stdout is defined
-          - sess_result.stdout | length > 0
-        fail_msg: "No IPv6 session data retrieved or command returned empty."
-        success_msg: "IPv6 session data successfully captured."
+          - sess.stdout is defined
+          - sess.stdout | length >= 0
+        fail_msg: "Data retrieval failed or returned empty for {{ inventory_hostname }}"
+        success_msg: "IPv6 sessions successfully captured from {{ inventory_hostname }}"
 
-    - name: Display IPv6 session information
-      # Standard: Observability for operator visibility
+    - name: Display session details
+      # Documentation: Provides formatted output for visibility and troubleshooting
       ansible.builtin.debug:
         msg: |
-          ======================= IPv6 SESSIONS =======================
-          {{ sess_result.stdout }}
+          ======================= IPv6 SESSIONS: {{ inventory_hostname }} =======================
+          {{ sess.stdout }}

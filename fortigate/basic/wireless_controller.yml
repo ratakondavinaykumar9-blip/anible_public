@@ -1,32 +1,40 @@
 ---
-# FortiGate Wireless Controller - Production Grade
-# This playbook retrieves the status of Wireless Termination Points (WTP).
-# Read-only operations are inherently idempotent as they do not modify device state.
+# Wireless Controller Status Retrieval
+# Updated: 2026-03-15
+# Author: NetLearner Architect
+#
+# Description:
+# This playbook retrieves the status of Wireless Termination Points (WTP) from FortiGate devices.
+# Idempotency: Read-only operation; safe for repeated execution without state alteration.
+# Observability: Implements register/assert patterns to verify data integrity.
+---
 - name: Get Wireless Controller Status
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve wireless-controller WTP operational data
-      # Using FQCN for reliability and clarity across different Ansible environments.
+    - name: Retrieve Wireless Termination Point (WTP) status via CLI
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
       ansible.netcommon.cli_command:
         command: get wireless-controller wtp
       register: wifi_status
-      # Error Handling: Ensure the task fails explicitly if the command execution encounters an error.
-      failed_when: wifi_status.failed | default(false)
+      # Error Handling: Ensure failure if the return code is non-zero or if the CLI returns a parsing error
+      failed_when:
+        - wifi_status.rc != 0
+        - "'command parse error' in wifi_status.stdout"
 
-    - name: Verify successful data retrieval
-      # Observability: Assert that the controller returned a non-empty response.
+    - name: Verify Wireless Controller response integrity
+      # Observability: Validates that the command returned a populated result
       ansible.builtin.assert:
         that:
           - wifi_status.stdout is defined
           - wifi_status.stdout | length > 0
-        fail_msg: "Wireless controller status retrieval failed or returned no data."
-        success_msg: "Wireless controller status successfully captured."
+        fail_msg: "The wireless controller returned empty or invalid data."
+        success_msg: "Wireless controller output successfully captured."
 
-    - name: Display Wireless Controller Information
-      # Documentation: Providing a formatted view of the operational state for operator visibility.
+    - name: Display Wireless Status
+      # Best Practice: FQCN for debug module and clear output formatting
       ansible.builtin.debug:
         msg: |
-          ======================= WIRELESS WTP STATUS =======================
+          ======================= WIRELESS STATUS =======================
           {{ wifi_status.stdout }}

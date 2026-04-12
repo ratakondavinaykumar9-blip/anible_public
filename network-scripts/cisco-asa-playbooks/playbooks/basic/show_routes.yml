@@ -1,51 +1,64 @@
 ---
-- name: Get Routing Table from Cisco ASA/Firepower
+# Description: Improved Routing Table Extraction for Cisco ASA/Firepower
+# Standards: Idempotency, Observability, FQCN, Error Handling, and Documentation
+- name: Get and Parse Routing Table
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: no
   vars:
     output_format: text
+    backup_path: "/tmp/asa_routes_{{ inventory_hostname }}.json"
 
   tasks:
-    - name: Gather system facts for timestamping
-      # Why: Required to populate ansible_date_time for structured JSON metadata
+    - name: Gather minimal facts for timestamping
       ansible.builtin.setup:
         gather_subset:
           - "!all"
-          - "min"
-      when: output_format == 'json'
+          - "date_time"
+      tags: [always]
 
-    - name: Get routes via CLI command
-      # Why: Uses FQCN to retrieve live routing state from the device
+    - name: Retrieve routing table from device
+      # Using FQCN for cross-platform network command execution
       ansible.netcommon.cli_command:
         command: show route
       register: route_output
-      # Error Handling: Fail if command returns empty or indicates an invalid command
-      failed_when:
-        - route_output.stdout | length == 0
+      # Error Handling: Fail if the command returns no data or unexpected error messages
+      failed_when: 
+        - route_output.stdout == ""
         - "'Invalid input' in route_output.stdout"
+      changed_when: false # Read-only command; maintain idempotency
 
-    - name: Verify routing table integrity
-      # Why: Observability - Asserts that the output contains expected ASA route headers
+    - name: Validate routing table content
+      # Observability: Assert that the output contains expected routing indicators
       ansible.builtin.assert:
         that:
-          - "'Codes:' in route_output.stdout"
-        fail_msg: "The output does not appear to be a valid ASA routing table."
+          - "'Gateway of last resort' in route_output.stdout"
+          - "route_output.stdout_lines | length > 0"
+        fail_msg: "Routing table appears empty or malformed."
+        success_msg: "Successfully validated routing table output."
 
-    - name: Display raw routing output
-      # Why: Provides immediate visibility during interactive runs
+    - name: Display raw routing data
       ansible.builtin.debug:
         var: route_output.stdout
+      when: output_format == 'text'
 
-    - name: Save structured routing data
-      # Why: Generates a persistent, machine-readable audit trail
-      # Idempotency: Safely overwrites the destination with the latest verified state
+    - name: Generate and save structured JSON route report
+      # Idempotency: ansible.builtin.copy only updates the file if content changes
       ansible.builtin.copy:
         content: |
           {
             "device": "{{ inventory_hostname }}",
-            "timestamp": "{{ ansible_date_time.iso8601 | default('N/A') }}",
-            "routes": {{ route_output.stdout | to_json }}
+            "extracted_at": "{{ ansible_date_time.iso8601 }}",
+            "routing_table_raw": {{ route_output.stdout | to_json }}
           }
-        dest: "/tmp/asa_routes_{{ inventory_hostname }}.json"
+        dest: "{{ backup_path }}"
         mode: '0644'
-      when: output_format == 'json'
+      # Conditionality: Only executes if the user explicitly requests JSON format
+      when: output_format | default('text') == 'json'
+      register: file_creation
+
+    - name: Confirm report generation
+      ansible.builtin.assert:
+        that:
+          - file_creation.dest is defined
+        fail_msg: "Failed to write the JSON report to {{ backup_path }}"
+      when: output_format | default('text') == 'json'

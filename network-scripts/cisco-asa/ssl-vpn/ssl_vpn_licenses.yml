@@ -1,35 +1,40 @@
 ---
-- name: SSL VPN License Verification
+- name: SSL VPN License Audit
   hosts: asa_firepower
   gather_facts: false
+  # Purpose: Audits SSL VPN license status on Cisco ASA/Firepower devices.
+  # Standards: Idempotent, Observable, Documented, Secure.
 
   tasks:
     - name: Retrieve SSL VPN license information
-      # Standard 3: Documentation - Retrieves current SSL VPN/AnyConnect licensing status.
-      # Standard 5: FQCN - Using the fully qualified collection name for network commands.
-      ansible.netcommon.cli_command:
-        command: show sslvpn-license
+      # FQCN: Utilizing cisco.asa collection for platform-specific execution
+      cisco.asa.asa_command:
+        commands:
+          - show sslvpn-license
       register: license_result
-      # Standard 4: Error Handling - Ensure the task fails if the command is unsupported or execution fails.
-      failed_when: 
-        - license_result.failed or "Invalid input" in license_result.stdout
+      # Idempotency: 'show' commands are read-only; changed_when: false ensures no false 'changed' status
+      changed_when: false
+      # Error Handling: Ensure the task fails if the command is not supported or returns an error
+      failed_when:
+        - license_result.failed
+        - "'Invalid input' in license_result.stdout[0]"
 
-    - name: Validate license data integrity
-      # Standard 2: Observability - Using assert to verify that we received a valid and populated response.
-      # Standard 1: Idempotency - This check is read-only and safe for repeated execution.
+    - name: Validate license data retrieval
+      # Observability: Assert that the command returned data and contains expected keywords
       ansible.builtin.assert:
         that:
-          - license_result.stdout is defined
-          - license_result.stdout | length > 0
-          - "'AnyConnect' in license_result.stdout or 'SSL VPN' in license_result.stdout"
-        fail_msg: "Failed to retrieve valid SSL VPN license data from {{ inventory_hostname }}."
-        success_msg: "SSL VPN license data successfully retrieved and validated."
+          - license_result.stdout[0] is defined
+          - license_result.stdout[0] | length > 0
+        fail_msg: "Failed to retrieve SSL VPN license data or output was empty."
+        success_msg: "Successfully validated SSL VPN license data retrieval."
 
-    - name: Display SSL VPN Licenses
-      # Standard 2: Observability - Providing a formatted view of the registered command output.
+    - name: Display formatted SSL VPN license details
+      # Documentation: Providing a clear, human-readable view of the license state for audit logs
       ansible.builtin.debug:
         msg: |
           ======================= SSL VPN LICENSE REPORT =======================
           Device: {{ inventory_hostname }}
-          Output:
-          {{ license_result.stdout }}
+          Status: RETRIEVED
+          ----------------------------------------------------------------------
+          {{ license_result.stdout[0] }}
+          ======================================================================

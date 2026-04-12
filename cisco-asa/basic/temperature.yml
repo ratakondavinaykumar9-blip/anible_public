@@ -1,33 +1,38 @@
 ---
-# Temperature Monitoring Playbook
-# This playbook retrieves and verifies temperature data from Cisco ASA/Firepower devices.
-# It adheres to standards for Idempotency (read-only), Observability, and FQCN usage.
+# Temperature Monitoring Playbook for Cisco ASA/Firepower
+# Purpose: Retrieve and validate temperature sensor data to ensure hardware environmental health.
+# Standards: Idempotency (Read-only), Observability (Assert), Best Practices (FQCN).
 
-- name: Retrieve and Verify Device Temperature
+- name: Monitor Device Temperature
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Facts not required for specific CLI command execution
 
   tasks:
-    - name: Retrieve temperature data from device
-      # Use FQCN for cross-platform network CLI compatibility
+    - name: Retrieve temperature data via CLI
+      # Using FQCN for cross-environment consistency and reliable module resolution.
+      # This task is inherently idempotent as it performs a read-only state inspection.
       ansible.netcommon.cli_command:
         command: show temperature
-      register: temperature_result
-      # Error Handling: Ensure the task fails if the command output suggests an error
+      register: temp_result
+      # Error Handling: Fail if the command is unrecognized or if the transport layer fails.
       failed_when: 
-        - temperature_result.failed or "Invalid input" in temperature_result.stdout
+        - temp_result.failed or "Invalid input" in temp_result.stdout
 
-    - name: Verify temperature data integrity
-      # Observability: Assert that the output contains expected keywords (e.g., Celsius)
+    - name: Verify temperature output integrity
+      # Observability: Assert that the command returned valid sensor data.
+      # This prevents silent failures where the command succeeds but returns unexpected content.
       ansible.builtin.assert:
         that:
-          - "temperature_result.stdout is defined"
-          - "'Celsius' in temperature_result.stdout or 'Temperature' in temperature_result.stdout"
-        fail_msg: "Temperature output was empty or did not contain valid measurement data."
-        success_msg: "Temperature data successfully retrieved and validated."
+          - "'Temperature' in temp_result.stdout"
+        fail_msg: "Temperature data not found in command output. Check device hardware status."
+        success_msg: "Temperature data successfully captured and validated for {{ inventory_hostname }}."
 
-    - name: Display temperature status
+    - name: Display Temperature Report
+      # Formatted output for enhanced visibility during manual or automated runs.
       ansible.builtin.debug:
         msg: |
-          ======================= SYSTEM TEMPERATURE =======================
-          {{ temperature_result.stdout }}
+          ======================= TEMPERATURE STATUS =======================
+          Host: {{ inventory_hostname }}
+          Reported Data:
+          {{ temp_result.stdout }}
+          ==================================================================

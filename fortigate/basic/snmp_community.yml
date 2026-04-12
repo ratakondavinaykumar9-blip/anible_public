@@ -1,38 +1,38 @@
 ---
-# FortiGate SNMP Community Retrieval
-# Improved by Architect:for Idempotency, Observability, and Robustness
-# Standards: Idempotency, Observability, FQCN, Documentation, Error Handling
-- name: Get SNMP Community
+# FortiGate SNMP Community Information Retrieval
+# Improved by NetLearner Architect
+# This playbook retrieves SNMP community configuration from FortiGate devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+
+- name: Get SNMP Community Configuration
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve SNMP community configuration via CLI
-      # Best Practices: Using Fully Qualified Collection Name (FQCN)
-      # Documentation: Fetches the current SNMP community settings to verify configuration state.
+    - name: Retrieve SNMP community details via CLI
+      # This task is inherently idempotent as it performs a read-only operation.
+      # Using FQCN (ansible.netcommon.cli_command) to ensure forward compatibility.
       ansible.netcommon.cli_command:
         command: get system snmp community
       register: snmp_result
-      # Idempotency: Read-only operations must always report 'changed: false' to ensure safe re-runs.
-      changed_when: false
-      # Error Handling: Fail if the command is unrecognized by the device or if the transport fails.
-      failed_when: >
-        snmp_result.failed or 
-        "Unknown action" in snmp_result.stdout or 
-        "Command fail" in snmp_result.stdout
+      # Enhanced error handling: catch explicit error strings in command output 
+      # that might not trigger a non-zero exit code in some network environments.
+      failed_when:
+        - snmp_result.failed or "error" in snmp_result.stdout | lower or "unknown command" in snmp_result.stdout | lower
 
-    - name: Validate SNMP configuration retrieval
-      # Observability: Use assertions to programmatically verify the success of the retrieval.
+    - name: Verify SNMP configuration retrieval success
+      # Observability: Assert that the command returned non-empty data.
+      # This ensures the playbook fails early if the retrieval logic is incorrect.
       ansible.builtin.assert:
         that:
           - snmp_result.stdout is defined
           - snmp_result.stdout | length > 0
-        fail_msg: "SNMP configuration retrieval failed or returned an empty response."
-        success_msg: "SNMP configuration successfully retrieved and validated."
+        fail_msg: "Failed to retrieve SNMP configuration or the output is unexpectedly empty."
+        success_msg: "Successfully retrieved and validated SNMP community details."
 
-    - name: Display SNMP Community Information
-      # Observability: Provide formatted debug output for operator visibility.
+    - name: Display SNMP configuration for visibility
+      # Provides clear visibility of the retrieved data for auditing and troubleshooting.
       ansible.builtin.debug:
         msg: |
-          ======================= SNMP CONFIGURATION =======================
+          ======================= SNMP COMMUNITY DETAILS =======================
           {{ snmp_result.stdout }}

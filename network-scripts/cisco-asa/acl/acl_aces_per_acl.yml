@@ -1,32 +1,33 @@
 ---
-# ACL ACE Count - Audit and Observability Playbook
-# This playbook retrieves Access Control Entry (ACE) counts for all ACLs on Cisco ASA/Firepower devices.
-# Adheres to Standard:s: Idempotency, Observability, Documentation, and FQCN.
+# This playbook retrieves the count of Access Control Entries (ACEs) for each Access Control List (ACL)
+# on Cisco ASA/Firepower devices. It is designed to be read-only and safe for production environments.
 - name: Get ACL ACE Count
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Optimization: Fact gathering is disabled as it is unnecessary for this CLI operation.
 
   tasks:
-    - name: Retrieve ACL information from the security appliance
-      # Best Practices: Using Fully Qualified Collection Name (FQCN)
-      # Idempotency: This is a read-only operation and is inherently safe to run multiple times.
+    - name: Retrieve ACL summary and entry counts
+      # Using FQCN (Fully Qualified Collection Name) for predictable module resolution.
+      # The command filters for lines containing the ACL name or the 'entries' count to provide a concise summary.
       ansible.netcommon.cli_command:
         command: "show access-list | include (access-list|entries)"
       register: acl_info
-      # Error Handling: Ensure the task stops if the command execution fails
-      failed_when: acl_info.failed == true
+      # Error Handling: Ensure the task fails if the command is unrecognized or returns an error.
+      failed_when: 
+        - acl_info.failed
+        - "'Invalid input' in acl_info.stdout"
 
     - name: Validate ACL data retrieval
-      # Observability: Verify that the command returned meaningful data
+      # Observability: Assert that the command returned data to prevent silent failures in reporting.
       ansible.builtin.assert:
         that:
-          - "acl_info.stdout is defined"
-          - "acl_info.stdout | length > 0"
-        fail_msg: "The command returned no data. Ensure ACLs are configured and the 'include' pattern matches."
-        success_msg: "ACL information successfully captured."
+          - acl_info.stdout is defined
+          - acl_info.stdout | length > 0
+        fail_msg: "Failure: No ACL information was returned from the device."
+        success_msg: "Success: ACL information captured successfully."
 
-    - name: Display ACL ACE Summary Report
-      # Documentation: Provide a formatted view of the ACE counts for audit visibility
+    - name: Display ACL ACE Count Summary
+      # Formats the output for clear visibility in the console or automation logs.
       ansible.builtin.debug:
         msg: |
           ======================= ACL ACE COUNT SUMMARY =======================

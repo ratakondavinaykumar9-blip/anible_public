@@ -1,32 +1,32 @@
 ---
-# Hardware Model Info
-# This playbook retrieves the hardware model from Cisco ASA/Firepower devices.
-# It is designed to be idempotent, observable, and follows Network Automation Framework FQCN standards.
-- name: Get Hardware Model
+# Playbook: Get Hardware Model Info
+# Purpose: Retrieves and validates hardware model information from Cisco ASA/Firepower devices.
+# Standards: Idempotency (Read-only), Observability (Assert/Register), FQCN (cisco.asa, ansible.builtin).
+- name: Get Hardware Model Information
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve hardware model information via FQCN
-      # FQCN: Using the specialized cisco.asa collection for robust, platform-specific command execution.
+    - name: Execute command to retrieve hardware and model details
+      # FQCN: Utilizing the cisco.asa collection for platform-specific CLI execution.
+      # Idempotency: This task is read-only ('show' command) and is safe to run repeatedly.
       cisco.asa.asa_command:
         commands:
           - "show version | include (Hardware|Model)"
-      register: model_query
-      # Error Handling: Ensure the task fails if the module reports a failure.
-      failed_when: model_query.failed | default(false)
+      register: hardware_info
+      # Error Handling: Ensure the task fails if the command returns no data or if the execution fails.
+      failed_when:
+        - hardware_info.failed or (hardware_info.stdout[0] | length == 0)
 
-    - name: Validate hardware information retrieval (Observability)
-      # Assert confirms that the device returned expected data before continuing.
+    - name: Validate that hardware information was correctly retrieved
+      # Observability: Use assertions to verify that the output contains expected hardware/model keywords.
       ansible.builtin.assert:
         that:
-          - model_query.stdout is defined
-          - model_query.stdout | length > 0
-          - "'Hardware' in model_query.stdout[0] or 'Model' in model_query.stdout[0]"
-        fail_msg: "Failed to retrieve valid hardware information from the device."
-        success_msg: "Hardware model information successfully retrieved."
+          - "'Hardware' in hardware_info.stdout[0] or 'Model' in hardware_info.stdout[0]"
+        fail_msg: "The retrieved output does not contain valid Hardware or Model information."
+        success_msg: "Hardware model information successfully validated."
 
-    - name: Display Hardware Model
-      # Debug: Output the trimmed result from the first command in the list.
+    - name: Display the retrieved hardware model details
+      # Documentation: Provide clear visibility of the result for the operator.
       ansible.builtin.debug:
-        msg: "{{ model_query.stdout[0] | trim }}"
+        msg: "Hardware Details: {{ hardware_info.stdout[0] | trim }}"

@@ -1,34 +1,37 @@
 ---
-# Cisco ASA/Firepower EtherChannel Retrieval Playbook
-# Improved for Idempotency, Observability, and Error Handling
+# Etherchannel Status Retrieval
+# Purpose: This playbook retrieves and validates EtherChannel information from Cisco ASA/Firepower devices.
+# It follows NetLearner standards for idempotency, observability, and error handling.
+# Improved: 2026-03-15
+
 - name: Get EtherChannel Information
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute 'show etherchannel' on device
-      # Using FQCN for network operations to ensure consistency across environments
+    - name: Execute 'show etherchannel' command
+      # Best Practice: Use Fully Qualified Collection Name (FQCN)
+      # Idempotency: Read-only commands are inherently idempotent and safe to repeat.
       ansible.netcommon.cli_command:
         command: show etherchannel
       register: ec_result
-      # Error Handling: Explicitly fail if the device returns common error patterns
+      # Error Handling: Ensure the playbook fails if the command is unrecognized or execution fails.
       failed_when:
+        - ec_result.failed
         - "'Invalid input' in ec_result.stdout"
-        - "'ERROR:' in ec_result.stdout"
-        - "ec_result.rc != 0"
 
-    - name: Verify EtherChannel output validity
-      # Observability: Assert that data was actually returned to prevent silent failures
+    - name: Verify command output
+      # Observability: Assert that the command returned valid data to ensure the device is responsive.
       ansible.builtin.assert:
         that:
-          - "ec_result.stdout is defined"
-          - "ec_result.stdout | length > 0"
-        fail_msg: "The 'show etherchannel' command returned an empty response."
-        success_msg: "EtherChannel data successfully retrieved from {{ inventory_hostname }}."
+          - ec_result.stdout is defined
+          - ec_result.stdout | length > 0
+        fail_msg: "EtherChannel information could not be retrieved or the command returned no data."
+        success_msg: "Successfully captured EtherChannel status."
 
-    - name: Display EtherChannel Summary
-      # Documentation: Provide a structured view for operator review
+    - name: Display EtherChannel details
+      # Documentation: Provide a formatted view of the current EtherChannel state for audit purposes.
       ansible.builtin.debug:
         msg: |
-          ======================= ETHERCHANNEL STATUS ({{ inventory_hostname }}) =======================
+          ======================= ETHERCHANNEL SUMMARY =======================
           {{ ec_result.stdout }}

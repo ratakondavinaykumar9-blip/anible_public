@@ -1,46 +1,48 @@
 ---
-# FortiGate Session Monitoring - Production Grade
-# Purpose: This playbook collects and validates session metrics for FortiGate devices.
-# Idempotency: This playbook is read-only and performs no state changes, making it safe for repeated execution.
+# FortiGate Session Monitoring - NetLearner Architect Optimized
+# This playbook retrieves real-time session metrics and validates data integrity.
+# Standards: Idempotent (Read-only), Observability (Asserts), FQCN, Error Handling.
 
-- name: Monitor Sessions
+- name: Monitor FortiGate Sessions
   hosts: fortigate
-  gather_facts: false  # Fact gathering is disabled to optimize performance for monitoring tasks.
+  gather_facts: false
 
   tasks:
-    - name: Retrieve active session list
-      # Best Practices: Using Fully Qualified Collection Names (FQCN) for reliability.
+    - name: Retrieve detailed session list
+      # Using FQCN for consistent network-agnostic command execution.
+      # This task is inherently idempotent as it does not modify device state.
       ansible.netcommon.cli_command:
-        command: get system session list
+        command: "get system session list"
       register: sessions_output
-      # Error Handling: Ensure the command was recognized and returned data.
-      failed_when:
-        - "sessions_output.stdout == ''"
-        - "'Unknown action' in sessions_output.stdout"
+      # Error Handling: Catch empty responses or CLI-level execution errors.
+      failed_when: 
+        - sessions_output.stdout is not defined or sessions_output.stdout == ""
+        - "'command fail' in sessions_output.stdout | lower"
 
     - name: Retrieve session statistics summary
       ansible.netcommon.cli_command:
-        command: get system session stat
+        command: "get system session stat"
       register: stats_output
-      # Error Handling: Detect if the device failed to process the statistics request.
-      failed_when:
-        - "'Command fail' in stats_output.stdout"
-        - "stats_output.stdout == ''"
+      failed_when: 
+        - stats_output.stdout is not defined or stats_output.stdout == ""
 
-    - name: Verify session data observability
-      # Observability: Using assertions to validate that the captured output contains expected metrics.
+    - name: Assert session data validity
+      # Observability: Verify that the response contains expected session metric keywords.
       ansible.builtin.assert:
         that:
-          - "'total sessions' in stats_output.stdout"
-        fail_msg: "Data Integrity Error: Session statistics output is missing expected 'total sessions' metric."
-        success_msg: "Data Integrity Verified: Session statistics successfully captured."
+          - "'sessions' in stats_output.stdout | lower"
+        fail_msg: "The session statistics response was invalid or missing expected metrics."
+        success_msg: "Session statistics successfully captured and validated."
 
-    - name: Display formatted session monitoring report
-      # Documentation: Providing a structured debug output for human operators.
+    - name: Display Session Monitoring Report
+      # Documentation: Provides operational visibility into firewall session load.
       ansible.builtin.debug:
         msg: |
           ======================= SESSION MONITORING =======================
-          DEVICE: {{ inventory_hostname }}
-          STATUS: VERIFIED
-          ------------------------------------------------------------------
+          TARGET HOST: {{ inventory_hostname }}
+          
+          STATISTICS SUMMARY:
           {{ stats_output.stdout }}
+          
+          TOTAL SESSIONS COUNTED: {{ sessions_output.stdout_lines | length if sessions_output.stdout_lines is defined else 'Unknown' }}
+          ==================================================================

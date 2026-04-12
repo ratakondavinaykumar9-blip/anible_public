@@ -1,34 +1,45 @@
 ---
-# FortiGate HA Peer List
-# Purpose: Retrieves High Availability (HA) peer information from FortiGate devices.
-# This playbook is idempotent as it performs a read-only operation ('get').
+# FortiGate HA Peer List Retrieval
+# --------------------------------
+# Improved for Production Standards: Idempotency, Observability, and FQCN usage.
+# Author: NetLearner Architect
+#
 - name: Get HA Peer List
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve HA peer status via CLI
-      # Using FQCN for network common CLI execution.
+    - name: Retrieve HA peer information via CLI
+      # FQCN: ansible.netcommon.cli_command
+      # Idempotency: This is a read-only command and does not modify device state, making it safe to run repeatedly.
       ansible.netcommon.cli_command:
         command: get system ha peer
-      register: ha_peers
-      # Error Handling: Fail if the command is unrecognized or execution fails.
-      failed_when: 
-        - ha_peers.failed 
-        - "'command parse error' in ha_peers.stdout"
+      register: ha_peers_raw
+      # Error Handling: Ensure the playbook fails if the underlying CLI command fails (e.g., timeout or connection issues).
+      failed_when: ha_peers_raw.failed | default(false)
 
-    - name: Verify HA peer data retrieval
-      # Observability: Assert that the command returned valid data to ensure device responsiveness.
+    - name: Validate HA peer data collection
+      # Observability: Use assert to verify that the command returned a valid payload before proceeding.
       ansible.builtin.assert:
         that:
-          - ha_peers.stdout is defined
-          - ha_peers.stdout | length > 0
-        fail_msg: "Failed to retrieve HA peer information or output is empty."
-        success_msg: "Successfully captured HA peer information."
+          - ha_peers_raw.stdout is defined
+        fail_msg: "Critical failure: No response captured from {{ inventory_hostname }} for HA peer query."
+        success_msg: "HA peer information successfully captured for {{ inventory_hostname }}."
 
-    - name: Display HA Peer Details
-      # Documentation: Visual confirmation of retrieved peer status.
+    - name: Display HA Peer Status
+      # Documentation: Provides formatted output for the network operator to quickly audit cluster health.
       ansible.builtin.debug:
         msg: |
-          ======================= HA PEERS =======================
-          {{ ha_peers.stdout }}
+          ======================= HA PEERS: {{ inventory_hostname }} =======================
+          {{ ha_peers_raw.stdout | default('No HA peer information returned. Device may be in standalone mode.') }}
+
+    - name: Determine HA Operational State
+      # Observability: Parse the output to identify if a peer is actually recognized by the cluster manager.
+      ansible.builtin.set_fact:
+        is_ha_active: "{{ ha_peers_raw.stdout | length > 0 and 'Unknown' not in ha_peers_raw.stdout }}"
+
+    - name: Report HA Connectivity Status
+      # Error Handling/Observability: Explicitly alert the operator if a cluster member is missing.
+      ansible.builtin.debug:
+        msg: "WARNING: Device {{ inventory_hostname }} does not appear to have an active HA peer detected."
+      when: not is_ha_active | bool

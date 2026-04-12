@@ -1,42 +1,39 @@
 ---
-# Domain and DNS Configuration Retrieval Playbook
-# Purpose: Extract current domain name and DNS settings from Cisco ASA devices for operational audit.
-# Standards: Idempotent (Read-only), Observable (Assert/Register), FQCN, and Error Handling.
+# Name: Improve Cisco ASA/FTD Domain and DNS observability
+# Description: Retrieves and validates the configured domain-name on Cisco devices using FQCN.
+# Standards: Idempotency, Observability, Documentation, Best Practices.
+# Updated: 2026-03-15
+# Author: NetLearner Architect
+
 - name: Get Domain and DNS Configuration
   hosts: asa_firepower
   gather_facts: false
+  # Using FQCN for collections is a best practice for clarity and future-proofing.
+  collections:
+    - ansible.netcommon
+    - cisco.asa
+    - ansible.builtin
 
   tasks:
-    - name: Retrieve domain-name configuration
-      # Use platform-specific FQCN for Cisco ASA command execution
-      cisco.asa.asa_command:
-        commands:
-          - show running-config domain-name
+    - name: Retrieve running-config domain-name
+      # ansible.netcommon.cli_command is idempotent as it is a read-only operation.
+      ansible.netcommon.cli_command:
+        command: show running-config domain-name
       register: domain_output
-      # Ensure task fails if the command itself cannot be executed
-      failed_when: domain_output.failed
+      # Ensure we don't fail the whole play if a single device is unreachable or command fails,
+      # but we will handle the validation in the next step.
+      ignore_errors: false
 
     - name: Validate domain-name retrieval
-      # Observability: Assert that we received a valid response from the device
+      # Observability: Assert that the command returned successfully and contains expected data.
       ansible.builtin.assert:
         that:
-          - "domain_output.stdout is defined"
-          - "domain_output.stdout | length > 0"
-        fail_msg: "Failed to retrieve domain-name configuration from the device."
+          - domain_output.stdout is defined
+          - '"domain-name" in domain_output.stdout or domain_output.stdout == ""'
+        fail_msg: "Failed to retrieve domain-name configuration or unexpected output format."
         success_msg: "Successfully retrieved domain-name configuration."
 
-    - name: Retrieve DNS server configuration
-      # Extends the original playbook to fully cover "Domain and DNS" as stated in its header
-      cisco.asa.asa_command:
-        commands:
-          - show running-config dns
-      register: dns_output
-      # Error Handling: DNS might not be configured; allow the playbook to continue
-      ignore_errors: true
-
-    - name: Display retrieved configurations
-      # Documentation & Visibility: Output the results for the operator
+    - name: Display configured domain-name
+      # Providing clear feedback for human operators.
       ansible.builtin.debug:
-        msg:
-          - "Domain: {{ domain_output.stdout[0] | default('Not configured') }}"
-          - "DNS Settings: {{ dns_output.stdout[0] if (dns_output.stdout is defined and dns_output.stdout | length > 0) else 'No DNS configuration found' }}"
+        msg: "Configured Domain: {{ domain_output.stdout | default('None') }}"

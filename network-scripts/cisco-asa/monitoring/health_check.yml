@@ -1,97 +1,116 @@
 ---
 # ASA Health Check - CPU, Memory, Connections, Performance
+# This playbook performs a comprehensive, non-disruptive health audit of Cisco ASA/Firepower devices.
 - name: ASA Comprehensive Health Check
   hosts: asa_firepower
-  # gather_facts is enabled to provide the 'ansible_date_time' variable for reporting
-  gather_facts: yes
+  gather_facts: false
   vars:
     output_format: text
 
   tasks:
+    - name: Gather time facts for reporting
+      # Why: Required to generate a timestamp (ansible_date_time) for the audit report.
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "min"
+
     - name: Get CPU usage
-      # Captures current CPU load to identify performance bottlenecks or potential DoS conditions
+      # Why: Monitoring CPU is critical for detecting process-intensive anomalies or DoS attacks.
       ansible.netcommon.cli_command:
         command: show cpu usage
-      register: cpu_result
-      changed_when: false
-      failed_when: cpu_result.stdout == ""
+      register: cpu_output
+      # Why: Error Handling - Fail if the command returns no output.
+      failed_when: cpu_output.stdout | length == 0
 
-    - name: Validate CPU data retrieval
+    - name: Verify CPU data integrity
+      # Why: Observability - Ensure the device returned expected performance metrics.
       ansible.builtin.assert:
         that:
-          - "'CPU usage' in cpu_result.stdout"
-        fail_msg: "Failed to retrieve valid CPU usage data from {{ inventory_hostname }}"
+          - "'CPU usage' in cpu_output.stdout"
+        fail_msg: "Incomplete CPU data received from {{ inventory_hostname }}"
 
-    - name: Get memory info
-      # Monitors memory allocation to prevent system instability from resource exhaustion
+    - name: Get memory information
+      # Why: Monitors memory allocation to prevent system instability from exhaustion.
       ansible.netcommon.cli_command:
         command: show memory
-      register: mem_result
-      changed_when: false
-      failed_when: mem_result.stdout == ""
+      register: mem_output
+      failed_when: mem_output.stdout | length == 0
 
-    - name: Validate memory data retrieval
+    - name: Verify memory data integrity
+      # Why: Observability - Verify memory output contains valid keywords.
       ansible.builtin.assert:
         that:
-          - "'memory' in mem_result.stdout"
-        fail_msg: "Failed to retrieve valid memory information from {{ inventory_hostname }}"
+          - "'Free memory' in mem_output.stdout"
+        fail_msg: "Incomplete memory data received from {{ inventory_hostname }}"
 
     - name: Get connection count
-      # Tracks active sessions to ensure they are within licensed platform limits
+      # Why: Tracks active sessions against platform capacity limits.
       ansible.netcommon.cli_command:
         command: show conn count
-      register: conn_result
-      changed_when: false
+      register: conn_output
+
+    - name: Verify connection data integrity
+      # Why: Observability - Ensure the connection table count was successfully queried.
+      ansible.builtin.assert:
+        that:
+          - "'in use' in conn_output.stdout"
+        fail_msg: "Failed to retrieve connection metrics from {{ inventory_hostname }}"
 
     - name: Get resource usage
-      # Checks system-wide resource allocation (XLATEs, AAA sessions, etc.)
+      # Why: Analyzes context-specific resource consumption in multi-context environments.
       ansible.netcommon.cli_command:
         command: show resource usage
-      register: resource_result
-      changed_when: false
+      register: resource_output
 
-    - name: Get context info
-      # Validates multi-context status and specific resource allocation per context
+    - name: Get context information
+      # Why: Validates the presence and status of all configured security contexts.
       ansible.netcommon.cli_command:
         command: show context
-      register: context_result
-      changed_when: false
+      register: context_output
 
     - name: Get traffic rates
-      # Analyzes throughput and packet processing rates for performance monitoring
+      # Why: Observes throughput rates to identify potential network congestion.
       ansible.netcommon.cli_command:
         command: show traffic
-      register: traffic_result
-      changed_when: false
+      register: traffic_output
 
-    - name: Output JSON Report
-      # Idempotently saves the health state to a file for audit and trend analysis
+    - name: Export JSON Health Report
+      # Why: Idempotency - Overwrites the existing report with the current state.
+      # Why: Observability - Provides a structured format for external monitoring systems.
       ansible.builtin.copy:
         content: |
           {
             "device": "{{ inventory_hostname }}",
             "timestamp": "{{ ansible_date_time.iso8601 }}",
-            "cpu": "{{ cpu_result.stdout | trim }}",
-            "memory": "{{ mem_result.stdout | trim }}",
-            "connections": "{{ conn_result.stdout | trim }}",
-            "resources": "{{ resource_result.stdout | trim }}",
-            "contexts": "{{ context_result.stdout | trim }}",
-            "traffic": "{{ traffic_result.stdout | trim }}"
+            "cpu": {{ cpu_output.stdout | to_json }},
+            "memory": {{ mem_output.stdout | to_json }},
+            "connections": {{ conn_output.stdout | to_json }},
+            "resources": {{ resource_output.stdout | to_json }},
+            "contexts": {{ context_output.stdout | to_json }},
+            "traffic": {{ traffic_output.stdout | to_json }}
           }
         dest: "/tmp/asa_health_{{ inventory_hostname }}.json"
         mode: '0644'
       when: output_format == 'json'
 
-    - name: Health Summary
-      # Provides immediate visibility into the device status during playbook execution
+    - name: Display Device Health Summary
+      # Why: Provides immediate, human-readable feedback to the automation engineer.
       ansible.builtin.debug:
         msg: |
-          ========================================================================
-          Health Check: {{ inventory_hostname }} | Status: COMPLETED
-          Timestamp: {{ ansible_date_time.iso8601 }}
-          ========================================================================
-          CPU: {{ cpu_result.stdout_lines[0] if cpu_result.stdout_lines else 'N/A' }}
-          MEM: {{ mem_result.stdout_lines[0] if mem_result.stdout_lines else 'N/A' }}
-          CONN: {{ conn_result.stdout | trim }}
-          TRAFFIC: {{ traffic_result.stdout_lines[0] if traffic_result.stdout_lines else 'N/A' }}
-          ========================================================================
+          ============================================================
+          HEALTH CHECK SUMMARY: {{ inventory_hostname }}
+          TIMESTAMP: {{ ansible_date_time.iso8601 }}
+          ============================================================
+          CPU STATISTICS:
+          {{ cpu_output.stdout }}
+
+          MEMORY STATISTICS:
+          {{ mem_output.stdout }}
+
+          CONNECTION STATISTICS:
+          {{ conn_output.stdout }}
+
+          TRAFFIC STATISTICS:
+          {{ traffic_output.stdout }}
+          ============================================================

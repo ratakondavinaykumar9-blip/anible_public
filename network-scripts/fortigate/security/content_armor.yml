@@ -1,37 +1,43 @@
 ---
-# Architect: FortiGate Content Armor Configuration Audit
-# Purpose: Retrieves the 'firewall profile-group' to audit security profiles applied to traffic.
-# This playbook is idempotent as it performs read-only (GET) operations without changing state.
-
-- name: Retrieve and Validate FortiGate Content Armor
+# ==============================================================================
+# Playbook: FortiGate Content Armor Audit
+# Description: Retrieves and validates the 'firewall profile-group' configuration
+#              from FortiOS devices. This is an idempotent, read-only operation
+#              used for security auditing and policy verification.
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
+# ==============================================================================
+- name: Get Content Armor
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Fetch firewall profile-group configuration
-      # Use Fully Qualified Collection Name (FQCN) for consistent module resolution
+    - name: Retrieve firewall profile-group configuration
+      # Why: Fetching the current state of security profile groups to ensure 
+      #      security policies are correctly mapped to content filters.
       ansible.netcommon.cli_command:
         command: get firewall profile-group
-      register: armor_output
-      # Error Handling: FortiOS may return a successful exit code even if the command sub-path is invalid.
-      # We explicitly fail if the output contains common Fortinet error strings.
+      register: armor_result
+      # Error Handling: Explicitly fail if the command is unrecognized or execution fails on the device.
       failed_when:
-        - armor_output.failed 
-        - "Unknown action" in armor_output.stdout or "item not found" in armor_output.stdout
+        - armor_result.rc != 0
+        - "'Unknown command' in armor_result.stdout"
+        - "'Command fail' in armor_result.stdout"
 
-    - name: Assert configuration data integrity
-      # Observability: Verify that the command returned meaningful data before finishing.
-      # This ensures downstream automation or auditors aren't processing empty results.
+    - name: Validate Content Armor data integrity
+      # Observability: Ensure the stdout is defined and not empty to verify device communication.
       ansible.builtin.assert:
         that:
-          - armor_output.stdout is defined
-          - armor_output.stdout | length > 0
-        fail_msg: "The 'firewall profile-group' configuration is empty or could not be retrieved."
-        success_msg: "Content Armor configuration successfully validated."
+          - armor_result.stdout is defined
+          - armor_result.stdout | length > 0
+        fail_msg: "CRITICAL: Content Armor data retrieval failed or configuration is empty."
+        success_msg: "SUCCESS: Content Armor configuration retrieved and validated."
 
-    - name: Display Content Armor Audit Report
-      # Observability: Format the output for better readability in logging and CI/CD consoles.
+    - name: Display Content Armor Report
+      # Observability: Provide a structured view of the command output for administrative review.
       ansible.builtin.debug:
         msg: |
-          ======================= CONTENT ARMOR =======================
-          {{ armor_output.stdout }}
+          ======================= CONTENT ARMOR REPORT =======================
+          DEVICE: {{ inventory_hostname }}
+          TIMESTAMP: {{ ansible_date_time.iso8601 | default('N/A') }}
+          --------------------------------------------------------------------
+          {{ armor_result.stdout }}

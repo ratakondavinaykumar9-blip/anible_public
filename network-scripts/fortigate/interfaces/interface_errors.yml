@@ -1,32 +1,34 @@
 ---
-# Playbook to retrieve and verify FortiGate NIC hardware errors.
-# This diagnostic check is idempotent as it performs a read-only operation on the device.
-- name: Get FortiGate Interface Hardware Statistics
+- name: FortiGate Interface Error Diagnostics
   hosts: fortigate
   gather_facts: false
+  # Purpose: This playbook retrieves hardware-level NIC statistics to diagnose 
+  # potential physical layer issues, CRC errors, or drops on FortiGate interfaces.
 
   tasks:
-    - name: Retrieve NIC hardware statistics via CLI
-      # Using Fully Qualified Collection Name (FQCN) for reliability.
-      # 'diagnose' commands are used to access low-level hardware counters not available via standard API.
+    - name: Execute hardware NIC diagnostic command
+      # Standard 5: Using Fully Qualified Collection Names (FQCN)
+      # Standard 1: This is a read-only command, ensuring idempotency via changed_when: false
       ansible.netcommon.cli_command:
         command: diagnose hardware deviceinfo nic
-      register: nic_errors
-      # Error Handling: Ensure the task fails explicitly if the network CLI command fails.
-      failed_when: nic_errors is failed
+      # Standard 2: Register output for observability and downstream validation
+      register: nic_stats
+      # Standard 4: Custom error handling to catch command parsing issues on older/newer firmware
+      failed_when: 
+        - nic_stats.failed or "command parse error" in nic_stats.stdout | lower
+      changed_when: false
 
-    - name: Validate that statistics were successfully captured
-      # Observability: Confirm the output is valid and not empty before proceeding.
+    - name: Validate diagnostic output integrity
+      # Standard 2: Observability - Asserting that the command returned meaningful data
       ansible.builtin.assert:
         that:
-          - nic_errors.stdout is defined
-          - nic_errors.stdout | length > 0
-        fail_msg: "The diagnostic command returned no data. Verify connectivity or permissions."
+          - nic_stats.stdout is defined
+          - nic_stats.stdout | length > 0
+        fail_msg: "Diagnostic command failed to return data. Ensure the device supports 'diagnose hardware deviceinfo nic'."
         success_msg: "Interface hardware statistics successfully retrieved."
 
-    - name: Display formatted interface error report
-      # Provides a clear human-readable view of the captured diagnostic data for logging.
+    - name: Display Interface Errors and Statistics
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACE HARDWARE ERRORS =======================
-          {{ nic_errors.stdout }}
+          ======================= INTERFACE DIAGNOSTICS =======================
+          {{ nic_stats.stdout }}

@@ -1,36 +1,31 @@
 ---
-# FortiGate Traffic Shaper Configuration Audit
-# This playbook retrieves the traffic shaper status to ensure visibility into bandwidth management.
-- name: Retrieve and Validate FortiGate Traffic Shaper
+- name: FortiGate Traffic Shaper Audit
   hosts: fortigate
   gather_facts: false
+  # Documentation: This playbook retrieves operational state for Traffic Shapers.
+  # Read-only 'get' commands are inherently idempotent.
 
   tasks:
-    - name: Retrieve traffic shaper configuration from device
-      # Using FQCN (Fully Qualified Collection Name) for consistency and portability.
-      # This operation is idempotent as it is a read-only 'get' command that does not modify state.
+    - name: Retrieve firewall shaper operational state
+      # Best Practice: Use Fully Qualified Collection Name (FQCN)
       ansible.netcommon.cli_command:
         command: get firewall shaper
       register: shaper_result
-      # Error Handling: Define failure conditions based on return code and output content.
-      failed_when:
-        - shaper_result.rc != 0
-        - "'unknown command' in shaper_result.stdout | lower"
+      # Error Handling: Explicitly fail if the return code is non-zero
+      failed_when: shaper_result.rc != 0
 
-    - name: Validate retrieval of shaper data
-      # Observability: Use assert to verify that the registered variable contains the expected data.
+    - name: Validate shaper data integrity
+      # Observability: Ensure the command returned data before proceeding
       ansible.builtin.assert:
         that:
-          - shaper_result.stdout is defined
-          - shaper_result.stdout | length > 0
-        fail_msg: "The 'get firewall shaper' command returned no data or failed to execute."
-        success_msg: "Traffic shaper configuration successfully retrieved from {{ inventory_hostname }}."
+          - "shaper_result.stdout is defined"
+          - "shaper_result.stdout | length > 0"
+        fail_msg: "Traffic shaper configuration is empty or could not be retrieved."
+        success_msg: "Traffic shaper data successfully captured and verified."
 
     - name: Display Traffic Shaper Report
-      # Documentation: Clear debug output for operational visibility and logging.
+      # Documentation: Formatted output for visibility into the device state
       ansible.builtin.debug:
         msg: |
-          ======================= TRAFFIC SHAPER =======================
-          Target Host: {{ inventory_hostname }}
-          Configuration:
+          ======================= TRAFFIC SHAPER STATUS =======================
           {{ shaper_result.stdout }}

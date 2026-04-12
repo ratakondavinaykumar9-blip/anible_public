@@ -1,49 +1,39 @@
 ---
-# FortiGate Log Viewer - Production Ready
-# Improved for idempotency, observability, and robust error handling.
+# FortiGate Log Viewer
+# Improved version following NetLearner Architect standards for Idempotency, Observability, and Error Handling.
 - name: View FortiGate Logs
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Disabled to improve execution speed; host facts are not required for log retrieval.
   vars:
-    # Category of logs to retrieve (e.g., traffic, event, virus)
+    # Default log parameters; can be overridden via extra-vars at runtime.
     log_type: "traffic"
-    # Number of lines to display from the end of the log buffer
     log_count: 50
 
   tasks:
-    - name: Validate input parameters
-      # Observability: Ensure variables are within expected bounds before execution
-      ansible.builtin.assert:
-        that:
-          - log_count | int > 0
-          - log_type is defined
-        fail_msg: "Variable log_count must be a positive integer and log_type must be defined."
-        quiet: true
-
-    - name: Retrieve logs from device
-      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+    - name: "Execute log retrieval: {{ log_type }}"
+      # FQCN: Using ansible.netcommon.cli_command for direct CLI interaction.
       ansible.netcommon.cli_command:
-        command: "execute log filter category {{ log_type }} && execute log display | head {{ log_count }}"
-      register: logs_result
-      # Idempotency: Read-only operations must report 'changed: false'
+        # Chaining commands to set the filter category and then display the results.
+        command: "execute log filter category {{ log_type }} && execute log display {{ log_count }}"
+      register: logs
+      # Idempotency: Read-only operations must not trigger a 'changed' state.
       changed_when: false
-      # Error Handling: Catch FortiOS specific command failures
-      failed_when:
-        - logs_result.rc != 0
-        - "'Command fail' in logs_result.stdout"
+      # Error Handling: Explicitly fail if the FortiOS CLI returns common error strings.
+      failed_when: 
+        - logs.failed or "Command fail" in logs.stdout or "Invalid" in logs.stdout
 
-    - name: Verify log data integrity
-      # Observability: Confirm the command returned content and didn't just exit silently
+    - name: "Verify log data integrity"
+      # Observability: Ensure that the command actually returned data before proceeding.
       ansible.builtin.assert:
         that:
-          - logs_result.stdout | length > 0
-        fail_msg: "No logs were returned for type: {{ log_type }}. Check if logging is enabled."
-        quiet: true
+          - "logs.stdout is defined"
+          - "logs.stdout | length > 0"
+        fail_msg: "Log retrieval failed: The device returned empty output for category '{{ log_type }}'."
+        success_msg: "Successfully retrieved {{ log_type }} logs."
 
-    - name: Display formatted log output
-      # Observability: Provide a clear, human-readable summary of the captured data
+    - name: "Display Logs"
+      # Documentation: Formatted output for operator visibility during execution.
       ansible.builtin.debug:
         msg: |
-          ======================= {{ log_type | upper }} LOGS (Last {{ log_count }}) =======================
-          {{ logs_result.stdout }}
-          ====================================================================================
+          ======================= FORTIGATE {{ log_type | upper }} LOGS =======================
+          {{ logs.stdout }}

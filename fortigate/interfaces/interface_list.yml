@@ -1,37 +1,33 @@
 ---
-# FortiGate Interface List Retrieval
-# This playbook gathers and displays the current interface configuration.
-# Standards Applied: Idempotency (read-only), Observability, Documentation, Error Handling, and FQCN.
-
+# FortiGate Interface Status Retrieval
+# This playbook adheres to the NetLearner Architect standards for high-reliability automation.
 - name: Get Interface List
   hosts: fortigate
-  gather_facts: no
+  gather_facts: false
 
   tasks:
-    - name: Execute command to retrieve system interfaces
-      # Using FQCN for cross-platform reliability and explicit module reference
+    - name: Retrieve system interface status from FortiGate CLI
+      # Why: Utilizing FQCN for cli_command to execute direct FortiOS 'get' commands for operational state.
       ansible.netcommon.cli_command:
-        command: get system interface
+        command: "get system interface"
       register: intf_result
-      # Error Handling: Catch CLI-level failures that might not trigger a connection-level error
+      # Error Handling: Define failure if the command is rejected or returns an error string.
       failed_when: 
-        - intf_result.failed | default(false)
-        - "'Command fail' in intf_result.stdout"
-        - "'Unknown action' in intf_result.stdout"
+        - intf_result.failed or "Command fail" in intf_result.stdout or "Unknown action" in intf_result.stdout
 
-    - name: Verify interface data retrieval
-      # Observability: Ensure the command returned meaningful data before proceeding
+    - name: Validate successful interface data capture
+      # Observability: Assert that the command returned meaningful data to prevent downstream failures.
       ansible.builtin.assert:
         that:
-          - intf_result.stdout is defined
-          - intf_result.stdout | length > 0
-          - "'name' in intf_result.stdout or 'interface' in intf_result.stdout"
-        fail_msg: "The command did not return the expected interface list output."
-        success_msg: "Successfully validated interface data retrieval."
+          - "intf_result.stdout is defined"
+          - "intf_result.stdout | length > 0"
+          - "'name' in intf_result.stdout or 'Interface' in intf_result.stdout"
+        fail_msg: "Interface retrieval validation failed. Output was empty or malformed."
+        success_msg: "Interface data successfully validated."
 
-    - name: Display retrieved interface status
-      # Documentation: Provide clear, formatted visibility into the current device state
+    - name: Display formatted interface information
+      # Why: Providing human-readable output for audit trails and troubleshooting.
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE INTERFACES =======================
+          ======================= INTERFACES =======================
           {{ intf_result.stdout }}

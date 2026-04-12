@@ -1,56 +1,53 @@
 ---
-# Playbook: Get Connection Table
-# Purpose: Retrieves and validates the connection table from Cisco ASA/Firepower devices.
-# Idempotency: Inherently idempotent as these are read-only 'show' commands.
-# Best Practices: Uses Fully Qualified Collection Names (FQCN).
-- name: Retrieve and Validate ASA Connection Table
+- name: Get ASA Connection Table Information
   hosts: asa_firepower
   gather_facts: false
+  # Purpose: Retrieve and validate the current connection table from Cisco ASA/Firepower devices.
+  # This provides visibility into active traffic sessions for troubleshooting and audit.
 
   tasks:
-    - name: Get summary connection table
-      # Using FQCN ansible.netcommon.cli_command for standardized network interaction.
+    - name: Retrieve summary connection table
+      # Using FQCN for standardized network CLI interactions
       ansible.netcommon.cli_command:
         command: show conn
       register: conn_summary
-      # Error Handling: Fail if the transport fails or if the device returns CLI error patterns.
-      failed_when: >
-        conn_summary.failed or
-        'Invalid input' in conn_summary.stdout or
-        'incomplete command' in conn_summary.stdout
+      # Error Handling: Ensure the command didn't return a device-side error despite a successful SSH session.
+      failed_when:
+        - conn_summary.stdout is not defined
+        - "'Invalid input' in conn_summary.stdout"
+        - "'% Error' in conn_summary.stdout"
 
-    - name: Assert summary connection table is not empty
-      # Observability: Ensure the command returned data to verify operational state.
+    - name: Validate summary connection output
+      # Observability: Confirm the device returned data to prevent false positives in automation pipelines.
       ansible.builtin.assert:
         that:
           - conn_summary.stdout | length > 0
-        fail_msg: "Connection summary output was empty. Verify device status and connectivity."
-        success_msg: "Connection summary successfully captured."
+        fail_msg: "The 'show conn' command returned an empty result."
+        success_msg: "Summary connection table successfully retrieved."
 
-    - name: Get detailed connection table
-      # Detailed connection information is critical for protocol-specific troubleshooting.
+    - name: Retrieve detailed connection table
       ansible.netcommon.cli_command:
         command: show conn detail
-      register: conn_detail
-      failed_when: >
-        conn_detail.failed or
-        'Invalid input' in conn_detail.stdout or
-        'incomplete command' in conn_detail.stdout
+      register: conn_detailed
+      failed_when:
+        - conn_detailed.stdout is not defined
+        - "'Invalid input' in conn_detailed.stdout"
+        - "'% Error' in conn_detailed.stdout"
 
-    - name: Assert detailed connection table is not empty
-      # Observability: Verify the detailed output contains content.
+    - name: Validate detailed connection output
+      # Observability: Ensure detailed metrics are available for deep-packet analysis.
       ansible.builtin.assert:
         that:
-          - conn_detail.stdout | length > 0
-        fail_msg: "Detailed connection output was empty."
-        success_msg: "Detailed connection info successfully captured."
+          - conn_detailed.stdout | length > 0
+        fail_msg: "The 'show conn detail' command returned an empty result."
+        success_msg: "Detailed connection table successfully retrieved."
 
-    - name: Display captured connection data
-      # Debugging output for operator visibility during execution.
+    - name: Display connection information
+      # Idempotency: debug tasks do not modify system state and are safe for repeated execution.
       ansible.builtin.debug:
         msg: |
-          ======================= CONNECTIONS SUMMARY =======================
+          ======================= SUMMARY CONNECTIONS =======================
           {{ conn_summary.stdout }}
-
-          ======================= CONNECTIONS DETAILED ======================
-          {{ conn_detail.stdout }}
+          
+          ======================= DETAILED CONNECTIONS =======================
+          {{ conn_detailed.stdout }}

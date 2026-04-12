@@ -1,39 +1,35 @@
 ---
-# IPSec Status Retrieval Playbook
-# Purpose: Retrieves and displays the current IPSec VPN status from FortiGate devices.
-# Standards: Idempotency (Read-only), Observability (Register/Assert), Documentation (Comments), FQCN.
+# FortiGate IPSec Status - Improved by NetLearner Architect
+# Purpose: Retrieve and verify the operational status of IPSec tunnels.
+# Standards: Idempotency (Read-only), Observability (Assert), Best Practices (FQCN).
 
 - name: FortiGate IPSec Status
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute FortiGate CLI command to get IPSec status
-      # FQCN: Using ansible.netcommon.cli_command for standard CLI interaction
+    - name: Retrieve IPSec tunnel status
+      # Use FQCN for network common CLI command execution.
+      # This operation is inherently idempotent as it does not modify configuration.
       ansible.netcommon.cli_command:
-        command: get vpn ipsec status
-      register: ipsec_output
-      # Idempotency: Read-only operations should not report a 'changed' status in Ansible
-      changed_when: false
-      # Error Handling: Fail if the command execution fails or returns an "Unknown action" error
-      failed_when: 
-        - ipsec_output.failed or "Unknown action" in ipsec_output.stdout
+        command: "get vpn ipsec status"
+      register: ipsec_result
+      # Error Handling: Detect command failure or unrecognized command syntax.
+      failed_when:
+        - ipsec_result.failed or "Unknown action" in ipsec_result.stdout
 
-    - name: Validate IPSec status data integrity
-      # Observability: Assert that we received meaningful output from the device
+    - name: Verify IPSec command output integrity
+      # Observability: Confirm the command returned meaningful output.
       ansible.builtin.assert:
         that:
-          - ipsec_output.stdout is defined
-          - ipsec_output.stdout | length > 0
-        fail_msg: "The IPSec status output was empty or could not be retrieved from {{ inventory_hostname }}."
-        quiet: true
+          - "ipsec_result.stdout is defined"
+          - "ipsec_result.stdout | length > 0"
+        fail_msg: "The command 'get vpn ipsec status' returned no output."
+        success_msg: "IPSec status successfully retrieved."
 
-    - name: Display IPSec Status Summary
-      # Documentation: Providing a clear, formatted view of the tunnel status for the operator
+    - name: Display Formatted IPSec Status
+      # Provides visual confirmation for the network administrator.
       ansible.builtin.debug:
         msg: |
-          ======================= IPSEC STATUS: {{ inventory_hostname }} =======================
-          
-          {{ ipsec_output.stdout }}
-
-          ================================================================================
+          ======================= IPSEC STATUS =======================
+          {{ ipsec_result.stdout }}

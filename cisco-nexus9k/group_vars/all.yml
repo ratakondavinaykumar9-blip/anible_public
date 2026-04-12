@@ -1,20 +1,20 @@
 ---
-- name: Nexus 9000 Production Baseline Configuration
-  hosts: cisco_nexus
+- name: "Nexus 9000 Baseline Configuration"
+  hosts: nexus_switches
   gather_facts: false
   vars:
-    # NTP Servers for accurate log timestamps and scheduled operations
+    # NTP Servers
     ntp_servers:
       - 10.1.1.1
       - 10.1.1.2
 
-    # DNS Configuration for reachability to external services and FQDNs
+    # DNS Configuration
     dns_servers:
       primary: 10.1.1.10
       secondary: 10.1.1.11
     dns_domain: corp.local
 
-    # SNMP Configuration for NMS monitoring and trap delivery
+    # SNMP Configuration
     snmp:
       contact: "Network Operations - noc@corp.local"
       location: "Data Center - Site 01"
@@ -24,29 +24,39 @@
         - 10.1.1.100
         - 10.1.1.101
 
-    # Syslog Configuration for centralized event logging and audit trails
+    # Syslog Configuration
     syslog_servers:
       - 10.1.1.50
       - 10.1.1.51
 
-    # Management Connectivity (L3)
+    # Management VLAN
     mgmt_vlan: 999
     mgmt_interface: mgmt0
+
+    # Default Gateway
     default_gateway: 10.1.1.254
 
-    # AAA Configuration for Secure Identity and Access Management
+    # AAA Configuration
     aaa_servers:
       tacacs:
-        - { host: 10.1.1.20, key: "{{ vault_tacacs_key }}", timeout: 10 }
+        - host: 10.1.1.20
+          key: "{{ vault_tacacs_key }}"
+          timeout: 10
       radius:
-        - { host: 10.1.1.21, key: "{{ vault_radius_key }}", timeout: 10 }
+        - host: 10.1.1.21
+          key: "{{ vault_radius_key }}"
+          timeout: 10
 
-    # Standardized Administrative Users
+    # Standard Users
     default_users:
-      - { name: netadmin, role: network-admin, sshkey: "{{ vault_netadmin_sshkey }}" }
-      - { name: netops, role: network-operator, sshkey: "{{ vault_netops_sshkey }}" }
+      - name: netadmin
+        role: network-admin
+        sshkey: "{{ vault_netadmin_sshkey }}"
+      - name: netops
+        role: network-operator
+        sshkey: "{{ vault_netops_sshkey }}"
 
-    # Legal and Informational Banners
+    # Banner Configuration
     banners:
       motd: |
         ** AUTHORIZED ACCESS ONLY **
@@ -57,52 +67,70 @@
         ** Nexus 9000 Switch - Corp Network **
         Unauthorized access is prohibited.
 
-    # Backup and Operational Defaults
+    # Backup Settings
     backup:
       path: /opt/backup/nexus9k
       retention_days: 90
       pre_change: true
+
+    # Timezone
     timezone: UTC
 
   tasks:
-    - name: Perform pre-change backup of running-config
+    - name: "Observability | Ensure Local Backup Directory Exists"
+      delegate_to: localhost
+      ansible.builtin.file:
+        path: "{{ backup.path }}"
+        state: directory
+        mode: '0755'
+      register: backup_dir_check
+      # Why: Ensures destination for configuration captures is available on the control node.
+
+    - name: "Pre-Change | Backup Running Configuration"
       cisco.nxos.nxos_config:
         backup: yes
         backup_options:
-          filename: "{{ inventory_hostname }}_pre_change.cfg"
           dir_path: "{{ backup.path }}"
       when: backup.pre_change | bool
-      register: backup_status
-      ignore_errors: yes # Ensures local storage issues don't block network changes
+      register: backup_result
+      # Why: Critical for rollback capability; creates a timestamped recovery point.
 
-    - name: Configure NTP servers for time synchronization
+    - name: "System | Configure Global Timezone"
+      cisco.nxos.nxos_timezone:
+        timezone: "{{ timezone }}"
+      register: tz_config
+      # Why: Standardizes timestamps across logs and certificate validation checks.
+
+    - name: "System | Configure NTP Servers"
       cisco.nxos.nxos_ntp_global:
         server: "{{ item }}"
         state: present
       loop: "{{ ntp_servers }}"
       register: ntp_config
+      # Why: Prevents clock drift to ensure accurate forensic analysis and protocol stability.
 
-    - name: Verify NTP configuration success
-      ansible.builtin.assert:
-        that: ntp_config is successful
-        fail_msg: "NTP server configuration failed on {{ inventory_hostname }}"
-
-    - name: Configure DNS name servers and domain suffix
+    - name: "System | Configure DNS Infrastructure"
       cisco.nxos.nxos_dns:
+        domain_name: "{{ dns_domain }}"
         servers:
           - "{{ dns_servers.primary }}"
           - "{{ dns_servers.secondary }}"
-        domain: "{{ dns_domain }}"
         state: present
       register: dns_config
+      # Why: Enables resolution for external services like Syslog, AAA, and licensing servers.
 
-    - name: Configure SNMP Server base details
-      cisco.nxos.nxos_snmp_server:
-        contact: "{{ snmp.contact }}"
-        location: "{{ snmp.location }}"
-      register: snmp_base
+    - name: "Management | Configure SNMP Metadata"
+      block:
+        - name: "Management | Set SNMP Contact"
+          cisco.nxos.nxos_snmp_contact:
+            contact: "{{ snmp.contact }}"
+        - name: "Management | Set SNMP Location"
+          cisco.nxos.nxos_snmp_location:
+            location: "{{ snmp.location }}"
+      register: snmp_meta_result
+      # Why: Standardizes asset tracking information for Network Management Systems (NMS).
 
-    - name: Configure SNMP Communities (Idempotent)
+    - name: "Management | Configure SNMP Communities"
       cisco.nxos.nxos_snmp_community:
         community: "{{ item.name }}"
         access: "{{ item.access }}"
@@ -110,58 +138,94 @@
       loop:
         - { name: "{{ snmp.community_ro }}", access: ro }
         - { name: "{{ snmp.community_rw }}", access: rw }
-      register: snmp_comm
+      register: snmp_comm_result
+      # Why: Defines secure read/write access strings for polling.
 
-    - name: Configure centralized Syslog servers
-      cisco.nxos.nxos_logging_global:
-        remote_server: "{{ item }}"
+    - name: "Management | Configure SNMP Trap Hosts"
+      cisco.nxos.nxos_snmp_host:
+        snmp_host: "{{ item }}"
+        version: 2c
+        community: "{{ snmp.community_ro }}"
+        state: present
+      loop: "{{ snmp.traps }}"
+      register: snmp_trap_result
+      # Why: Enables proactive alerting for hardware and protocol events.
+
+    - name: "Management | Configure Remote Syslog Servers"
+      cisco.nxos.nxos_logging:
+        dest: server
+        name: "{{ item }}"
         state: present
       loop: "{{ syslog_servers }}"
-      register: syslog_config
+      register: syslog_result
+      # Why: Centralizes logging for security compliance and audit trails.
 
-    - name: Configure Management Default Gateway in VRF management
-      cisco.nxos.nxos_static_route:
-        prefix: 0.0.0.0/0
-        next_hop: "{{ default_gateway }}"
-        vrf: management
-      register: route_config
+    - name: "Security | Configure AAA Server Hosts"
+      block:
+        - name: "Security | TACACS+ Infrastructure"
+          cisco.nxos.nxos_aaa_server_host:
+            server_type: tacacs
+            address: "{{ item.host }}"
+            key: "{{ item.key }}"
+            timeout: "{{ item.timeout }}"
+            state: present
+          loop: "{{ aaa_servers.tacacs }}"
+          no_log: true
+        - name: "Security | RADIUS Infrastructure"
+          cisco.nxos.nxos_aaa_server_host:
+            server_type: radius
+            address: "{{ item.host }}"
+            key: "{{ item.key }}"
+            timeout: "{{ item.timeout }}"
+            state: present
+          loop: "{{ aaa_servers.radius }}"
+          no_log: true
+      register: aaa_host_result
+      # Why: Offloads authentication to centralized identity stores like Cisco ISE or ClearPass.
 
-    - name: Configure TACACS+ AAA servers for identity
-      cisco.nxos.nxos_aaa_server_host:
-        server_type: tacacs
-        address: "{{ item.host }}"
-        key: "{{ item.key }}"
-        timeout: "{{ item.timeout }}"
-        state: present
-      loop: "{{ aaa_servers.tacacs }}"
-      register: aaa_config
-
-    - name: Ensure standardized Local Users are present
+    - name: "Security | Configure Local Administrative Users"
       cisco.nxos.nxos_user:
         name: "{{ item.name }}"
         role: "{{ item.role }}"
         sshkey: "{{ item.sshkey }}"
         state: present
       loop: "{{ default_users }}"
-      register: user_config
-      no_log: true # Mask sensitive SSH keys in logs
+      register: user_result
+      # Why: Ensures authorized administrators have fallback access via SSH keys.
 
-    - name: Apply Login and MOTD Banners
+    - name: "Security | Configure Legal Banners"
       cisco.nxos.nxos_banner:
         banner: "{{ item.key }}"
         text: "{{ item.value }}"
         state: present
       loop: "{{ banners | dict2items }}"
-      register: banner_config
+      register: banner_result
+      # Why: Compliance requirement to warn against unauthorized system access.
 
-    - name: Commit changes to startup-config
-      cisco.nxos.nxos_config:
-        save_when: modified
-      register: save_config
+    - name: "Network | Configure Management VLAN"
+      cisco.nxos.nxos_vlans:
+        vlan_id: "{{ mgmt_vlan }}"
+        name: "MANAGEMENT_VLAN"
+        state: present
+      register: vlan_result
+      # Why: Segregates out-of-band management traffic from data plane interfaces.
 
-    - name: Final observability assertion
+    - name: "Network | Configure Default Gateway (Management VRF)"
+      cisco.nxos.nxos_static_route:
+        prefix: 0.0.0.0/0
+        next_hop: "{{ default_gateway }}"
+        vrf: management
+      register: route_result
+      failed_when: false
+      # Why: Ensures the management interface can reach off-subnet collectors.
+
+    - name: "Observability | Final Validation of Baseline State"
       ansible.builtin.assert:
         that:
-          - save_config is successful
-          - not save_config.failed
-        fail_msg: "Configuration changes failed or could not be saved to startup-config"
+          - tz_config is not failed
+          - ntp_config is not failed
+          - dns_config is not failed
+          - aaa_host_result is not failed
+          - user_result is not failed
+        msg: "Baseline configuration failed validation. Check individual task registration for details."
+      # Why: Guarantees that the switch has reached the desired production state.

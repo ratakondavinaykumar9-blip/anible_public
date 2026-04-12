@@ -1,35 +1,39 @@
 ---
-# FortiGate Interface Status Diagnostic Playbook
-# This playbook retrieves hardware-level interface statistics from a FortiGate device.
-# It adheres to industry standards for observability, error handling, and FQCN usage.
+# FortiGate Interface Status Retrieval
+# Purpose: Gathers hardware-level NIC information for diagnostic purposes.
+# Idempotency: Safe to run multiple times as it is a read-only operation.
+# Standards: FQCN usage, Observability, and Error Handling.
 
-- name: FortiGate Interface Status Diagnostics
+- name: Get FortiGate Interface Status
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve hardware interface diagnostic information
-      # FQCN: Using ansible.netcommon.cli_command for network device interaction.
-      # Idempotency: Read-only diagnostic commands are safe to run multiple times.
+    - name: Retrieve hardware NIC information via CLI
+      # FQCN: Using ansible.netcommon for standardized network CLI communication
       ansible.netcommon.cli_command:
         command: diagnose hardware deviceinfo nic
-      register: interface_status_raw
-      # Error Handling: Explicitly fail if the command is unrecognized or execution fails.
+      register: status_result
+      # Error Handling: Identify failure if the command is unrecognized or output is null
       failed_when: 
-        - interface_status_raw.failed or "Unknown command" in interface_status_raw.stdout
+        - status_result.failed or status_result.stdout | length == 0
+        - "'Command fail' in status_result.stdout"
 
-    - name: Validate diagnostic output integrity
-      # Observability: Assert that the command returned content to verify success.
+    - name: Validate status retrieval success
+      # Observability: Explicitly assert that data was captured correctly
       ansible.builtin.assert:
         that:
-          - interface_status_raw.stdout is defined
-          - interface_status_raw.stdout | length > 0
-        fail_msg: "Diagnostic data retrieval failed or returned empty content."
-        success_msg: "Hardware interface diagnostic data successfully validated."
+          - status_result.stdout is defined
+          - status_result.stdout != ""
+        fail_msg: "Failed to retrieve NIC information from {{ inventory_hostname }}."
+        success_msg: "NIC hardware information successfully retrieved."
 
-    - name: Display formatted interface hardware status
-      # Documentation: Outputting the diagnostic data for operational visibility.
+    - name: Display Interface Status Report
+      # Documentation: Provide a formatted view of the captured output
       ansible.builtin.debug:
         msg: |
           ======================= INTERFACE STATUS =======================
-          {{ interface_status_raw.stdout }}
+          HOST: {{ inventory_hostname }}
+          ----------------------------------------------------------------
+          {{ status_result.stdout }}
+          ================================================================

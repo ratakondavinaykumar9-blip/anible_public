@@ -1,39 +1,38 @@
 ---
-# FortiGate IPS Signatures Retrieval
-# This playbook retrieves IPS signature status to ensure security visibility.
-# Adheres to Standard:s for idempotency and observability.
-- name: Get IPS Signatures
+# FortiGate IPS Signatures Retrieval and Verification
+# Improved: 2026-03-15
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: FortiGate IPS Signatures
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve IPS signature information via CLI
-      # Use FQCN for network command execution
+    - name: Retrieve IPS signatures from the security gateway
+      # Using FQCN for network common CLI execution
+      # Why: This allows execution of raw FortiOS diagnostic commands not covered by state modules.
       ansible.netcommon.cli_command:
         command: diagnose ips signature
-      register: sig
-      # Idempotency: diagnose commands are read-only; mark as changed: false
+      register: sig_output
+      # Idempotency: Mark as 'changed: false' because this is a read-only diagnostic operation.
       changed_when: false
-      # Error Handling: Ensure the command was accepted by the device
+      # Error Handling: Fail if return code is non-zero or if the output contains known error strings.
       failed_when: 
-        - sig.stdout is not defined
-        - "'Command fail' in sig.stdout"
-        - "'Unknown action' in sig.stdout"
+        - sig_output.rc != 0
+        - "'Command fail' in sig_output.stdout"
+        - "'Unknown action' in sig_output.stdout"
 
-    - name: Validate IPS signature output
-      # Observability: Assert that data was actually returned
+    - name: Validate signature data integrity
+      # Observability: Assert that the output is populated to ensure the retrieval was successful.
       ansible.builtin.assert:
         that:
-          - sig.stdout | length > 0
-        fail_msg: "The IPS signature command returned no data. Check device connectivity or permissions."
-        success_msg: "IPS signatures successfully captured for {{ inventory_hostname }}."
+          - sig_output.stdout is defined
+          - sig_output.stdout | length > 0
+        fail_msg: "IPS signature retrieval failed or returned empty data."
+        success_msg: "IPS signature data successfully validated."
 
-    - name: Display IPS Signatures Report
-      # Documentation: Provide structured feedback for the operator
+    - name: Display IPS signature details
+      # Documentation: Provide operational visibility into the retrieved signature set.
       ansible.builtin.debug:
         msg: |
-          ======================= IPS SIGNATURES REPORT =======================
-          Target Device: {{ inventory_hostname }}
-          Execution Status: SUCCESS
-          =====================================================================
-          {{ sig.stdout }}
+          ======================= IPS SIGNATURES =======================
+          {{ sig_output.stdout }}

@@ -1,81 +1,82 @@
 ---
 # ==============================================================================
-# Playbook: Configure Dell EMC PowerSwitch Hostname (Improved)
+# Playbook: Configure Dell EMC PowerSwitch Hostname
 # ==============================================================================
-# Author: Architect:# Version: 1.1.0
-# Description: Configures and verifies hostname on Dell EMC PowerSwitch devices.
-#              Supports OS6, OS9, and OS10 with full idempotency and validation.
+# Standards: Idempotent, Observable, Documented, Robust Error Handling, FQCN
+# Platforms: Dell EMC PowerSwitch N-Series (OS6), S-Series (OS9), Z-Series (OS10)
+# Requirements: ansible.netcommon collection
 # ==============================================================================
 
 - name: Configure Dell EMC PowerSwitch Hostname
   hosts: dell_switches
-  gather_facts: false
+  gather_facts: no
   connection: ansible.netcommon.network_cli
 
   vars:
-    # Target hostname, defaults to inventory name
+    # Variables with defaults to ensure flexibility and safety
     expected_hostname: "{{ inventory_hostname }}"
-    # Flag to save running configuration to startup
     save_config: true
-    # RFC 1123 compliant hostname length
     max_hostname_length: 63
 
   tasks:
-    - name: Pre-validation - Validate hostname string
-      # Ensure the requested hostname follows naming standards before connecting
+    - name: Validate hostname input
+      # Standard 2 & 5: Observability and FQCN
+      # Ensures hostname adheres to RFC 1123 and hardware constraints before execution
       ansible.builtin.assert:
         that:
           - expected_hostname | length <= max_hostname_length
           - expected_hostname is match('^[a-zA-Z][a-zA-Z0-9\-]*$')
-        fail_msg: "Invalid hostname '{{ expected_hostname }}'. Must be alphanumeric/hyphens and <= {{ max_hostname_length }} chars."
-        success_msg: "Hostname '{{ expected_hostname }}' passed pre-validation."
+        fail_msg: "Invalid hostname '{{ expected_hostname }}'. Must be alphanumeric/hyphen, start with a letter, and <= {{ max_hostname_length }} chars."
+        success_msg: "Hostname '{{ expected_hostname }}' validation successful."
       changed_when: false
 
-    - name: Main Configuration Logic
+    - name: Hostname Management Lifecycle
       block:
-        - name: Telemetry - Get current system status
-          # Retrieve system info to determine current hostname state for idempotency
+        - name: Retrieve current system facts
+          # Standard 1: Gather current state to ensure idempotency in the following tasks
           ansible.netcommon.cli_command:
             command: show system
           register: system_info
           changed_when: false
 
-        - name: Parse current hostname
-          # Extract hostname using regex that supports OS6, OS9, and OS10 variations
+        - name: Parse active hostname from system output
+          # Standard 3: Documentation - Using robust regex to handle OS6/9/10 formatting variations (dots vs spaces)
           ansible.builtin.set_fact:
-            current_hostname: "{{ system_info.stdout | regex_search('(Host Name|System Name)[:\\.\\s]*\\s+(\\S+)', '\\2') | first | default('unknown', true) }}"
+            current_hostname: "{{ system_info.stdout | regex_search('Host Name[\\s\\.:]+(\\S+)', '\\1') | first | default('unknown', true) }}"
+          changed_when: false
 
-        - name: Configuration - Apply new hostname
-          # Idempotency: Only apply if the current hostname differs from the expected value
+        - name: Apply hostname configuration
+          # Standard 1 & 5: Idempotency check via 'when' clause and use of FQCN
+          # Using cli_config as it is the preferred context for configuration state changes
           ansible.netcommon.cli_config:
             config: "hostname {{ expected_hostname }}"
-          register: hostname_change
           when: current_hostname != expected_hostname
+          register: hostname_change
 
-        - name: Observability - Verify change on device
-          # Re-query the device to confirm the change was accepted by the control plane
+        - name: Verify hostname application
+          # Standard 2: Observability - Re-poll device to confirm the change was accepted by the control plane
           ansible.netcommon.cli_command:
             command: show system
-          register: verify_info
+          register: verify_system
           when: hostname_change is changed
           changed_when: false
 
-        - name: Validation - Assert hostname matches expected state
-          # Final verification to ensure the device's operational state matches the intent
+        - name: Assert new hostname is active
+          # Standard 2: Final validation to ensure the operational state matches the intended state
           ansible.builtin.assert:
             that:
-              - "expected_hostname in verify_info.stdout"
-            fail_msg: "Verification failed! Device did not report: {{ expected_hostname }}"
-            success_msg: "Hostname successfully updated and verified as {{ expected_hostname }}."
+              - verify_system.stdout is search('Host Name[\\s\\.:]+' ~ expected_hostname)
+            fail_msg: "Verification failed: Device still reports hostname as '{{ current_hostname }}'."
           when: hostname_change is changed
 
       rescue:
-        - name: Error Handling - Log failure
+        - name: Log configuration failure details
+          # Standard 4: Error Handling - Provide visibility into the failure state
           ansible.builtin.debug:
-            msg: "CRITICAL: Hostname update failed for {{ inventory_hostname }}. Initiating rollback."
+            msg: "ERROR: Failed to update hostname on {{ inventory_hostname }}. Target: {{ expected_hostname }}"
 
-        - name: Error Handling - Rollback hostname
-          # Attempt to restore the previous hostname if the update failed halfway
+        - name: Attempt rollback to original hostname
+          # Standard 4: Automated rollback logic to prevent leaving the device in a partial state
           ansible.netcommon.cli_config:
             config: "hostname {{ current_hostname }}"
           when: 
@@ -83,30 +84,29 @@
             - current_hostname != 'unknown'
           ignore_errors: true
 
-        - name: Error Handling - Explicitly fail task
+        - name: Signal task failure
           ansible.builtin.fail:
-            msg: "Playbook failed during hostname application on {{ inventory_hostname }}."
+            msg: "Hostname configuration failed for {{ inventory_hostname }}. Original: {{ current_hostname | default('unknown') }}"
 
       always:
-        - name: Persistence - Write memory
-          # Save the configuration to ensure it persists across reboots
+        - name: Persist configuration to startup-config
+          # Standard 1: Conditional execution to maintain idempotency of the 'write' operation
           ansible.netcommon.cli_command:
             command: write memory
-          register: save_result
           when:
             - save_config | bool
-            - hostname_change is changed
+            - hostname_change is changed | default(false)
+          register: save_result
+          # Standard 4: Explicit failure condition if the device refuses to save state
           failed_when: 
-            - "'Error' in save_result.stdout"
-            - "'% Invalid' in save_result.stdout"
+            - save_result.stdout is defined
+            - "'Error' in save_result.stdout or 'Fail' in save_result.stdout"
 
-    - name: Final Summary
+    - name: Final Execution Summary
       ansible.builtin.debug:
         msg:
-          - "----------------------------------------"
-          - "Hostname Report for {{ inventory_hostname }}"
-          - "Original Hostname: {{ current_hostname }}"
-          - "Desired Hostname:  {{ expected_hostname }}"
-          - "Change Status:     {{ 'UPDATED' if (hostname_change is changed) else 'NO CHANGE REQUIRED' }}"
-          - "Config Saved:      {{ 'YES' if (save_result is defined and not save_result.skipped) else 'N/A' }}"
-          - "----------------------------------------"
+          device: "{{ inventory_hostname }}"
+          status: "{{ 'Updated' if (hostname_change is changed | default(false)) else 'No change required' }}"
+          original: "{{ current_hostname }}"
+          target: "{{ expected_hostname }}"
+      changed_when: false

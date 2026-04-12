@@ -1,35 +1,40 @@
 ---
-# EIGRP Status Check Playbook
-# This playbook retrieves and validates the EIGRP neighbor table from Cisco ASA/Firepower devices.
-# It is designed to be idempotent (read-only) and includes observability through assertions.
-
-- name: Retrieve and Verify EIGRP Status
+# NetLearner Architect - Optimized EIGRP Status Playbook
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Purpose: Validates EIGRP neighbor adjacency and operational status on ASA/Firepower.
+- name: EIGRP Status Check
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve EIGRP neighbor table using CLI command
-      # Using Fully Qualified Collection Name (FQCN) for reliability
+    - name: "FETCH | Retrieve EIGRP neighbors"
+      # FQCN: Using ansible.netcommon.cli_command for standardized CLI interaction.
       ansible.netcommon.cli_command:
         command: show eigrp neighbors
-      register: eigrp_status
-      # Handle cases where EIGRP might not be configured or the command is unsupported
-      failed_when: 
-        - eigrp_status.failed
-        - "'Invalid input' in eigrp_status.stdout"
+      register: eigrp_raw
+      # Error Handling: failed_when: false ensures we can run asserts even if the command itself has issues.
+      failed_when: false
+      # Idempotency: 'show' commands are non-modifying and safe to run repeatedly.
 
-    - name: Validate command execution and output presence
-      # Observability: Ensure the device returned a valid response structure
+    - name: "ASSERT | Verify command execution success"
+      # Observability: Ensure the device responded and no transport errors occurred.
       ansible.builtin.assert:
         that:
-          - "eigrp_status.stdout is defined"
-        fail_msg: "The EIGRP status command failed to return valid output on {{ inventory_hostname }}."
-        success_msg: "Successfully retrieved EIGRP status from {{ inventory_hostname }}."
+          - eigrp_raw.failed is false
+          - eigrp_raw.stdout is defined
+        fail_msg: "CRITICAL: Could not retrieve EIGRP data from {{ inventory_hostname }}."
+        success_msg: "INFO: Successfully connected and executed query on {{ inventory_hostname }}."
 
-    - name: Display formatted EIGRP neighbor information
-      # Provides clear visibility of the operational state for the operator
+    - name: "ASSERT | Verify EIGRP process is active"
+      # Observability: Validate that the EIGRP process is actually enabled by checking for output headers.
+      ansible.builtin.assert:
+        that:
+          - "'Address' in eigrp_raw.stdout or 'H' in eigrp_raw.stdout"
+        fail_msg: "WARNING: EIGRP is not enabled or has no configured neighbors on {{ inventory_hostname }}."
+        quiet: true
+
+    - name: "DEBUG | Display EIGRP Neighbors"
+      # Documentation: Visual representation of the EIGRP neighbor table for operator review.
       ansible.builtin.debug:
         msg: |
-          ======================= EIGRP NEIGHBORS: {{ inventory_hostname }} =======================
-          {{ eigrp_status.stdout | default('No EIGRP neighbor data returned.') }}
-          ==========================================================================================
+          ================

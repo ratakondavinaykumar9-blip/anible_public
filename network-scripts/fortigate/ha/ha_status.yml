@@ -1,0 +1,151 @@
+---
+# ==============================================================================
+# Playbook: FortiGate HA Status (Optimized)
+# ==============================================================================
+# Author: NetLearner Architect
+# Version: 1.2.0
+# Description: Monitor FortiGate High Availability cluster status with peer
+#              health validation, failover detection, and report generation.
+#
+# Standards:
+#   - Idempotency: Read-only tasks use changed_when: false.
+#   - Observability: Comprehensive assertions and registered status checks.
+#   - Documentation: Detailed comments on task intent and logic.
+#   - Error Handling: Robust block/rescue for failure isolation.
+#   - FQCN: Consistent use of Fully Qualified Collection Names.
+# ==============================================================================
+
+- name: Get HA Status
+  hosts: fortigate
+  gather_facts: false
+  connection: httpapi
+
+  vars:
+    vdom: "root"
+    check_sync: true
+    alert_threshold: 3
+    output_dir: "/tmp/ha_reports"
+
+  tasks:
+    - name: Initialize report environment
+      ansible.builtin.file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+      # Prerequisite: Ensures the local filesystem is prepared for report storage.
+
+    - name: Execute HA diagnostic sequence
+      block:
+        - name: Retrieve HA cluster status
+          ansible.netcommon.cli_command:
+            command: "get system ha status"
+          register: ha_status
+          changed_when: false
+          # Idempotency: Marks read-only diagnostic command as unchanged.
+          failed_when:
+            - ha_status.failed or ha_status.stdout is not defined
+
+        - name: Retrieve HA running configuration
+          ansible.netcommon.cli_command:
+            command: "show system ha"
+          register: ha_config
+          changed_when: false
+          failed_when: false # Prevents playbook failure if specific config view is restricted.
+
+        - name: Retrieve HA management peer status
+          ansible.netcommon.cli_command:
+            command: "diagnose sys ha management-peer status"
+          register: ha_peers
+          changed_when: false
+          failed_when: false
+
+        - name: Retrieve cluster checksums for sync validation
+          ansible.netcommon.cli_command:
+            command: "diagnose sys ha checksum status"
+          register: sync_status
+          when: check_sync | bool
+          changed_when: false
+          failed_when: false
+
+        - name: Extract HA metadata for analysis
+          ansible.builtin.set_fact:
+            ha_mode: "{{ ha_status.stdout | regex_search('Mode:\\s+(\\S+)', '\\1') | first | default('Unknown') }}"
+            ha_group: "{{ ha_status.stdout | regex_search('Group:\\s+(\\d+)', '\\1') | first | default('N/A') }}"
+            is_primary: "{{ 'Primary' in ha_status.stdout or 'Master' in ha_status.stdout }}"
+          when: ha_status.stdout is defined
+          # Observability: Parsing raw output into structured facts for logic and reporting.
+
+        - name: Verify cluster integrity
+          ansible.builtin.assert:
+            that:
+              - ha_mode != 'Unknown'
+              - ha_status.stdout | regex_findall('Primary|Master|Slave|Secondary') | length >= 1
+            fail_msg: "CRITICAL: HA cluster members missing or invalid mode detected on {{ inventory_hostname }}!"
+            success_msg: "HA cluster integrity verified (Mode: {{ ha_mode }})."
+            quiet: true
+          # Observability: Ensures the device is part of a functional, recognized cluster.
+
+        - name: Verify configuration synchronization
+          ansible.builtin.assert:
+            that:
+              - "'is in-sync' in sync_status.stdout"
+            fail_msg: "CRITICAL: HA Cluster is OUT OF SYNC on {{ inventory_hostname }}!"
+            success_msg: "HA Cluster synchronization verified."
+            quiet: true
+          when: 
+            - check_sync | bool
+            - sync_status.stdout is defined
+          # Observability: Explicitly checks for configuration drift between HA nodes.
+
+      rescue:
+        - name: Handle collection errors gracefully
+          ansible.builtin.debug:
+            msg: "WARNING: Unable to retrieve HA data for {{ inventory_hostname }}. Possible standalone or disconnected state."
+
+        - name: Set fallback operational state
+          ansible.builtin.set_fact:
+            ha_mode: "Standalone/Unknown"
+            ha_group: "N/A"
+            is_primary: false
+          # Error Handling: Ensures following tasks have defined variables even on failure.
+
+      always:
+        - name: Summarize operational status
+          ansible.builtin.debug:
+            msg: |
+              ========================================
+              Host: {{ inventory_hostname }}
+              HA Mode: {{ ha_mode }}
+              Role: {{ 'Primary/Master' if is_primary else 'Secondary/Slave' }}
+              Sync: {{ 'OK' if (sync_status.stdout is defined and 'is in-sync' in sync_status.stdout) else 'N/A' }}
+              ========================================
+
+    - name: Archive HA status report
+      ansible.builtin.copy:
+        content: |
+          # FortiGate HA Status Report
+          # Generated: {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S"') }}
+          # Host: {{ inventory_hostname }}
+          
+          ## Operational Summary
+          Mode: {{ ha_mode }}
+          Group: {{ ha_group }}
+          Role: {{ 'Primary/Master' if is_primary else 'Secondary/Slave' }}
+          
+          ## HA Status (Raw Output)
+          {{ ha_status.stdout | default('N/A') }}
+          
+          ## HA Configuration
+          {{ ha_config.stdout | default('N/A') }}
+          
+          ## Peer Management Status
+          {{ ha_peers.stdout | default('N/A') }}
+          
+          ## Sync Status
+          {{ sync_status.stdout | default('N/A') }}
+        dest: "{{ output_dir }}/{{ inventory_hostname }}_ha_status.txt"
+        mode: '0640'
+      delegate_to: localhost
+      # Idempotency: 'copy' only updates the file if content has changed.

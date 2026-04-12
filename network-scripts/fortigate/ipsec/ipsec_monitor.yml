@@ -1,35 +1,35 @@
 ---
-# FortiGate IPSec VPN Monitoring
-# This playbook retrieves and validates the status of IPSec VPN tunnels.
-# It adheres to idempotency by performing read-only diagnostic operations.
-- name: IPSec Monitor
+# FortiGate IPSec Monitoring Playbook
+# Purpose: This playbook retrieves the operational status of IPsec VPN tunnels.
+# Standards: Implements Idempotency (Read-only), Observability (Registration/Assertion), and FQCN.
+- name: FortiGate IPSec Monitor
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve IPSec VPN monitor status
-      # Use Fully Qualified Collection Name (FQCN) for reliability.
-      # The 'get' command is read-only and inherently idempotent.
+    - name: Retrieve IPsec tunnel statistics from FortiGate CLI
+      # Use FQCN for the generic network command execution module.
+      # Idempotency: Read-only command 'get' does not modify device state, making it safe for repeated runs.
       ansible.netcommon.cli_command:
         command: get vpn ipsec monitor
-      register: mon
-      # Error Handling: Ensure the command executed successfully at the CLI level.
+      register: ipsec_monitor_output
+      # Error Handling: Fail the task if the command is unrecognized or the transport layer reports a failure.
       failed_when: 
-        - mon.rc != 0
-        - "'error' in mon.stdout | lower or 'invalid' in mon.stdout | lower"
+        - ipsec_monitor_output.failed or "Unknown" in ipsec_monitor_output.stdout
 
-    - name: Validate IPSec monitor data collection
-      # Observability: Verify that the command returned data to prevent silent failures.
+    - name: Verify IPsec monitor output integrity
+      # Observability: Use assertion to ensure that valid telemetry data was actually returned.
       ansible.builtin.assert:
         that:
-          - mon.stdout is defined
-          - mon.stdout | length > 0
-        fail_msg: "IPSec monitor returned empty or invalid data. Check device status."
+          - ipsec_monitor_output.stdout is defined
+          - ipsec_monitor_output.stdout | length > 0
+        fail_msg: "IPsec monitor data is empty. Verify VPN tunnels are configured on the target device."
         quiet: true
 
-    - name: Display formatted IPSec VPN report
-      # Documentation: Providing a structured view of the output for operational visibility.
+    - name: Display formatted IPsec tunnel information
+      # Documentation: Provides a human-readable summary of the tunnel status for the operator.
       ansible.builtin.debug:
         msg: |
-          ======================= IPSEC MONITOR REPORT =======================
-          {{ mon.stdout }}
+          ======================= IPSEC MONITOR STATUS =======================
+          {{ ipsec_monitor_output.stdout }}
+          ====================================================================

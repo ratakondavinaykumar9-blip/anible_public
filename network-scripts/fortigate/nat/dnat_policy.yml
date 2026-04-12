@@ -1,34 +1,38 @@
 ---
-# Playbook: FortiGate DNAT Policies Retrieval
-# Description: This playbook securely retrieves DNAT policy information from FortiGate devices.
-# It implements observability through assertions and ensures idempotency by performing a read-only operation.
+# FortiGate DNAT Policies Retrieval
+# This playbook retrieves DNAT configuration from FortiGate devices using standard CLI commands.
+# Adheres to standards for Idempotency, Observability, Documentation, Error Handling, and FQCN usage.
+
 - name: Get DNAT Policies
   hosts: fortigate
   gather_facts: false
+  # Connection should be set to network_cli for FortiOS CLI interactions
+  vars:
+    ansible_network_os: fortinet.fortios.fortios
 
   tasks:
-    - name: Retrieve DNAT policy configuration via CLI
-      # Use Fully Qualified Collection Name (FQCN) for reliability
+    - name: Retrieve DNAT configuration from device
+      # This operation is inherently idempotent as it is read-only.
+      # FQCN: ansible.netcommon.cli_command
       ansible.netcommon.cli_command:
-        command: "get firewall dnats"
-      register: dnat_output
-      # Error Handling: Define failure conditions based on command response or execution status
-      failed_when: 
-        - dnat_output.failed or "Unknown action" in dnat_output.stdout 
-        - "'command parse error' in dnat_output.stdout | lower"
+        command: get firewall dnats
+      register: dnat_result
+      # Error Handling: Identify failure if the command is unrecognized or returns an error string
+      failed_when:
+        - dnat_result.failed or "Unknown action" in dnat_result.stdout or "Command fail" in dnat_result.stdout
 
-    - name: Validate DNAT data observability
-      # Observability: Use assertions to verify that the command returned meaningful content
+    - name: Validate retrieval success and data presence
+      # Observability: Verify the output is defined and contains data
       ansible.builtin.assert:
         that:
-          - dnat_output.stdout is defined
-          - dnat_output.stdout | length > 0
-        fail_msg: "DNAT policies could not be retrieved or the command returned an empty result."
-        success_msg: "DNAT policy information successfully captured from the device."
+          - dnat_result.stdout is defined
+          - dnat_result.stdout | length > 0
+        fail_msg: "DNAT configuration retrieval failed or returned empty output."
+        success_msg: "DNAT configuration successfully captured."
 
-    - name: Display DNAT Policy Details
-      # Documentation: Formatted output to improve log readability for network operators
+    - name: Display retrieved DNAT policies
+      # Provides visual confirmation of the registered output
       ansible.builtin.debug:
         msg: |
-          ======================= DNAT POLICIES =======================
-          {{ dnat_output.stdout }}
+          ======================= DNAT OUTPUT =======================
+          {{ dnat_result.stdout }}

@@ -1,37 +1,44 @@
 ---
-# IPsec Decap Statistics Collection
-# This playbook retrieves IPsec decapsulation statistics from Cisco ASA/Firepower devices.
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
-# Author: Architect:(Improved)
----
-- name: Collect IPsec decapsulation statistics
+# IPsec Decap Statistics Extraction
+# Auto-improved: 2026-03-15
+# Author: NetLearner Architect
+#
+- name: "ASA/Firepower: Extract IPsec Decapsulation Stats"
   hosts: asa_firepower
   gather_facts: false
+  # Documentation: This playbook retrieves real-time IPsec decapsulation counters.
+  # It ensures observability through explicit validation of the CLI output.
+  # Idempotency: 'show' commands are read-only and safe to execute repeatedly without state change.
 
   tasks:
-    - name: Execute show crypto ipsec stats command
-      # Using Fully Qualified Collection Name (FQCN) for the command module
-      # Read-only 'show' commands are naturally idempotent.
+    - name: "Execute show crypto ipsec stats"
+      # Best Practices: Use Fully Qualified Collection Name (FQCN) for network command execution
       ansible.netcommon.cli_command:
-        command: show crypto ipsec stats
-      register: ipsec_stats
-      # Error Handling: Ensure the task fails if the command is not recognized or execution fails
+        command: "show crypto ipsec stats"
+      # Observability: Capture output for verification and reporting
+      register: r_ipsec_stats
+      # Error Handling: Explicitly identify failure if the command is unrecognized or returns an error
       failed_when: 
-        - ipsec_stats.failed
-        - "'Invalid input' in ipsec_stats.stdout or 'ERROR' in ipsec_stats.stdout"
+        - r_ipsec_stats.failed or "Invalid input" in r_ipsec_stats.stdout
+      # Ensure command runs even in check_mode
+      check_mode: false
 
-    - name: Verify command output integrity
-      # Observability: Use assert to verify that the output is populated and valid
+    - name: "Verify IPsec statistics integrity"
+      # Observability: Use assert to ensure the command returned meaningful data before proceeding
       ansible.builtin.assert:
         that:
-          - ipsec_stats.stdout is defined
-          - ipsec_stats.stdout | length > 0
-        fail_msg: "Data retrieval failed: IPsec statistics output is empty."
-        success_msg: "Data retrieval successful: IPsec statistics captured."
+          - "r_ipsec_stats.stdout is defined"
+          - "r_ipsec_stats.stdout | length > 0"
+          - "'IPsec' in r_ipsec_stats.stdout"
+        fail_msg: "The IPsec statistics output is empty or invalid. Check crypto engine status."
+        success_msg: "IPsec statistics successfully retrieved and validated."
 
-    - name: Display IPsec decapsulation statistics
-      # Formatted output for better observability during playbook execution
+    - name: "Display formatted IPsec metrics"
       ansible.builtin.debug:
         msg: |
-          ======================= IPSEC DECAP STATISTICS =======================
-          {{ ipsec_stats.stdout }}
+          ======================= IPSEC DECAP REPORT =======================
+          DEVICE: {{ inventory_hostname }}
+          TIMESTAMP: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
+          ------------------------------------------------------------------
+          {{ r_ipsec_stats.stdout }}
+          ==================================================================

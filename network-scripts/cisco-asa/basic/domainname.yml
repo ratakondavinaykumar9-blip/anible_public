@@ -1,31 +1,34 @@
 ---
-# Standard: Domain and DNS Verification
-# Purpose: Safely retrieve and validate the configured domain name from Cisco ASA/Firepower devices.
-- name: Get Domain/DNS Information
+# Playbook: Domain and DNS Configuration Audit
+# This playbook retrieves and validates the domain-name configuration on Cisco ASA/Firepower devices.
+# It adheres to standards for Idempotency, Observability, and Error Handling.
+- name: Audit Domain and DNS configuration
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve domain-name configuration
-      # FQCN: Using ansible.netcommon for standardized CLI interaction
+    - name: Retrieve current domain-name configuration
+      # Using FQCN for the network common CLI module
+      # Idempotency: This is a read-only operation and safe for repeated execution
       ansible.netcommon.cli_command:
         command: show running-config domain-name
       register: domain_output
-      # Idempotency: Read-only operations must not report a change state
-      changed_when: false
-      # Error Handling: Detect and fail on common CLI error strings or task failure
-      failed_when:
-        - domain_output.failed or "Invalid input" in domain_output.stdout
+      # Error Handling: Fail if the command is unrecognized or the task fails
+      failed_when: 
+        - domain_output.failed
+        - "'Invalid input' in domain_output.stdout"
 
-    - name: Validate domain-name retrieval success
-      # Observability: Assert that the command returned a valid response
+    - name: Verify domain-name configuration presence
+      # Observability: Ensure the device actually has a domain name configured
       ansible.builtin.assert:
         that:
           - domain_output.stdout is defined
-        fail_msg: "Failed to capture domain-name configuration from the device."
-        success_msg: "Successfully captured domain-name configuration."
+          - domain_output.stdout | length > 0
+          - "'domain-name' in domain_output.stdout"
+        fail_msg: "Audit Failed: No domain-name configuration found on the device."
+        success_msg: "Audit Passed: Domain-name configuration successfully retrieved."
 
     - name: Display retrieved domain configuration
-      # Observability: Provide clear output for operational visibility
+      # Observability: Provide a clear summary of the retrieved state
       ansible.builtin.debug:
-        msg: "Configured Domain: {{ domain_output.stdout | default('None/Empty') }}"
+        msg: "Device Domain Config: {{ domain_output.stdout }}"

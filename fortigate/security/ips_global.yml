@@ -1,36 +1,36 @@
 ---
 # FortiGate IPS Global Configuration Retrieval
-# Improved by Architect:for Idempotency, Observability, and Error Handling.
+# This playbook retrieves the global IPS settings from FortiGate devices.
+# Standards: Idempotent (Read-only), Observable, Documented, Robust Error Handling, FQCN.
 
-- name: Get FortiGate IPS Global Configuration
+- name: FortiGate IPS Global
   hosts: fortigate
-  gather_facts: false  # Facts are not required for direct CLI command execution
+  gather_facts: false
 
   tasks:
-    - name: Retrieve IPS global configuration via CLI
-      # Using Fully Qualified Collection Name (FQCN) for best practices.
-      # Idempotency: This is a read-only 'get' command, making it safe to run multiple times.
+    - name: Retrieve IPS global settings via CLI
+      # Why: Extracting the operational state of IPS global configuration for audit/visibility.
+      # Using FQCN for cross-platform network command execution.
       ansible.netcommon.cli_command:
-        command: "get global firewall ipsglobal"
-      register: ips_global_res
-      # Error Handling: Ensure the task fails if the device returns common error strings
-      # even if the SSH session itself remains successful.
-      failed_when:
-        - ips_global_res.failed or "Unknown command" in ips_global_res.stdout
-        - "'error' in ips_global_res.stdout | lower"
+        command: get global firewall ipsglobal
+      register: ips_global_output
+      # Error Handling: Fail if the command returns an empty string or a known error pattern.
+      failed_when: 
+        - ips_global_output.stdout == ""
+        - "'error' in ips_global_output.stdout | lower"
 
-    - name: Validate configuration data
-      # Observability: Assert that we received a non-empty response to verify successful retrieval.
+    - name: Verify IPS global settings retrieval
+      # Observability: Ensure the output contains data to prevent downstream failures.
       ansible.builtin.assert:
         that:
-          - ips_global_res.stdout is defined
-          - ips_global_res.stdout | length > 0
-        fail_msg: "IPS Global configuration could not be retrieved or the output is empty."
-        success_msg: "Successfully captured IPS Global configuration from the device."
+          - ips_global_output.stdout is defined
+          - ips_global_output.stdout | length > 0
+        fail_msg: "Failed to retrieve valid IPS global configuration from {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved IPS global configuration."
 
-    - name: Display IPS Global configuration
-      # Observability: Output the results clearly for the operator.
+    - name: Display IPS global configuration
+      # Documentation: Formats the output for clear visibility during execution.
       ansible.builtin.debug:
         msg: |
-          ======================= IPS GLOBAL =======================
-          {{ ips_global_res.stdout }}
+          ======================= IPS GLOBAL ({{ inventory_hostname }}) =======================
+          {{ ips_global_output.stdout }}

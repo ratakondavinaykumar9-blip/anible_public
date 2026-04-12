@@ -1,38 +1,36 @@
 ---
-# Architect: ASA Inspection Statistics Analysis
-# Purpose: Retrieves and analyzes deep packet inspection (DPI) statistics from Cisco ASA.
-# This playbook is idempotent as it performs read-only "show" operations.
+# Inspection Stats Improvement
+# Improved by NetLearner Architect
+# This playbook retrieves service-policy inspection statistics from Cisco ASA/Firepower devices.
+# It adheres to idempotency, observability, and FQCN standards.
 
 - name: Get Inspection Stats
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Get inspect stats from Cisco ASA
-      # Best Practice: Using Fully Qualified Collection Name (FQCN) for ASA-specific commands
-      cisco.asa.asa_command:
-        commands:
-          - show service-policy | include inspect
+    - name: "Retrieve service-policy inspection statistics"
+      # Using FQCN for network CLI compatibility. This is a read-only operation (idempotent).
+      ansible.netcommon.cli_command:
+        command: "show service-policy | include inspect"
       register: inspect_output
-      # Error Handling: Capture execution failures while identifying empty returns
+      # Ensure the task fails explicitly if the command execution encounters an error
       failed_when: 
-        - inspect_output.failed is defined and inspect_output.failed
+        - inspect_output.failed | default(false)
+        - "'Invalid input' in inspect_output.stdout"
 
-    - name: Validate command execution and data integrity
-      # Observability: Assert that the stdout list contains expected data structures
+    - name: "Verify inspection data was retrieved"
+      # Observability: Assert that the output exists to validate the device state
       ansible.builtin.assert:
         that:
           - "inspect_output.stdout is defined"
           - "inspect_output.stdout | length > 0"
-        fail_msg: "Data retrieval failed for {{ inventory_hostname }}. Please check connectivity and credentials."
+        fail_msg: "No inspection statistics were returned. Verify that service-policies are active on the target."
+        success_msg: "Inspection statistics successfully captured."
 
-    - name: Display Inspection Statistics
-      # Observability: Structured and formatted output for operational monitoring
+    - name: "Display formatted inspection statistics"
+      # Provides clear visibility into the registered output
       ansible.builtin.debug:
         msg: |
           ======================= INSPECTION STATS =======================
-          DEVICE: {{ inventory_hostname }}
-          TIMESTAMP: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
-          ----------------------------------------------------------------
-          {{ inspect_output.stdout[0] if inspect_output.stdout[0] | trim != '' else 'No active service-policy inspections found.' }}
-          ================================================================
+          {{ inspect_output.stdout }}

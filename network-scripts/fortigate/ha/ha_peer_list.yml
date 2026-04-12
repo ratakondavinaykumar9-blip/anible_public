@@ -1,36 +1,37 @@
 ---
-# Playbook: FortiGate HA Peer List
-# Purpose: Retrieves and validates High Availability (HA) peer status from FortiGate devices.
-# Standards: Automation Framework (Idempotency, Observability, FQCN).
+# FortiGate HA Peer List Retrieval
+# This playbook adheres to NetLearner standards for idempotency, observability, and robust error handling.
 - name: Get HA Peer List
   hosts: fortigate
-  gather_facts: false # Performance: Fact gathering is not required for CLI-based status checks.
+  gather_facts: false
 
   tasks:
-    - name: Execute CLI command to retrieve HA peer information
-      # FQCN used to ensure the correct module is invoked across different environments.
+    - name: Execute HA peer status command
+      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction
       ansible.netcommon.cli_command:
         command: get system ha peer
-      register: ha_peer_result
-      # Idempotency: 'get' commands are read-only and inherently safe for repeated execution.
-      # Error Handling: Explicitly catch device-specific error strings that may not trigger a CLI failure.
+      register: ha_peer_output
+      # Idempotency: Read-only state retrieval should never report 'changed: true'
+      changed_when: false
+      # Error Handling: Catch non-zero exit codes and specific FortiOS error strings
       failed_when: >
-        ha_peer_result.failed or 
-        "Command fail" in ha_peer_result.stdout or 
-        "Unknown action" in ha_peer_result.stdout
+        ha_peer_output.rc != 0 or 
+        "Unknown action" in ha_peer_output.stdout or 
+        "Command fail" in ha_peer_output.stdout
 
-    - name: Validate integrity of captured HA data
-      # Observability: Assert that the command returned valid data to prevent silent failures.
+    - name: Validate HA peer data integrity
+      # Observability: Ensure that data was actually returned before proceeding
       ansible.builtin.assert:
         that:
-          - ha_peer_result.stdout is defined
-          - ha_peer_result.stdout | length > 0
-        fail_msg: "Data integrity check failed: HA peer output is empty or undefined."
-        success_msg: "HA peer data successfully captured and validated."
+          - ha_peer_output.stdout is defined
+          - ha_peer_output.stdout | length > 0
+        fail_msg: "HA peer information is empty or could not be retrieved. Verify HA configuration."
+        success_msg: "HA peer information successfully captured."
 
-    - name: Display formatted HA Peer status
-      # Documentation: Providing a human-readable output for auditing and troubleshooting.
+    - name: Display HA Peer Status
+      # Observability: Provide formatted output for operator visibility
       ansible.builtin.debug:
         msg: |
-          ======================= HA PEER STATUS =======================
-          {{ ha_peer_result.stdout }}
+          ======================= HA PEERS =======================
+          {{ ha_peer_output.stdout }}
+          ========================================================

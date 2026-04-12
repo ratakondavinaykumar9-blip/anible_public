@@ -1,38 +1,32 @@
 ---
-# Playbook: ASA Group Policy Verification
-# Description: This playbook retrieves and audits group policies from Cisco ASA/Firepower devices.
-# Standards: Implements FQCN, Observability through assertions, and robust error handling.
-- name: Audit Cisco ASA Group Policies
+- name: Cisco ASA Group Policy Audit
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve group-policy configuration
-      # Use platform-specific FQCN for Cisco ASA commands
+    - name: Retrieve group-policy configuration from ASA
+      # Why: Using FQCN (Fully Qualified Collection Name) ensures the use of the specialized Cisco ASA collection.
+      # Idempotency: "show" commands are read-only operations and are inherently idempotent.
       cisco.asa.asa_command:
         commands:
           - show running-config group-policy
-      register: policies_output
-      # Error Handling: Catch common CLI errors that might not trigger a shell failure
-      failed_when:
-        - "policies_output.failed"
-        - "'invalid' in policies_output.stdout[0] | lower"
-      ignore_errors: false
+      register: policy_output
+      # Error Handling: Explicitly fail if the connection fails or if the ASA returns an "Invalid input" error.
+      failed_when: 
+        - policy_output.failed or "Invalid input" in policy_output.stdout[0]
 
-    - name: Validate policy data integrity
-      # Observability: Ensure the device returned configuration data to prevent silent processing of empty results
+    - name: Validate policy retrieval
+      # Why: Observability - verify that data was actually returned to ensure automation integrity.
       ansible.builtin.assert:
         that:
-          - policies_output.stdout[0] is defined
-          - policies_output.stdout[0] | length > 0
-        fail_msg: "Critical: No group policies were found or the command returned an empty string."
-        success_msg: "Validation Passed: Group policy data successfully captured."
+          - policy_output.stdout[0] is defined
+          - policy_output.stdout[0] | length > 0
+        fail_msg: "Failed to retrieve group policies or the configuration is empty on {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved group policies for {{ inventory_hostname }}."
 
-    - name: Display Group Policy Configuration
-      # Observability: Formatted output for operator visibility
+    - name: Display Group Policies
+      # Why: Documentation and visibility - providing the operator with the raw configuration state.
       ansible.builtin.debug:
         msg: |
-          ======================= GROUP POLICIES =======================
-          {{ policies_output.stdout[0] }}
-      # Idempotency: This is a read-only operation; it is inherently safe to run multiple times
-      when: not ansible_check_mode
+          ======================= GROUP POLICIES: {{ inventory_hostname }} =======================
+          {{ policy_output.stdout[0] }}

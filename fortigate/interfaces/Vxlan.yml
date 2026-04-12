@@ -1,35 +1,35 @@
 ---
-# FortiGate VXLAN Audit Playbook
-# Improved by Architect:# Standards: Idempotency (Read-only), Observability (Register/Assert), FQCN, Error Handling.
-
-- name: Audit FortiGate VXLAN Configuration
+# FortiGate VXLAN Operational Status Retrieval
+# Standards: Idempotency (Read-only), Observability (Register/Assert), FQCN
+- name: Get VXLAN Status
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve VXLAN system state via CLI
-      # Using FQCN for best practices. This task is idempotent as it is a read-only operation.
+    - name: Retrieve VXLAN information from FortiGate
+      # FQCN: Utilizing the network common CLI module for standard command execution
+      # Idempotency: This is a read-only operation and safe to run repeatedly
       ansible.netcommon.cli_command:
-        command: get system vxlan
-      register: vxlan_result
-      # Error Handling: Fail if the command is unrecognized or execution fails
+        command: "get system vxlan"
+      register: vxlan_raw
+      # Error Handling: Ensure the command was accepted and executed by FortiOS
       failed_when: 
-        - vxlan_result.rc != 0 
-        - "'Unknown action' in vxlan_result.stderr"
+        - vxlan_raw.failed | default(false)
+        - "'Command fail' in vxlan_raw.stdout"
+        - "'Unknown action' in vxlan_raw.stdout"
 
-    - name: Verify VXLAN data retrieval success
-      # Observability: Assert that stdout is not empty and the register variable exists
+    - name: Verify VXLAN output consistency
+      # Observability: Confirm that the device returned non-empty data for validation
       ansible.builtin.assert:
         that:
-          - vxlan_result.stdout is defined
-          - vxlan_result.stdout | length > 0
-        fail_msg: "VXLAN configuration is either empty or could not be retrieved from {{ inventory_hostname }}."
-        success_msg: "VXLAN configuration successfully captured from {{ inventory_hostname }}."
+          - vxlan_raw.stdout is defined
+          - vxlan_raw.stdout | length > 0
+        fail_msg: "The VXLAN status query returned no data. Check if VXLAN is enabled or configured."
         quiet: true
 
-    - name: Display VXLAN operational status
-      # Observability: Provide clear, formatted output of the registered command results
+    - name: Display VXLAN Operational State
+      # Documentation: Provides a clean, formatted output of the operational status
       ansible.builtin.debug:
         msg: |
           ======================= VXLAN STATUS: {{ inventory_hostname }} =======================
-          {{ vxlan_result.stdout }}
+          {{ vxlan_raw.stdout }}

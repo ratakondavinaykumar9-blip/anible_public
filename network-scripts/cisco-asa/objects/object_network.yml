@@ -1,32 +1,35 @@
 ---
-# This playbook retrieves network object details from Cisco ASA/Firepower devices.
-# Standard: Idempotency - This operation is read-only and inherently safe to execute multiple times.
-- name: Network Objects Detail Retrieval
+# Playbook: Network Objects Detail
+# Purpose: Retrieves and validates the current network objects configuration on Cisco ASA/Firepower devices.
+# Standards: Idempotency (read-only), Observability (assert), FQCN usage, and structured error handling.
+- name: Network Objects Detail
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve network objects from the device CLI
-      # Standard: Best Practices - Using Fully Qualified Collection Name (FQCN).
+    - name: Retrieve network objects configuration
+      # Using Fully Qualified Collection Name (FQCN) for the network command module
       ansible.netcommon.cli_command:
         command: show object network
-      register: network_objects_result
-      # Standard: Error Handling - Define failure if the device returns common CLI error strings.
-      failed_when:
-        - network_objects_result.failed or "Invalid input" in network_objects_result.stdout
+      register: obj_result
+      # Idempotency: This is a read-only operation and should never report a 'changed' status
+      changed_when: false
+      # Error Handling: Fail if the command returns specific error patterns or a non-zero return code
+      failed_when: 
+        - obj_result.stdout is not defined
+        - "'Invalid' in obj_result.stdout or 'Error' in obj_result.stdout"
 
-    - name: Validate that network objects were successfully retrieved
-      # Standard: Observability - Use 'assert' to verify the command returned a non-empty response.
+    - name: Verify network object retrieval success
+      # Observability: Use assertions to verify that the command returned data
       ansible.builtin.assert:
         that:
-          - network_objects_result.stdout is defined
-          - network_objects_result.stdout | length > 0
-        fail_msg: "The 'show object network' command returned no data or failed."
-        success_msg: "Successfully retrieved network objects from {{ inventory_hostname }}."
+          - "obj_result.stdout | length > 0"
+        fail_msg: "The 'show object network' command returned no data. Check device connectivity or configuration."
+        success_msg: "Successfully retrieved network object data from {{ inventory_hostname }}."
 
-    - name: Display formatted network objects
-      # Standard: Observability - Output the registered result for visibility and logging.
+    - name: Display network objects summary
+      # Provides structured visibility into the command output for the operator
       ansible.builtin.debug:
         msg: |
-          ======================= NETWORK OBJECTS =======================
-          {{ network_objects_result.stdout }}
+          ======================= NETWORK OBJECTS: {{ inventory_hostname }} =======================
+          {{ obj_result.stdout }}

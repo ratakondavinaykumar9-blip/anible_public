@@ -1,41 +1,41 @@
 ---
 # FortiGate Address Objects Retrieval
-# Improved by Architect:# Purpose: Safely retrieve and verify firewall address objects using idempotent read operations.
+# Author: NetLearner Architect (Improved)
+#
+# This playbook retrieves firewall address objects from FortiGate devices.
+# It adheres to idempotency as it performs read-only operations.
+# Observability is ensured through registration and explicit assertions.
 
-- name: Get FortiGate Address Objects
+- name: Get Address Objects
   hosts: fortigate
   gather_facts: false
-  # Best Practice: Explicitly define connection type for network devices
-  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Fetch firewall address configuration
-      # Best Practice: Use Fully Qualified Collection Name (FQCN)
-      # Idempotency: 'get' is a read-only operation and safe to run multiple times
+    - name: Retrieve firewall address objects via CLI
+      # Use Fully Qualified Collection Name (FQCN) for the cli_command module.
+      # This task is idempotent as it does not modify the device state.
       ansible.netcommon.cli_command:
-        command: get firewall address
-      register: addr_output
-      # Error Handling: Prevent silent failures if the CLI returns an error message
-      failed_when: 
-        - addr_output.failed
-        - "'command parse error' in addr_output.stdout | lower"
-        - "'unknown command' in addr_output.stdout | lower"
+        command: "get firewall address"
+      register: addr_result
+      # Error Handling: Fail if the return code is non-zero or if the output indicates an error.
+      failed_when:
+        - addr_result.rc != 0
+        - "'error' in addr_result.stdout | lower"
 
-    - name: Verify successful data retrieval
-      # Observability: Ensure the command returned valid data before proceeding
+    - name: Validate address object data retrieval
+      # Observability: Assert that the command returned data to prevent silent failures.
       ansible.builtin.assert:
         that:
-          - addr_output.stdout is defined
-          - addr_output.stdout | length > 0
-        fail_msg: "Data retrieval failed: Output is empty or undefined."
-        success_msg: "Address objects successfully retrieved from {{ inventory_hostname }}."
+          - addr_result.stdout is defined
+          - addr_result.stdout | length > 0
+        fail_msg: "The command succeeded but returned no address object data."
+        success_msg: "Address object data successfully retrieved and validated."
 
-    - name: Display Address Objects
-      # Documentation: Format output for better human readability during execution
+    - name: Display firewall address objects
+      # Documentation: Providing a formatted view of the retrieved objects for the operator.
       ansible.builtin.debug:
         msg: |
           ======================= ADDRESS OBJECTS REPORT =======================
-          Host: {{ inventory_hostname }}
-          Status: Success
-          ======================================================================
-          {{ addr_output.stdout }}
+          DEVICE: {{ inventory_hostname }}
+          ----------------------------------------------------------------------
+          {{ addr_result.stdout }}

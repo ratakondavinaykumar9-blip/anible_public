@@ -1,33 +1,43 @@
 ---
-# Playbook: Get Cisco ASA/Firepower Failover Configuration
-# Purpose: Retrieves and validates High Availability (HA) failover configuration.
-# Standards: Idempotency is inherent as this is a read-only retrieval of device state.
+# Playbook: Retrieve and Validate Cisco ASA/Firepower Failover Configuration
+# Standards: Idempotency (Read-only), Observability (Asserts/Register), Best Practices (FQCN)
 - name: Get Failover Configuration
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve failover configuration from device
-      # Why: Using platform-specific FQCN (cisco.asa) for robust integration with Cisco ASA/Firepower.
-      cisco.asa.asa_command:
-        commands:
-          - show running-config failover
+    - name: Retrieve failover running-config
+      # Purpose: Fetch the current failover state. Read operations are inherently idempotent.
+      # Using FQCN (Fully Qualified Collection Names) for reliable collection mapping.
+      ansible.netcommon.cli_command:
+        command: show running-config failover
       register: failover_output
-      # Error Handling: Ensures the playbook identifies connection or command failures.
-      failed_when: failover_output.failed | default(false)
+      # Error Handling: Catch common CLI errors or invalid command responses.
+      failed_when: 
+        - failover_output.failed or "Invalid" in failover_output.stdout
 
-    - name: Verify data observability
-      # Why: Asserting that the command returned a valid response structure to confirm successful execution.
+    - name: Verify failover configuration retrieval
+      # Observability: Ensure the command returned content to avoid false positives in automation.
       ansible.builtin.assert:
         that:
-          - "failover_output.stdout is defined"
-          - "failover_output.stdout | length > 0"
-        fail_msg: "Data retrieval failed for {{ inventory_hostname }}."
-        quiet: true
+          - failover_output.stdout is defined
+          - failover_output.stdout | length > 0
+        fail_msg: "The failover configuration could not be retrieved or is empty."
+        success_msg: "Successfully captured failover configuration."
 
-    - name: Display Failover Configuration
-      # Why: Provides a formatted output for human readability and operational verification.
+    - name: Log failover configuration details
+      # Documentation: Provides human-readable visibility into the device state for audit logs.
       ansible.builtin.debug:
         msg: |
           ======================= FAILOVER CONFIG =======================
-          {{ failover_output.stdout[0] if failover_output.stdout[0] != '' else 'Failover is not configured on this device.' }}
+          {{ failover_output.stdout }}
+
+    - name: Determine failover operational status
+      # Observability: Register a boolean fact to allow conditional logic in larger workflows.
+      ansible.builtin.set_fact:
+        is_failover_configured: "{{ 'failover' in failover_output.stdout }}"
+
+    - name: Final status report
+      # Provides a concise summary of the task outcome.
+      ansible.builtin.debug:
+        msg: "Failover configuration check complete. Status: {{ 'Configured' if is_failover_configured else 'Unconfigured' }}"

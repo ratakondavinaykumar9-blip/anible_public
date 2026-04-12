@@ -1,38 +1,44 @@
 ---
-# FortiGate Log Viewer
-# This playbook retrieves and displays operational logs from FortiGate devices.
-# Standards: Idempotency, Observability, Documentation, Error Handling, and FQCN usage.
-- name: View FortiGate Logs
+# FortiGate Log Viewer - Production Grade
+# This playbook retrieves and displays logs from a FortiGate firewall.
+# It adheres to NetLearner standards for idempotency, observability, and error handling.
+- name: FortiGate Log Retrieval and Analysis
   hosts: fortigate
-  gather_facts: false # Facts are not required for log viewing; disabling improves execution speed.
+  gather_facts: false
   vars:
-    log_type: "traffic" # Default log category
-    log_count: 50       # Number of entries to retrieve
+    # Default log type to retrieve (e.g., traffic, event, virus, webfilter).
+    log_type: "traffic"
+    # Number of log entries to display.
+    log_count: 50
 
   tasks:
-    - name: Retrieve filtered logs from the device
-      # Using FQCN (ansible.netcommon.cli_command).
-      # Read-only operations are inherently idempotent as they do not change device state.
+    - name: Retrieve logs from FortiGate CLI
+      # Using Fully Qualified Collection Name (FQCN) for network command execution.
       ansible.netcommon.cli_command:
-        command: "execute log filter category {{ log_type }} && execute log display"
+        command: "execute log filter category {{ log_type }} && execute log display | head {{ log_count }}"
       register: log_output
-      # Error Handling: Fail if the CLI returns a failure message even if the return code is 0.
-      failed_when: 
-        - log_output.failed or "Command fail" in log_output.stdout
+      # Idempotency: Read-only operations should not report 'changed' status.
+      changed_when: false
+      # Error Handling: Fail if the command returns known FortiOS error strings.
+      failed_when:
+        - log_output.failed or "Command fail" in log_output.stdout or "Invalid" in log_output.stdout
 
-    - name: Validate log retrieval
-      # Observability: Assert that we actually received data from the device.
+    - name: Validate log retrieval results
+      # Observability: Assert that we received a valid response from the device.
       ansible.builtin.assert:
         that:
-          - log_output.stdout is defined
           - log_output.stdout | length > 0
-        fail_msg: "Log retrieval failed: No data returned for category '{{ log_type }}'."
-        success_msg: "Successfully retrieved logs for category '{{ log_type }}'."
+        fail_msg: "Log retrieval failed or returned no data for category: {{ log_type }}"
+        success_msg: "Successfully retrieved logs for category: {{ log_type }}"
 
-    - name: Display formatted logs
-      # Debug output for observability during manual playbook execution.
+    - name: Display formatted log output
+      # Providing a clear, documented output for the operator.
       ansible.builtin.debug:
         msg: |
-          ======================= {{ log_type | upper }} LOGS (Count: {{ log_count }}) =======================
+          ==============================================================================
+          FORTIGATE LOG SUMMARY
+          Category: {{ log_type }}
+          Limit:    {{ log_count }} entries
+          ==============================================================================
           {{ log_output.stdout }}
-          =================================================================================
+          ==============================================================================

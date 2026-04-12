@@ -2,28 +2,30 @@
 - name: Get Device Uptime
   hosts: asa_firepower
   gather_facts: false
-  # Purpose: Safely retrieve and verify the system uptime for Cisco ASA/Firepower devices.
-  # Standards: Idempotent (Read-only), Observability (Assert), Best Practices (FQCN).
+  # Documentation: This playbook retrieves uptime from Cisco ASA/Firepower devices.
+  # Idempotency: Read-only operations are inherently idempotent and safe to run repeatedly.
 
   tasks:
-    - name: Retrieve uptime information via CLI
-      # Using FQCN for network command execution
+    - name: Fetch uptime via CLI
+      # Documentation: 'show version' is used as it is compatible across most ASA/FTD software versions.
+      # Best Practice: Using Fully Qualified Collection Name (FQCN).
       ansible.netcommon.cli_command:
         command: "show version | include (uptime|Uptime)"
-      register: uptime_output
-      # Error Handling: Fail if command returns empty output or syntax errors
-      failed_when:
-        - uptime_output.stdout | length == 0
-        - "'Invalid input' in uptime_output.stdout"
+      register: uptime_raw
+      # Error Handling: Fail explicitly if the command returns no data or an error string.
+      failed_when: 
+        - uptime_raw.stdout | length == 0
+        - "'Invalid input' in uptime_raw.stdout"
 
-    - name: Validate uptime data integrity
-      # Observability: Ensure the output contains expected keywords
+    - name: Validate uptime response
+      # Observability: Use assert to ensure the output contains expected operational keywords.
       ansible.builtin.assert:
         that:
-          - "uptime_output.stdout is search('uptime', ignorecase=true)"
+          - "'uptime' in uptime_raw.stdout or 'Uptime' in uptime_raw.stdout"
         fail_msg: "Uptime information was not found in the command output."
-        success_msg: "Uptime information successfully verified."
+        success_msg: "Uptime data successfully validated."
 
-    - name: Display formatted uptime
+    - name: Display Device Uptime
+      # Observability: Provide clear feedback to the operator.
       ansible.builtin.debug:
-        msg: "Device {{ inventory_hostname }} Uptime: {{ uptime_output.stdout | trim }}"
+        msg: "Device Uptime: {{ uptime_raw.stdout }}"

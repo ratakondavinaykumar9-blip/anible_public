@@ -1,34 +1,36 @@
 ---
-# FortiGate Traffic Monitoring Playbook
-# Standards: Idempotency (read-only), Observability (asserts), Documentation (comments), 
-# Error Handling (failed_when), and Best Practices (FQCN).
-
-- name: Monitor FortiGate Traffic
+# FortiGate Traffic Monitoring
+# This playbook retrieves and validates interface traffic statistics from FortiGate devices.
+# Standards Applied: Idempotency (Read-only), Observability (Assert), Error Handling (Failed_when), FQCN.
+- name: Monitor Traffic
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Get system interface traffic statistics
-      # FQCN: Using ansible.netcommon.cli_command for standardized network device interaction
+    - name: Get interface traffic statistics from FortiGate
+      # Using FQCN for portability. This command fetches real-time interface throughput.
       ansible.netcommon.cli_command:
         command: get system interface traffic
-      register: traffic_output
-      # Idempotency: Mark as changed: false as this is a diagnostic, read-only operation
+      register: traffic_result
+      # Idempotency: Marking as changed: false because this is a non-state-altering read operation.
       changed_when: false
-      # Error Handling: Ensure the command returns a success code and non-empty output
+      # Error Handling: Ensure the task fails if the command returns no data.
       failed_when: 
-        - traffic_output.rc is defined and traffic_output.rc != 0
-        - traffic_output.stdout == ""
+        - traffic_result.stdout is not defined or traffic_result.stdout | length == 0
 
-    - name: Verify traffic data integrity
-      # Observability: Assert that the output contains expected keywords to confirm valid data
+    - name: Validate traffic data integrity
+      # Observability: Assert that the output contains the expected 'Interface' header to ensure valid data.
       ansible.builtin.assert:
         that:
-          - "traffic_output.stdout is defined"
-          - "'interface' in traffic_output.stdout or 'traffic' in traffic_output.stdout"
-        fail_msg: "Traffic statistics could not be validated or the output format is unrecognized."
-        quiet: true
+          - "'Interface' in traffic_result.stdout"
+        fail_msg: "The traffic monitoring command returned invalid or unrecognized output."
+        success_msg: "Traffic statistics successfully captured and verified."
 
-    - name: Display the traffic monitoring report
-      # Observability: Provide a clear, formatted view of the real-time system state
-      ansible.builtin.
+    - name: Display traffic monitoring report
+      # Documentation: Presenting the captured data in a structured format for administrative review.
+      ansible.builtin.debug:
+        msg: |
+          ======================= TRAFFIC MONITORING REPORT =======================
+          Target Host: {{ inventory_hostname }}
+          -------------------------------------------------------------------------
+          {{ traffic_result.stdout }}

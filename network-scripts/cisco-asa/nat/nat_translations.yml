@@ -1,55 +1,52 @@
 ---
-- name: Get NAT Translations from Cisco ASA
+# Description: Retrieve and display active NAT translations (xlates) from Cisco ASA/Firepower devices.
+# This playbook is idempotent as it performs read-only operations to provide operational visibility.
+- name: Get NAT Translations
   hosts: asa_firepower
-  gather_facts: false
-  # Purpose: Safely retrieve, verify, and display NAT translations (xlate) for operational visibility.
-  # This playbook ensures idempotency as it performs read-only operations.
+  gather_facts: false # Fact collection is disabled to optimize performance as facts are not required for these tasks.
 
   tasks:
-    - name: Retrieve summary of active NAT translations (xlate)
-      # Standard: Best Practices - Using Fully Qualified Collection Name (FQCN)
-      # Standard: Idempotency - Read-only commands are safe to run multiple times without state change.
+    - name: Retrieve summary NAT translation table
+      # Use FQCN for the Cisco ASA collection to ensure robust and standardized command execution.
       cisco.asa.asa_command:
         commands:
           - show xlate
-      # Standard: Observability - Registering output for verification and display
-      register: xlate_summary
-      # Standard: Error Handling - Define failure based on CLI error strings to catch logical failures
-      failed_when: >
-        xlate_summary.failed or
-        "Invalid input" in xlate_summary.stdout[0] or
-        "ERROR" in xlate_summary.stdout[0]
+      register: xlate_output
+      # Explicitly catch failures to ensure the playbook stops if the device is unreachable or the command fails.
+      failed_when: xlate_output.failed | default(false)
 
-    - name: Verify NAT translation summary data integrity
-      # Standard: Observability - Use assert to ensure the command returned actionable data
+    - name: Validate summary NAT output
+      # Observability: Assert that the command returned data to verify successful retrieval from the device.
       ansible.builtin.assert:
         that:
-          - xlate_summary.stdout[0] | length > 0
-        fail_msg: "NAT summary retrieval succeeded but returned no data."
-        success_msg: "NAT summary successfully retrieved."
+          - xlate_output.stdout is defined
+          - xlate_output.stdout[0] | length > 0
+        fail_msg: "The 'show xlate' command failed or returned empty output on {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved summary NAT translation table."
 
     - name: Retrieve detailed NAT translation information
+      # Detailed translations provide source/destination interface and port mapping for deep-dive troubleshooting.
       cisco.asa.asa_command:
         commands:
           - show xlate detail
-      register: xlate_detail
-      failed_when: >
-        xlate_detail.failed or
-        "Invalid input" in xlate_detail.stdout[0] or
-        "ERROR" in xlate_detail.stdout[0]
+      register: xlate_detail_output
+      failed_when: xlate_detail_output.failed | default(false)
 
-    - name: Verify detailed NAT translation data integrity
+    - name: Validate detailed NAT output
+      # Observability: Verify detailed output was captured before attempting to display it to the user.
       ansible.builtin.assert:
         that:
-          - xlate_detail.stdout[0] | length > 0
-        fail_msg: "Detailed NAT info retrieval succeeded but returned no data."
-        success_msg: "Detailed NAT info successfully retrieved."
+          - xlate_detail_output.stdout is defined
+          - xlate_detail_output.stdout[0] | length > 0
+        fail_msg: "The 'show xlate detail' command failed or returned empty output on {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved detailed NAT translation information."
 
-    - name: Display NAT Translation Results
+    - name: Display Active NAT Translations
+      # Provide a clear, formatted output for human readability during troubleshooting sessions.
       ansible.builtin.debug:
         msg: |
-          ======================= NAT TRANSLATIONS SUMMARY =======================
-          {{ xlate_summary.stdout[0] }}
+          ======================= NAT TRANSLATIONS (SUMMARY) =======================
+          {{ xlate_output.stdout[0] }}
 
-          ======================= NAT TRANSLATIONS DETAIL =======================
-          {{ xlate_detail.stdout[0] }}
+          ======================= NAT TRANSLATIONS (DETAILED) ======================
+          {{ xlate_detail_output.stdout[0] }}

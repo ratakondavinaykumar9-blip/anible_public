@@ -1,36 +1,40 @@
 ---
-# FortiGate Interface Traffic Monitoring
-# This playbook retrieves real-time interface traffic statistics from FortiGate devices.
-# Improved for Idempotency, Observability, and Error Handling.
-
+# NetLearner Architect Improved Playbook
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Purpose: Safely retrieve and validate real-time interface traffic from FortiGate devices.
+#
 - name: Get FortiGate Interface Traffic
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve traffic statistics from system interfaces
-      # Idempotency: This is a read-only command and is inherently safe to run multiple times.
-      # FQCN: Using the ansible.netcommon.cli_command module for raw CLI output.
+    - name: Retrieve interface traffic statistics via CLI
+      # Why: This diagnostic command provides immediate RX/TX visibility across all interfaces.
+      # Using ansible.netcommon.cli_command for raw diagnostic output retrieval.
       ansible.netcommon.cli_command:
-        command: "get system interface traffic"
-      register: traffic_info
-      # Error Handling: Ensure the command execution was successful and returned non-empty output.
+        command: get system interface traffic
+      register: traffic_capture
+      # Idempotency: Read-only 'get' commands must not report a 'changed' status.
+      changed_when: false
+      # Error Handling: Ensure the task fails if the command is not supported or returns an error.
       failed_when:
-        - traffic_info.failed or traffic_info.stdout | length == 0
+        - traffic_capture.rc | default(0) != 0
+        - "'Command fail' in traffic_capture.stdout"
 
-    - name: Assert traffic data validity
-      # Observability: Verifying that the output contains expected keywords to ensure data integrity.
+    - name: Validate captured traffic data
+      # Observability: Confirm the output contains data before proceeding to display.
+      # This prevents successful task reporting when the device returns empty results.
       ansible.builtin.assert:
         that:
-          - "'interface' in traffic_info.stdout"
-        fail_msg: "The retrieved output does not contain valid interface traffic statistics."
-        success_msg: "Interface traffic data successfully validated."
+          - "traffic_capture.stdout is defined"
+          - "traffic_capture.stdout | length > 0"
+        fail_msg: "Data Integrity Error: Interface traffic output is empty or undefined."
+        success_msg: "Data Integrity Verified: Interface traffic stats successfully captured."
 
     - name: Display Interface Traffic Report
-      # Observability: Providing a formatted view of the retrieved metrics for logs and operators.
+      # Documentation: Provides a formatted, human-readable view of the captured statistics.
       ansible.builtin.debug:
         msg: |
           ======================= INTERFACE TRAFFIC =======================
-          Device: {{ inventory_hostname }}
-          -----------------------------------------------------------------
-          {{ traffic_info.stdout }}
+          {{ traffic_capture.stdout }}
+          =================================================================

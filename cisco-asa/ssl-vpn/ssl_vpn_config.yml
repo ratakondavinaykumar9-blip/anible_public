@@ -1,54 +1,65 @@
 ---
-# SSL VPN Configuration Audit
-# This playbook retrieves SSL VPN and Tunnel-Group configurations from Cisco ASA/Firepower devices.
-# Improved for:
-# - Idempotency: Read-only operations are inherently idempotent and safe for repeated execution.
-# - Observability: Utilizing 'register' and 'assert' to verify task success and connectivity.
-# - Error Handling: Using 'ignore_errors' to handle devices where specific features may not be configured.
-# - Best Practices: Using Fully Qualified Collection Names (FQCN) throughout.
-
+# SSL VPN Configuration Retrieval Playbook
+# Auto-improved: 2026-03-15
+# Author: Arjun (OpenClaw) / NetLearner Architect
+#
+# Standards:
+# 1. Idempotency: Use changed_when: false for read-only operations.
+# 2. Observability: Registered variables and assertions to verify data retrieval.
+# 3. Documentation: Detailed comments explaining task purpose and command selection.
+# 4. Error Handling: failed_when used to catch device-specific errors like 'Invalid input'.
+# 5. Best Practices: Use of Fully Qualified Collection Names (FQCN).
+---
 - name: Get SSL VPN Configuration
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
     - name: Retrieve WebVPN running configuration
-      # FQCN: Using cisco.asa collection for platform-specific reliability
-      cisco.asa.asa_command:
-        commands:
-          - show run webvpn
+      # Using FQCN for network command execution
+      # Documentation: 'show run webvpn' captures global SSL VPN settings and portal configurations
+      ansible.netcommon.cli_command:
+        command: show run webvpn
       register: webvpn_output
-      # Error Handling: ignore_errors allows the play to continue if webvpn is not yet initialized
-      ignore_errors: true
+      # Error Handling: Identify failure if the command is unrecognized or connection fails
+      failed_when:
+        - webvpn_output.failed or "Invalid input" in webvpn_output.stdout
+      # Idempotency: Read-only 'show' commands must not trigger a 'changed' status
+      changed_when: false
 
-    - name: Validate WebVPN command execution
-      # Observability: Ensure the command was sent successfully to the device
+    - name: Validate WebVPN configuration retrieval
+      # Observability: Ensure the output is defined to prevent downstream failures
       ansible.builtin.assert:
         that:
-          - webvpn_output is not failed
-        fail_msg: "Failed to retrieve WebVPN configuration from {{ inventory_hostname }}. Check connectivity/permissions."
-        quiet: true
+          - webvpn_output.stdout is defined
+        fail_msg: "Failed to retrieve WebVPN configuration from {{ inventory_hostname }}"
+        success_msg: "WebVPN configuration successfully captured."
 
-    - name: Retrieve Tunnel-Group running configuration
-      cisco.asa.asa_command:
-        commands:
-          - show run tunnel-group
+    - name: Retrieve Tunnel-Group configuration
+      # Documentation: Tunnel-groups define the connection profiles and AAA attributes for VPN sessions
+      ansible.netcommon.cli_command:
+        command: show run tunnel-group
       register: tunnel_group_output
-      ignore_errors: true
+      failed_when:
+        - tunnel_group_output.failed or "Invalid input" in tunnel_group_output.stdout
+      changed_when: false
 
-    - name: Validate Tunnel-Group command execution
+    - name: Validate Tunnel-Group configuration retrieval
+      # Observability: Confirm the command returned data
       ansible.builtin.assert:
         that:
-          - tunnel_group_output is not failed
-        fail_msg: "Failed to retrieve Tunnel-Group configuration from {{ inventory_hostname }}."
-        quiet: true
+          - tunnel_group_output.stdout is defined
+        fail_msg: "Failed to retrieve Tunnel-Group configuration from {{ inventory_hostname }}"
+        success_msg: "Tunnel-Group configuration successfully captured."
 
-    - name: Display SSL VPN and Tunnel-Group Details
-      # Documentation: Providing a consolidated view of the network state for the operator
+    - name: Display Captured SSL VPN Configuration
+      # Documentation: Formatted output for visibility and logging purposes
       ansible.builtin.debug:
         msg: |
           ======================= SSL VPN CONFIG: {{ inventory_hostname }} =======================
-          {{ webvpn_output.stdout[0] if webvpn_output.stdout is defined and webvpn_output.stdout[0] != "" else "No WebVPN configuration found." }}
           
-          ======================= TUNNEL GROUP CONFIG =======================
-          {{ tunnel_group_output.stdout[0] if tunnel_group_output.stdout is defined and tunnel_group_output.stdout[0] != "" else "No Tunnel-Group configuration found." }}
+          --- WEBVPN SETTINGS ---
+          {{ webvpn_output.stdout }}
+
+          --- TUNNEL-GROUP SETTINGS ---
+          {{ tunnel_group_output.stdout }}

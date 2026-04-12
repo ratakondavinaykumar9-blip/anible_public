@@ -1,36 +1,37 @@
 ---
-# FortiGate Firewall Statistics Collection
-# This playbook retrieves operational statistics from FortiGate firewalls.
-# Standards: Idempotent (read-only), Observable (assert), Documented, FQCN.
-
-- name: Get FortiGate Firewall Statistics
+# Playbook: FortiGate Firewall Statistics Collection
+# Description: Retrieves and validates operational telemetry from FortiGate firewalls.
+# Standards: Idempotent (Read-only), Observable (Assertions), Documented (Inline Comments).
+- name: Get Firewall Stats
   hosts: fortigate
   gather_facts: false
 
   tasks:
     - name: Retrieve firewall statistics via CLI command
-      # FQCN: Using ansible.netcommon for cross-platform network CLI support
+      # FQCN used for module consistency and compatibility
       ansible.netcommon.cli_command:
-        command: get firewall stats
-      register: stats_output
-      # Idempotency: Read-only operations must always report 'ok', never 'changed'
+        command: "get firewall stats"
+      register: stats_result
+      # Idempotency: Read-only operations must report 'changed: false'
       changed_when: false
-      # Error Handling: Fail if the device returns an internal command error string
+      # Error Handling: Ensure we fail if the command is unrecognized or execution fails
       failed_when: 
-        - stats_output.failed or "Command fail" in stats_output.stdout
+        - stats_result.failed
+        - "'Unknown' in stats_result.stdout or 'Command fail' in stats_result.stdout"
 
     - name: Validate statistics data integrity
-      # Observability: Verify that the command returned meaningful content
+      # Observability: Assert that the output is populated and valid
       ansible.builtin.assert:
         that:
-          - stats_output.stdout is defined
-          - stats_output.stdout | length > 0
-        fail_msg: "The firewall returned empty or invalid statistics data."
-        success_msg: "Firewall statistics successfully captured and verified."
+          - stats_result.stdout is defined
+          - stats_result.stdout | length > 0
+        fail_msg: "Telemetry failure: Statistics output is empty or undefined for {{ inventory_hostname }}."
+        success_msg: "Successfully validated telemetry for {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display formatted firewall statistics
-      # FQCN: Using ansible.builtin for core debug output
+    - name: Display Firewall Statistics
+      # Formatted output for human-readable audit logs
       ansible.builtin.debug:
         msg: |
-          ======================= FIREWALL STATS =======================
-          {{ stats_output.stdout }}
+          ======================= FIREWALL STATS: {{ inventory_hostname }} =======================
+          {{ stats_result.stdout }}

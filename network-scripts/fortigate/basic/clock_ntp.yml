@@ -1,43 +1,55 @@
 ---
-# FortiGate Clock and NTP Status Audit
-# Purpose: Retrieve and validate system time and NTP configuration to ensure 
-# logging accuracy, forensic integrity, and certificate validity.
-- name: Get Clock and NTP
+# FortiGate Clock and NTP Verification Playbook
+# Purpose: Retrieves and validates system time and NTP status from FortiGate devices.
+# Standards: Idempotent (read-only), FQCN compliant, includes observability and robust error handling.
+
+- name: Get Clock and NTP Configuration
   hosts: fortigate
   gather_facts: false
 
   tasks:
     - name: Retrieve current system time
-      # Fetches the local system time. This is a read-only operation (idempotent).
+      # Uses FQCN to fetch the system time; idempotent as it performs no state changes
       ansible.netcommon.cli_command:
         command: "get system time"
-      register: clock_info
-      # Error Handling: Ensure the command returned data and was recognized by the OS.
-      failed_when: 
-        - clock_info.stdout == ""
-        - "'Unknown' in clock_info.stdout"
+      register: time_output
+      # Error Handling: Fail if output is empty or contains known error strings
+      failed_when: >
+        time_output.stdout == "" or 
+        "Command fail" in time_output.stdout
 
-    - name: Retrieve NTP synchronization status
-      # Fetches NTP configuration to verify connectivity with defined time sources.
-      ansible.netcommon.cli_command:
-        command: "get system ntp"
-      register: ntp_info
-      failed_when: 
-        - ntp_info.stdout == ""
-        - "'Unknown' in ntp_info.stdout"
-
-    - name: Validate temporal data integrity
-      # Observability: Asserts that both commands returned valid, non-empty responses.
+    - name: Validate system time retrieval
+      # Observability: Assertion to ensure data integrity before proceeding
       ansible.builtin.assert:
         that:
-          - clock_info.stdout | length > 0
-          - ntp_info.stdout | length > 0
-        fail_msg: "Temporal data retrieval failed; one or more outputs were empty."
-        success_msg: "System clock and NTP status successfully retrieved and verified."
+          - "time_output.stdout is defined"
+          - "time_output.stdout | length > 0"
+        fail_msg: "Critical: Failed to retrieve system time from {{ inventory_hostname }}."
+        success_msg: "System time successfully retrieved from {{ inventory_hostname }}."
 
-    - name: Display Clock and NTP summary
-      # Provides a human-readable summary of the device's temporal state.
+    - name: Retrieve NTP configuration and synchronization status
+      # Fetches NTP daemon state to ensure network time synchronization is healthy
+      ansible.netcommon.cli_command:
+        command: "get system ntp"
+      register: ntp_output
+      # Error Handling: Identify failure conditions in the CLI response
+      failed_when: >
+        ntp_output.stdout == "" or 
+        "error" in ntp_output.stdout | lower
+
+    - name: Validate NTP status retrieval
+      # Observability: Confirms the presence of NTP-related keywords in the response
+      ansible.builtin.assert:
+        that:
+          - "ntp_output.stdout is defined"
+          - "'ntpsync' in ntp_output.stdout or 'server' in ntp_output.stdout"
+        fail_msg: "Critical: NTP status check failed or returned incomplete data for {{ inventory_hostname }}."
+        success_msg: "NTP status successfully retrieved for {{ inventory_hostname }}."
+
+    - name: Display formatted Clock and NTP telemetry
+      # Provides a consolidated view of the registered variables for operational visibility
       ansible.builtin.debug:
-        msg: |
-          Device Time: {{ clock_info.stdout }}
-          NTP Status: {{ ntp_info.stdout }}
+        msg: 
+          - "--- [ {{ inventory_hostname }} ] ---"
+          - "System Clock: {{ time_output.stdout | trim }}"
+          - "NTP Status:   {{ ntp_output.stdout | trim }}"

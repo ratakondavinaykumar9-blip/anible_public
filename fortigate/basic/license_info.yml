@@ -1,33 +1,37 @@
 ---
-# FortiGate License Status Verification
-# Improved: 2026-03-08
-# Author: Architect:# This playbook retrieves and validates the FortiGate license status following best practices.
-- name: FortiGate License Info
+# FortiGate License Information Retrieval
+# This playbook retrieves the license status from FortiGate devices and verifies its validity.
+# It adheres to NetLearner Architect standards for observability, idempotency, and error handling.
+
+- name: Get and Verify FortiGate License Info
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve license status from FortiGate
-      # This task executes a diagnose command which is read-only, ensuring idempotency.
-      # Fully Qualified Collection Name (FQCN) used for the network command.
+    - name: Retrieve system license status via CLI
+      # Use Fully Qualified Collection Name (FQCN) for cross-platform compatibility
       ansible.netcommon.cli_command:
-        command: "diagnose system license status"
-      register: license_result
-      # Error Handling: Fail the task if the output is empty or indicates an invalid command.
-      failed_when: 
-        - license_result.stdout == "" or "Unknown" in license_result.stdout
+        command: diagnose system license status
+      register: license_output
+      # Idempotency: Read-only commands should not report a 'changed' status
+      changed_when: false
+      # Error Handling: Fail if the output is empty or contains known failure strings
+      failed_when:
+        - license_output.stdout is not defined or license_output.stdout | length == 0
+        - "'Command fail' in license_output.stdout"
 
-    - name: Validate license operational state
-      # Observability: Verify the license status is 'OK' or 'Valid' to ensure system integrity.
+    - name: Verify license validity (Observability)
+      # Assert that the device reports a valid license to ensure service continuity
+      # This provides an explicit success/failure check beyond just capturing output
       ansible.builtin.assert:
         that:
-          - "'Status: OK' in license_result.stdout or 'Status: Valid' in license_result.stdout"
-        fail_msg: "CRITICAL: The FortiGate license is not in a valid status. Check 'diagnose system license status' manually."
-        success_msg: "SUCCESS: FortiGate license is verified and active."
+          - "'Status: Valid' in license_output.stdout or 'Status: Licensed' in license_output.stdout"
+        fail_msg: "FortiGate license verification failed. The device may be unlicensed or in evaluation mode."
+        success_msg: "FortiGate license status successfully verified as Valid/Licensed."
 
-    - name: Display license details for observability
-      # Documentation: Provide the raw output for audit trails and troubleshooting.
+    - name: Display formatted license status
+      # Provides human-readable output for log visibility and manual auditing
       ansible.builtin.debug:
         msg: |
           ======================= FORTIGATE LICENSE STATUS =======================
-          {{ license_result.stdout }}
+          {{ license_output.stdout }}

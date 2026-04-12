@@ -1,33 +1,38 @@
 ---
-- name: Get Detailed Software Version
+- name: Get Detailed Software Version from Cisco ASA/Firepower
+  # Purpose: Retrieves and validates software version information for inventory and compliance auditing.
+  # This playbook is designed to be idempotent and provides robust validation of device responses.
   hosts: asa_firepower
   gather_facts: false
-  # Documentation: This playbook retrieves the software version from Cisco ASA devices and validates the output.
-  # It adheres to standards for idempotency, observability, and follows FQCN best practices.
+  vars:
+    # Defining expected pattern to ensure we received a valid response from an ASA/Firepower device
+    valid_version_pattern: "Cisco"
 
   tasks:
-    - name: Execute 'show version' command on the device
-      # Best Practice: Use Fully Qualified Collection Name (FQCN)
-      # Idempotency: Read-only operations are inherently idempotent as they do not modify device state
+    - name: Retrieve software version details via CLI
+      # Use FQCN for the network common CLI module
+      # Task is idempotent as it performs a read-only 'show' operation
       ansible.netcommon.cli_command:
         command: show version
-      register: ver_result
-      # Error Handling: Fail the task if the output is undefined or empty to prevent downstream errors
-      failed_when: 
-        - ver_result.stdout is not defined or ver_result.stdout | length == 0
+      register: ver
+      # Error Handling: Fail explicitly if the command is not recognized or execution fails
+      failed_when:
+        - ver.failed or "Invalid input" in ver.stdout
+      # Ensure this task runs even in check mode to support read-only validation
+      check_mode: false
 
-    - name: Validate that the output contains expected ASA version data
-      # Observability: Use 'assert' to verify the integrity of the data retrieved from the device
+    - name: Validate command output integrity
+      # Observability: Use assert to verify that the retrieved data meets expected format/content
       ansible.builtin.assert:
         that:
-          - "'Cisco Adaptive Security Appliance' in ver_result.stdout"
-          - "'Software Version' in ver_result.stdout"
-        fail_msg: "The 'show version' output does not contain expected Cisco ASA identification strings."
-        success_msg: "Successfully validated ASA version information."
+          - "ver.stdout is defined"
+          - "valid_version_pattern in ver.stdout"
+        fail_msg: "The 'show version' output is empty or does not contain expected Cisco headers."
+        success_msg: "Successfully retrieved and validated software version."
 
-    - name: Display the detailed version information
-      # Best Practice: Use FQCN for the debug module
+    - name: Display formatted version information
+      # Observability: Output the results for manual review or logging systems
       ansible.builtin.debug:
         msg: |
           ======================= DETAILED VERSION =======================
-          {{ ver_result.stdout }}
+          {{ ver.stdout }}

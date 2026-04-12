@@ -1,33 +1,40 @@
 ---
-# FortiGate VIP (DNAT) Configuration Audit
-# Standards-aligned: Idempotency, Observability, and Error Handling
-# Author: Architect: name: Retrieve and Validate FortiGate VIP List
+# FortiGate VIP (DNAT) List
+# Improved: 2026-03-15
+# Author: NetLearner Architect
+#
+# Standards:
+# 1. Idempotency: Read-only operation, safe for multiple executions.
+# 2. Observability: Registered output and explicit assertions for verification.
+# 3. Documentation: Comments explaining task purpose and logic.
+# 4. Error Handling: Failed_when logic to catch CLI-level errors.
+# 5. Best Practices: Strict use of FQCN (Fully Qualified Collection Names).
+---
+- name: Get VIP List
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute 'get firewall vip' command on FortiGate
-      # This task is inherently idempotent as it only retrieves operational state without modifying configuration.
-      # Using Fully Qualified Collection Name (FQCN) for reliability.
+    - name: Retrieve VIP configuration via CLI
+      # Use FQCN for the network command module to ensure portability
       ansible.netcommon.cli_command:
         command: get firewall vip
       register: vip_result
-      # Error Handling: Ensure the task fails if the command returns an error string or fails execution.
+      # Error Handling: Catch cases where the command might be unsupported or fail silently
       failed_when: 
-        - vip_result.failed or "error" in vip_result.stdout | lower
-        - "entry not found" in vip_result.stdout | lower and "vip" not in vip_result.stdout | lower
+        - vip_result.failed or "Unknown action" in vip_result.stdout
 
-    - name: Verify VIP data observability and integrity
-      # Observability: Assert that the command returned data to prevent silent failures in automation pipelines.
+    - name: Verify VIP data retrieval success
+      # Observability: Assert that we received a non-empty response from the device
       ansible.builtin.assert:
         that:
-          - "vip_result.stdout is defined"
-          - "vip_result.stdout | length > 0"
-        fail_msg: "Data retrieval failed: The VIP list is empty or the command output was null."
-        success_msg: "VIP data successfully captured and validated."
+          - vip_result.stdout is defined
+          - vip_result.stdout | length > 0
+        fail_msg: "Failed to retrieve VIP list or no VIPs are configured."
+        success_msg: "Successfully retrieved VIP configuration."
 
-    - name: Display formatted VIP (DNAT) information
-      # Provides a clear visual report of the retrieved status.
+    - name: Display VIP (DNAT) information
+      # Documentation: Present the retrieved data in a readable format for logs
       ansible.builtin.debug:
         msg: |
           ======================= VIPs (DNAT) =======================

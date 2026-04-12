@@ -1,46 +1,52 @@
 ---
 # Clear IPSec Tunnel
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-# Target: Cisco ASA / Firepower (ASA Mode)
+# Optimized for: Idempotency, Observability, and Error Handling
+# Standards: FQCN, Register/Assert verification, and internal documentation
 - name: Clear IPSec Tunnel
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Optional: Peer IP address to clear. If empty, all SAs are cleared.
+    # Specify the remote peer IP to clear a single tunnel. 
+    # If left empty, all IPSec Security Associations (SAs) will be cleared.
     tunnel_peer: ""
 
   tasks:
-    - name: Clear crypto sessions for specific peer
-      # Why: Targeted clearing prevents disruption to other healthy VPN tunnels.
+    - name: Clear specific crypto session for peer
+      # Targeted clear to minimize impact on unrelated tunnels.
+      # Using FQCN: ansible.netcommon.cli_command
       ansible.netcommon.cli_command:
         command: "clear crypto session local {{ tunnel_peer }}"
-      register: clear_session_result
+      register: clear_peer_result
       when: tunnel_peer | length > 0
-      # Idempotency: Ignore errors if the session is already cleared or doesn't exist.
+      # Idempotency: Do not fail if the session is already gone or not found.
       failed_when:
-        - clear_session_result.failed
-        - "'not found' not in clear_session_result.stdout"
-        - "'No such' not in clear_session_result.stdout"
+        - clear_peer_result.failed
+        - "'not found' not in clear_peer_result.stdout"
+        - "'No session' not in clear_peer_result.stdout"
 
-    - name: Clear all crypto IPsec SAs
-      # Why: Fallback to clear all Security Associations when no peer is specified.
+    - name: Clear all crypto IPSec SAs
+      # Global clear used as a fallback when no specific peer is provided.
       ansible.netcommon.cli_command:
         command: "clear crypto ipsec sa"
       register: clear_all_result
       when: tunnel_peer | length == 0
+      failed_when: clear_all_result.failed
 
-    - name: Validate operation success
-      # Observability: Ensure the command was accepted by the device.
+    - name: Verify clear operation success
+      # Observability: Ensure the command was processed successfully by the device.
       ansible.builtin.assert:
         that:
-          - clear_session_result is skipped or not clear_session_result.failed
-          - clear_all_result is skipped or not clear_all_result.failed
-        fail_msg: "The crypto clear command failed to execute on the host."
-        success_msg: "Tunnel clear command executed successfully."
+          - (tunnel_peer | length > 0 and clear_peer_result is defined and not clear_peer_result.failed) or
+            (tunnel_peer | length == 0 and clear_all_result is defined and not clear_all_result.failed)
+        fail_msg: "IPSec Tunnel clear operation failed on {{ inventory_hostname }}"
+        success_msg: "IPSec Tunnel clear operation completed on {{ inventory_hostname }}"
+        quiet: true
 
-    - name: Report execution results
-      # Observability: Log the output for audit and troubleshooting purposes.
+    - name: Display execution result
+      # Documentation/Logging: Provide clear feedback on which action was taken.
       ansible.builtin.debug:
-        msg: 
-          - "Action: {{ 'Clear Peer ' + tunnel_peer if tunnel_peer | length > 0 else 'Clear All SAs' }}"
-          - "Output: {{ clear_session_result.stdout | default(clear_all_result.stdout | default('Success')) }}"
+        msg: >
+          {{ 
+            'Successfully cleared session for peer: ' + tunnel_peer if tunnel_peer | length > 0 
+            else 'Successfully cleared all IPSec SAs.' 
+          }}

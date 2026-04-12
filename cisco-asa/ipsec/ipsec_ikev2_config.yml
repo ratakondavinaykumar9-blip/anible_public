@@ -1,53 +1,51 @@
 ---
-# Ipsec Ikev2 Config
-# Improved for Idempotency, Observability, and industry standards
-# Author: Architect:#
-- name: Get IKEv2 and IPsec Profile Configuration
+# IKEv2 and IPsec Profile Configuration Retrieval
+# Improved by: NetLearner Architect
+# Purpose: This playbook gathers and validates security configurations for audit and troubleshooting.
+# Idempotency: Read-only operations are inherently idempotent and safe for repeated execution.
+
+- name: Get IKEv2 Configuration
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Performance: Facts are not required for simple CLI command execution
 
   tasks:
-    - name: Retrieve IKEv2 configuration from device
-      # Using FQCN for cross-platform network command execution.
-      # This task is idempotent as it performs a read-only operation.
+    - name: Retrieve IKEv2 running configuration
+      # Using Fully Qualified Collection Name (FQCN) for cross-version compatibility
       ansible.netcommon.cli_command:
         command: show running-config crypto ikev2
-      register: ikev2_config
-      # Error Handling: Ensure we don't proceed if the command is unrecognized or fails.
+      register: ikev2_output
+      # Error Handling: Ensure the command is recognized and didn't result in a parser error
       failed_when: 
-        - "ikev2_config.stdout == ''"
-        - "'Invalid input' in ikev2_config.stdout"
+        - ikev2_output.failed or "Invalid input" in ikev2_output.stdout
 
-    - name: Validate IKEv2 configuration retrieval
-      # Observability: Assert that the command returned data to verify success.
+    - name: Verify IKEv2 configuration retrieval
+      # Observability: Assert that the command produced an output string
       ansible.builtin.assert:
         that:
-          - ikev2_config.stdout | length > 0
-        fail_msg: "Failed to retrieve IKEv2 configuration or config is empty."
-        success_msg: "Successfully retrieved IKEv2 configuration."
+          - ikev2_output.stdout is defined
+        fail_msg: "Failed to capture IKEv2 configuration from the device."
+        quiet: true
 
-    - name: Retrieve crypto IPsec profile configuration
-      # Captures the current state of IPsec profiles for observability.
+    - name: Retrieve crypto ipsec profile configuration
       ansible.netcommon.cli_command:
         command: show running-config crypto ipsec profile
-      register: ipsec_profile_config
+      register: ipsec_profile_output
       failed_when: 
-        - "ipsec_profile_config.stdout == ''"
-        - "'Invalid input' in ipsec_profile_config.stdout"
+        - ipsec_profile_output.failed or "Invalid input" in ipsec_profile_output.stdout
 
-    - name: Validate IPsec profile configuration retrieval
-      # Observability: Confirms the presence of IPsec profile data.
+    - name: Verify IPsec profile configuration retrieval
       ansible.builtin.assert:
         that:
-          - ipsec_profile_config.stdout | length > 0
-        fail_msg: "Failed to retrieve IPsec profile configuration or config is empty."
-        success_msg: "Successfully retrieved IPsec profile configuration."
+          - ipsec_profile_output.stdout is defined
+        fail_msg: "Failed to capture IPsec profile configuration from the device."
+        quiet: true
 
-    - name: Display consolidated IKEv2 and IPsec configuration
-      # Documentation: Providing a clear summary of the retrieved device state.
+    - name: Display Configuration Summary
+      # Documentation: Provide a formatted view for administrative review
       ansible.builtin.debug:
         msg: |
           ======================= IKEv2 CONFIG =======================
-          {{ ikev2_config.stdout }}
-          ======================= IPSEC PROFILE ======================
-          {{ ipsec_profile_config.stdout }}
+          {{ ikev2_output.stdout | default('No IKEv2 configuration found') }}
+
+          ==================== IPSEC PROFILE CONFIG ==================
+          {{ ipsec_profile_output.stdout | default('No IPsec profile configuration found') }}

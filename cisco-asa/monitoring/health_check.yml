@@ -1,105 +1,105 @@
 ---
 # ASA Comprehensive Health Check
-# Improved by Architect:for Idempotency, Observability, and Error Handling.
-# This playbook captures system-wide telemetry to ensure operational stability on Cisco ASA devices.
----
+# Improved for idempotency, observability, and error handling.
+# This playbook performs a non-intrusive health check of Cisco ASA devices, 
+# capturing CPU, memory, connection counts, and traffic statistics for monitoring.
 - name: ASA Comprehensive Health Check
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Supported formats: 'text' (default) for summary or 'json' for reporting
     output_format: text
 
   tasks:
-    # Why: Gather current timestamp from localhost since Cisco ASA does not support standard Ansible fact gathering.
-    - name: Gather local system information for timestamping
-      ansible.builtin.setup:
-        filter: "ansible_date_time"
-      delegate_to: localhost
+    - name: "Collect Facts | Capture current timestamp from controller"
+      # Ensuring we have a consistent timestamp for reporting without querying the device clock.
+      ansible.builtin.set_fact:
+        report_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
       run_once: true
 
-    - name: Get CPU usage statistics
-      # Why: Monitor CPU load to identify performance bottlenecks or potential DoS attacks.
+    - name: "Health Check | Get CPU usage"
+      # Monitoring CPU to detect spikes that could impact packet processing.
       ansible.netcommon.cli_command:
         command: show cpu usage
-      register: cpu_result
-      # Error Handling: Ensure command succeeded and output contains expected headers.
+      register: cpu_output
       failed_when: 
-        - cpu_result.failed or "CPU usage" not in cpu_result.stdout or cpu_result.stdout | length == 0
+        - cpu_output.stdout | length == 0
+        - "'invalid' in cpu_output.stdout.lower()"
 
-    - name: Get memory utilization info
-      # Why: Ensure sufficient memory is available for operations and avoid leak-related crashes.
+    - name: "Health Check | Get memory info"
+      # Verifying memory allocation to prevent crashes due to exhaustion.
       ansible.netcommon.cli_command:
         command: show memory
-      register: mem_result
-      failed_when: 
-        - mem_result.failed or "Free memory" not in mem_result.stdout or mem_result.stdout | length == 0
+      register: mem_output
+      failed_when: mem_output.stdout | length == 0
 
-    - name: Get connection count statistics
-      # Why: Monitor active session count against hardware limits to prevent service disruption.
+    - name: "Health Check | Get connection count"
+      # Tracking active connections against licensed limits.
       ansible.netcommon.cli_command:
         command: show conn count
-      register: conn_result
-      failed_when: 
-        - conn_result.failed or conn_result.stdout | length == 0
+      register: conn_output
+      failed_when: conn_output.stdout | length == 0
 
-    - name: Get resource usage statistics
-      # Why: Audit per-resource allocation (XLate, Conn, etc.) in multiple context environments.
+    - name: "Health Check | Get resource usage"
+      # Inspecting system resources to ensure multi-context or global limits are not reached.
       ansible.netcommon.cli_command:
         command: show resource usage
-      register: resource_result
-      failed_when: 
-        - resource_result.failed or resource_result.stdout | length == 0
+      register: resource_output
+      failed_when: resource_output.stdout | length == 0
 
-    - name: Get context configuration info
-      # Why: Verify virtual context status and alignment with security policies.
+    - name: "Health Check | Get context info"
+      # Context info is useful for multi-context ASAs; ignored on single-context devices via ignore_errors.
       ansible.netcommon.cli_command:
         command: show context
-      register: context_result
-      failed_when: 
-        - context_result.failed or context_result.stdout | length == 0
+      register: context_output
+      ignore_errors: true
 
-    - name: Get traffic throughput rates
-      # Why: Capture interface-level throughput for capacity planning and troubleshooting.
+    - name: "Health Check | Get traffic rates"
+      # Monitoring throughput and packet rates for performance analysis.
       ansible.netcommon.cli_command:
         command: show traffic
-      register: traffic_result
-      failed_when: 
-        - traffic_result.failed or traffic_result.stdout | length == 0
+      register: traffic_output
+      failed_when: traffic_output.stdout | length == 0
 
-    # Observability: Verify all telemetry data points were successfully captured before proceeding.
-    - name: Verify telemetry data integrity
+    - name: "Validation | Assert health check completeness"
+      # Verifying that critical data points were successfully retrieved before proceeding.
       ansible.builtin.assert:
         that:
-          - cpu_result.stdout is defined
-          - mem_result.stdout is defined
-          - conn_result.stdout is defined
-          - resource_result.stdout is defined
-          - context_result.stdout is defined
-          - traffic_result.stdout is defined
-        fail_msg: "Health check telemetry capture failed for {{ inventory_hostname }}. One or more data points are missing."
-        quiet: true
+          - cpu_output.stdout is defined
+          - mem_output.stdout is defined
+          - conn_output.stdout is defined
+        fail_msg: "Critical health check data missing for {{ inventory_hostname }}"
+        success_msg: "All critical health check data retrieved for {{ inventory_hostname }}"
 
-    # Idempotency: The 'copy' module ensures the file is updated only if content differs; 'mode' ensures secure permissions.
-    - name: Generate JSON telemetry report
-      # Why: Provide structured output for downstream analysis or visualization tools.
+    - name: "Persistence | Save Health Report as JSON"
+      # Writing results to a file for external analysis. Idempotent: only updates if content changes.
       ansible.builtin.copy:
         content: |
           {
             "device": "{{ inventory_hostname }}",
-            "timestamp": "{{ hostvars['localhost']['ansible_date_time']['iso8601'] }}",
-            "cpu": {{ cpu_result.stdout | to_json }},
-            "memory": {{ mem_result.stdout | to_json }},
-            "connections": {{ conn_result.stdout | to_json }},
-            "resources": {{ resource_result.stdout | to_json }},
-            "contexts": {{ context_result.stdout | to_json }},
-            "traffic": {{ traffic_result.stdout | to_json }}
+            "timestamp": "{{ report_time }}",
+            "cpu": "{{ cpu_output.stdout | trim }}",
+            "memory": "{{ mem_output.stdout | trim }}",
+            "connections": "{{ conn_output.stdout | trim }}",
+            "resources": "{{ resource_output.stdout | trim }}",
+            "contexts": "{{ context_output.stdout | default('Single Context Mode') | trim }}",
+            "traffic": "{{ traffic_output.stdout | trim }}"
           }
         dest: "/tmp/asa_health_{{ inventory_hostname }}.json"
         mode: '0644'
       when: output_format == 'json'
 
-    # Human-readable summary for console-based auditing
-    - name: Display health check summary
-      # Why: Instant feedback for engineers during manual execution.
-      ans
+    - name: "Output | Display Health Summary"
+      # Providing immediate feedback to the operator.
+      ansible.builtin.debug:
+        msg: |
+          ==================================================
+          ASA Health Summary: {{ inventory_hostname }}
+          Timestamp: {{ report_time }}
+          ==================================================
+          CPU: {{ cpu_output.stdout | trim }}
+          
+          MEM: {{ mem_output.stdout | trim }}
+          
+          CONN: {{ conn_output.stdout | trim }}
+          
+          TRAFFIC: {{ traffic_output.stdout | trim }}

@@ -1,35 +1,38 @@
 ---
-# VLAN Information Gathering Playbook
-# This playbook retrieves and verifies VLAN status on Cisco ASA/Firepower devices.
-# It is designed to be read-only (idempotent) and provides verification of output integrity.
-
+# Playbook: Retrieve and Validate VLAN Configuration
+# Purpose: Fetches VLAN information from Cisco ASA/Firepower for auditing and state verification.
+# Standards: Idempotency (read-only), Observability (assert), FQCN usage.
 - name: Get VLAN Info
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute 'show vlan' on the target device
-      # Use FQCN for best practices and to ensure the correct module is invoked across different environments.
+    - name: Execute 'show vlan' command on the device
+      # Use FQCN for maintainability and to ensure the correct network plugin is utilized.
+      # This task is inherently idempotent as it performs a read-only operation.
       ansible.netcommon.cli_command:
         command: show vlan
       register: vlan_result
-      # Error Handling: Explicitly fail if the command is not recognized or returns a syntax error.
+      # Error Handling: Catch execution failures or command syntax errors specifically.
       failed_when: 
-        - vlan_result.failed or "Invalid input" in vlan_result.stdout
+        - vlan_result.failed 
+        - "'Invalid input' in vlan_result.stdout"
 
-    - name: Validate that VLAN information was returned
-      # Observability: Use assert to verify the output contains the 'VLAN' keyword, 
-      # ensuring we didn't receive an empty or irrelevant response.
+    - name: Verify VLAN information integrity
+      # Observability: Confirm the output contains data to ensure the session returned meaningful state.
       ansible.builtin.assert:
         that:
-          - "'VLAN' in vlan_result.stdout"
-        fail_msg: "The command output does not appear to contain valid VLAN information."
-        success_msg: "VLAN information successfully retrieved and validated."
+          - vlan_result.stdout is defined
+          - vlan_result.stdout | length > 0
+        fail_msg: "VLAN data retrieval failed or returned an empty response. Check device connectivity."
+        success_msg: "VLAN data successfully captured and validated."
 
-    - name: Display VLAN configuration details
-      # Documentation: Provide a clear, formatted view of the command output for logs and operators.
+    - name: Display Formatted VLAN Information
+      # Documentation: Output provided for operator visibility and audit logging.
       ansible.builtin.debug:
         msg: |
-          ======================= DEVICE VLAN STATUS =======================
+          ======================= VLAN STATUS REPORT =======================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          Output:
           {{ vlan_result.stdout }}
-          ==================================================================

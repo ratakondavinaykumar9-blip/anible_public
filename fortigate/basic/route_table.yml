@@ -1,34 +1,38 @@
 ---
 # FortiGate Route Table Retrieval
-# Purpose: This playbook retrieves the active routing table from FortiGate devices.
-# Standards: Idempotent (read-only), Observable (assert), Documented, FQCN used.
+# This playbook retrieves the full routing table from a FortiGate device.
+# It follows NetLearner standards for observability, error handling, and FQCN usage.
 
-- name: Get FortiGate Route Table
+- name: Retrieve and Validate FortiGate Route Table
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve routing table using CLI command
-      # FQCN: Using ansible.netcommon for broad compatibility across network platforms
+    - name: Get routing table info via CLI
+      # Use FQCN for network operations to ensure cross-version compatibility.
+      # This task is inherently idempotent as it performs a read-only 'get' operation.
       ansible.netcommon.cli_command:
         command: get router info routing-table all
-      register: routes_output
-      # Error Handling: Ensure the command was accepted by the FortiOS CLI
-      failed_when:
-        - routes_output.failed or "parse error" in routes_output.stdout | lower
+      register: routes_result
+      # Basic error handling: Ensure the task fails if the command is not recognized or execution fails.
+      failed_when: 
+        - routes_result.rc is defined and routes_result.rc != 0
+        - "'Command fail' in routes_result.stdout"
 
-    - name: Verify routing table integrity
-      # Observability: Confirm the output contains the expected 'Codes' legend typical of FortiOS
+    - name: Validate routing table response
+      # Observability: Use assertions to verify that the output is meaningful and not empty.
+      # Checking for 'routing table' ensures the device returned the expected data structure.
       ansible.builtin.assert:
         that:
-          - routes_output.stdout is defined
-          - "'Codes:' in routes_output.stdout"
-        fail_msg: "Routing table output was empty or format was unrecognized."
+          - routes_result.stdout is defined
+          - routes_result.stdout | length > 0
+          - "'routing table' in routes_result.stdout | lower"
+        fail_msg: "The routing table retrieval returned empty or invalid data."
         success_msg: "Routing table successfully retrieved and validated."
 
-    - name: Display formatted routing table
-      # FQCN: Using ansible.builtin for standard debug output
+    - name: Display formatted route table
+      # Use FQCN for the debug module to provide visual feedback for operators.
       ansible.builtin.debug:
         msg: |
           ======================= FORTIGATE ROUTE TABLE =======================
-          {{ routes_output.stdout }}
+          {{ routes_result.stdout }}

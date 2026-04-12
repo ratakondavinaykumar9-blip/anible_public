@@ -1,51 +1,62 @@
 ---
-# Network Automation Framework Architect: Performance Monitoring Enhancement
-# This playbook retrieves and validates ASA/Firepower performance metrics.
-# Standards applied: FQCN usage, detailed assertions, and granular error detection.
+# Performance Monitoring and Health Check
+# Improved: 2026-03-15
+# Author: NetLearner Architect
+#
+# This playbook retrieves critical performance and traffic metrics from ASA/Firepower devices.
+# It ensures observability through registration and assertions, implements error handling 
+# for CLI execution, and uses FQCN for long-term compatibility.
 
 - name: Performance Monitoring
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve Performance Monitor Statistics
-      # Why: 'show perfmon' provides granular CPU and connection utilization data.
-      # It is idempotent as it performs a read-only operation on the device state.
+    - name: Collect CPU and Memory Performance Metrics
+      # FQCN: Using netcommon for platform-agnostic CLI interaction
       ansible.netcommon.cli_command:
         command: show perfmon
-      register: perf_mon_result
-      # Error Handling: Fail if the command is unrecognized by the OS or execution fails.
+      register: perf
+      # Error Handling: Detect command failure or unsupported command syntax
       failed_when: 
-        - perf_mon_result.failed or "Invalid input" in perf_mon_result.stdout
-
-    - name: Retrieve Interface Traffic Statistics
-      # Why: 'show traffic' identifies bandwidth saturation and interface-level throughput.
-      ansible.netcommon.cli_command:
-        command: show traffic
-      register: traffic_result
-      # Error Handling: Ensures we catch partial failures or command syntax issues.
-      failed_when: 
-        - traffic_result.failed or "Invalid input" in traffic_result.stdout
-
-    - name: Validate Collected Performance Data
-      # Observability: Verification task to ensure captured stdout is not empty before display.
+        - perf.failed or "Invalid input" in perf.stdout
+      
+    - name: Validate Performance Data Integrity
+      # Observability: Assert that the command returned meaningful performance data
       ansible.builtin.assert:
         that:
-          - "perf_mon_result.stdout | length > 0"
-          - "traffic_result.stdout | length > 0"
-        fail_msg: "Telemetry collection failed: Received empty output from the device."
+          - "perf.stdout is defined"
+          - "perf.stdout | length > 0"
+          - "'CPU' in perf.stdout or 'Memory' in perf.stdout"
+        fail_msg: "Performance data collection failed or returned incomplete results on {{ inventory_hostname }}."
         quiet: true
 
-    - name: Display Performance Analysis Summary
-      # Purpose: Aggregates and outputs the collected telemetry for audit/logging.
+    - name: Collect Interface Traffic Statistics
+      ansible.netcommon.cli_command:
+        command: show traffic
+      register: traffic
+      failed_when: 
+        - traffic.failed or "Invalid input" in traffic.stdout
+
+    - name: Validate Traffic Data Integrity
+      # Observability: Ensure traffic counters were successfully retrieved
+      ansible.builtin.assert:
+        that:
+          - "traffic.stdout is defined"
+          - "traffic.stdout | length > 0"
+        fail_msg: "Traffic statistics collection failed on {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Display Performance and Traffic Report
+      # Documentation: Provide a structured view of the collected metrics for operators
       ansible.builtin.debug:
         msg: |
-          ======================= PERFORMANCE TELEMETRY =======================
+          ======================= DEVICE PERFORMANCE REPORT =======================
           DEVICE: {{ inventory_hostname }}
+          COLLECTED: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
           
-          [PERFMON DATA]
-          {{ perf_mon_result.stdout }}
-
-          [TRAFFIC DATA]
-          {{ traffic_result.stdout }}
-          =====================================================================
+          --- [ PERFORMANCE METRICS ] ---
+          {{ perf.stdout }}
+          
+          --- [ TRAFFIC STATISTICS ] ---
+          {{ traffic.stdout

@@ -1,37 +1,36 @@
 ---
-# Playbook: FortiGate Performance Monitoring
-# Description: Retrieves and validates system performance metrics (CPU, Memory, Sessions).
-# This playbook adheres to standards for Idempotency, Observability, and Error Handling.
+# FortiGate Performance Monitoring Playbook
+# Purpose: Retrieves and validates real-time performance metrics from FortiGate devices.
+# Standards: Idempotent (Read-only), Observable (Assert), Documented, FQCN usage.
 
-- name: Get Performance Status
+- name: Get FortiGate Performance Status
   hosts: fortigate
-  gather_facts: false # Performance metrics are gathered via CLI; standard facts are not required.
+  gather_facts: false
 
   tasks:
-    - name: Retrieve System Performance Metrics via CLI
-      # Use FQCN (ansible.netcommon.cli_command) for robust network command execution.
+    - name: Retrieve system performance status from FortiGate
+      # FQCN: ansible.netcommon.cli_command is used for standardized CLI interaction.
+      # Idempotency: This operation is read-only and safe for repeated execution.
       ansible.netcommon.cli_command:
         command: get system performance status
-      register: perf_output
-      # Error Handling: Ensure the task fails if the command returns an error or lacks key metrics.
+      register: fortigate_perf_raw
+      # Error Handling: Fail if the response is empty or missing expected headers.
       failed_when: 
-        - perf_output.failed
-        - "'CPU usage' not in perf_output.stdout"
+        - fortigate_perf_raw.stdout is not defined 
+        - fortigate_perf_raw.stdout | length == 0
 
-    - name: Validate Performance Data Integrity
-      # Observability: Assert that the retrieved data contains critical performance indicators.
+    - name: Validate performance data integrity
+      # Observability: Verify that the command returned standard FortiOS performance counters.
       ansible.builtin.assert:
         that:
-          - perf_output.stdout is defined
-          - "'CPU usage' in perf_output.stdout"
-          - "'Memory usage' in perf_output.stdout"
-        fail_msg: "Performance data from {{ inventory_hostname }} is incomplete or invalid."
-        success_msg: "Successfully validated performance metrics for {{ inventory_hostname }}."
+          - "'CPU' in fortigate_perf_raw.stdout"
+          - "'Memory' in fortigate_perf_raw.stdout"
+        fail_msg: "Performance data retrieval failed or returned an unexpected format."
+        success_msg: "Successfully validated FortiGate performance metrics."
 
-    - name: Display Performance Status
-      # Documentation: Output the performance details for auditability and real-time monitoring.
+    - name: Display formatted performance metrics
+      # Observability: Present the retrieved status for operator review.
       ansible.builtin.debug:
         msg: |
-          ======================= PERFORMANCE: {{ inventory_hostname }} =======================
-          {{ perf_output.stdout }}
-          ======================================================================================
+          ======================= PERFORMANCE STATUS: {{ inventory_hostname }} =======================
+          {{ fortigate_perf_raw.stdout }}

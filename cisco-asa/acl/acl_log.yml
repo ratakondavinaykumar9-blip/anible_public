@@ -1,37 +1,41 @@
 ---
-# ACL Log Retrieval and Verification
-# Improved for enterprise-grade automation standards.
-# Purpose: To securely fetch and audit ACL hits on Cisco ASA/FTD platforms.
+# ACL Logging Retrieval Playbook
+#
+# This playbook retrieves ACL-specific log entries from Cisco ASA/Firepower devices.
+# It adheres to enterprise standards for observability, error handling, and FQCN usage.
+#
+# Standards:
+# 1. Idempotency: This is a read-only operation; safe for repeated execution without state change.
+# 2. Observability: Uses 'register' to capture output and 'assert' to verify data integrity.
+# 3. Documentation: Clear task descriptions and comments explaining the purpose of each step.
+# 4. Error Handling: Explicitly checks for failure states in the command execution.
+# 5. Best Practices: Employs Fully Qualified Collection Names (FQCN) for all modules.
 
-- name: Get ACL Logs
+- name: Retrieve ACL Logs
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve filtered ACL logging entries from the device
-      # Use Fully Qualified Collection Names (FQCN) for consistency and predictability.
-      # This task fetches specific log lines containing "ACL" to monitor security policy hits.
+    - name: Execute 'show logging' command filtered for ACL entries
+      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interaction
       ansible.netcommon.cli_command:
-        command: "show logging | include ACL"
-      register: acl_log_data
-      # Error Handling: Ensure the playbook fails on actual execution errors or invalid syntax.
-      failed_when: 
-        - "acl_log_data.failed == true"
-        - "'Invalid' in acl_log_data.stdout"
+        command: show logging | include ACL
+      register: acl_log_output
+      # Error Handling: Prevent silent failures by explicitly checking the result object
+      failed_when: acl_log_output.failed | default(false)
 
-    - name: Assert log retrieval success and data presence
-      # Observability: Verify that the output structure is valid and defined.
+    - name: Verify log retrieval integrity
+      # Observability: Ensure the output variable is defined before proceeding to display
       ansible.builtin.assert:
         that:
-          - "acl_log_data.stdout is defined"
-        fail_msg: "Critical Error: Failed to fetch log data from {{ inventory_hostname }}."
-        success_msg: "Successfully verified log buffer availability."
+          - acl_log_output.stdout is defined
+        fail_msg: "Log retrieval failed or returned an invalid structure. Verify device connectivity."
         quiet: true
 
-    - name: Display ACL logs with formatted output
-      # Provide clear visibility into the firewall log buffer for auditing.
-      # Logic handles cases where the buffer might be empty gracefully.
+    - name: Present formatted ACL logs to the operator
+      # Observability: Provide a structured view of the logs with a fallback for empty buffers
       ansible.builtin.debug:
         msg: |
-          ======================= ACL LOGS: {{ inventory_hostname }} =======================
-          {{ acl_log_data.stdout if acl_log_data.stdout | length > 0 else 'NOTICE: No ACL log entries found in the current buffer.' }}
+          ======================= DEVICE: {{ inventory_hostname }} =======================
+          {{ acl_log_output.stdout | default('No ACL logs found in the current logging buffer.') }}
+          ================================================================================

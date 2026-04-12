@@ -1,32 +1,30 @@
 ---
-- name: Collect and Validate Cisco ASA/Firepower Memory Statistics
+- name: Cisco ASA/Firepower Memory Detail Analysis
   hosts: asa_firepower
   gather_facts: false
+  # Standardizing on false for YAML consistency in network automation
 
   tasks:
-    - name: Retrieve memory details via CLI
-      # Use FQCN to ensure the correct plugin is used across different environments
+    - name: Retrieve detailed memory statistics from the security appliance
+      # FQCN: Using ansible.netcommon.cli_command for cross-platform network compatibility
       ansible.netcommon.cli_command:
         command: show memory detail
-      register: memory_result
-      # IDEMPOTENCY: Read-only 'show' commands should never report a 'changed' state
-      changed_when: false
-      # ERROR HANDLING: Explicitly fail if the command returns no data
+      register: mem_output
+      # Error Handling: Ensure the playbook fails if the command returns an empty string or fails at the CLI level
       failed_when: 
-        - memory_result.stdout is not defined or memory_result.stdout | length == 0
+        - mem_output.stdout is not defined or mem_output.stdout | length == 0
 
-    - name: Validate memory output structure
-      # OBSERVABILITY: Ensure the retrieved data contains expected keywords to confirm command success
+    - name: Validate successful memory data acquisition
+      # Observability: Asserting that the output contains expected data to ensure the session was valid
       ansible.builtin.assert:
         that:
-          - "'Free memory' in memory_result.stdout"
-          - "'Used memory' in memory_result.stdout"
-        fail_msg: "The 'show memory detail' command returned unexpected or incomplete data."
-        success_msg: "Memory details successfully retrieved and validated."
+          - "'Free memory' in mem_output.stdout or 'Used memory' in mem_output.stdout"
+        fail_msg: "The 'show memory detail' command did not return the expected memory statistics."
+        success_msg: "Memory details successfully validated and parsed."
 
-    - name: Display formatted memory details
-      # DOCUMENTATION: Provide a clean, readable view of the memory state for operational audits
-      ansle.builtin.debug:
+    - name: Output memory detail for operational visibility
+      # Documentation: Providing a clear visual delimiter for log analysis and manual review
+      ansible.builtin.debug:
         msg: |
           ======================= MEMORY DETAIL =======================
-          {{ memory_result.stdout }}
+          {{ mem_output.stdout }}

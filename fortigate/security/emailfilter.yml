@@ -1,36 +1,35 @@
 ---
-# FortiGate Email Filter Retrieval Playbook
-# This playbook retrieves the email filter profiles from a FortiGate device.
-# Adheres to standards for Idempotency, Observability, Documentation, Error Handling, and FQCN.
-- name: Get FortiGate Email Filter Profiles
+# FortiGate Email Filter Configuration Retrieval
+# Purpose: Safely retrieve and validate the current email filter configuration.
+# This playbook is idempotent as it only performs read operations that do not alter the system state.
+
+- name: Get Email Filter Profile
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute command to get email filter profile
-      # FQCN: ansible.netcommon.cli_command is used for direct CLI interaction
+    - name: Retrieve email filter profile via CLI
+      # Using FQCN for the network common CLI command module to ensure portability.
       ansible.netcommon.cli_command:
-        command: get firewall emailfilter-profile
-      register: email_output
-      # Idempotency: Read-only 'get' commands should never report a change in state
-      changed_when: false
-      # Error Handling: Fail the task if the command execution fails or returns an error message
+        command: get firewall emailfilter profile
+      register: email_data
+      # Error Handling: Explicitly identify failures if the command is unsupported or the device returns an error.
       failed_when:
-        - email_output.failed
-        - "'Unknown action' in email_output.stdout or 'command parse error' in email_output.stdout"
+        - email_data.failed or "Command fail" in email_data.stdout
 
-    - name: Verify email filter data retrieval
-      # Observability: Assert that the command successfully returned configuration data
+    - name: Validate retrieval success
+      # Observability: Assert that the command returned valid data to ensure the output is usable.
       ansible.builtin.assert:
         that:
-          - email_output.stdout is defined
-          - email_output.stdout | length > 0
-        fail_msg: "Retrieval failed: Output is empty. Check if emailfilter-profile is supported/configured."
-        success_msg: "Email filter configuration successfully captured."
+          - email_data.stdout is defined
+          - email_data.stdout | length > 0
+        fail_msg: "No email filter profile data was returned from the device."
+        success_msg: "Email filter profile data successfully captured."
+        quiet: true
 
-    - name: Display Email Filter Configuration
-      # Documentation: Provide clear visibility into the retrieved configuration for the operator
+    - name: Display Email Filter Details
+      # Observability: Format the output for clear human-readable feedback during execution.
       ansible.builtin.debug:
         msg: |
-          ======================= EMAIL FILTER PROFILES =======================
-          {{ email_output.stdout }}
+          ======================= EMAIL FILTER PROFILE =======================
+          {{ email_data.stdout }}

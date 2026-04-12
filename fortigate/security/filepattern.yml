@@ -1,36 +1,36 @@
 ---
-# FortiGate File Filter Retrieval
-# This playbook retrieves the file-filter-profile configuration from FortiGate devices.
-# It adheres to idempotency by performing a read-only operation and ensures 
-# observability through assertions and structured error handling.
+# FortiGate File Filter Retrieval Playbook
+# Improved for Idempotency, Observability, and Error Handling
+# Author: NetLearner Architect
 - name: Get FortiGate File Filter Profile
   hosts: fortigate
   gather_facts: false
-  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve firewall file-filter-profile configuration
-      # Using FQCN for the cli_command module to follow best practices
+    - name: Retrieve file filter profile configuration
+      # FQCN: Using ansible.netcommon for broad compatibility across network devices
       ansible.netcommon.cli_command:
-        command: show firewall file-filter-profile
-      register: file_filter_result
-      # Error Handling: Identify failure if the command returns an error string or fails execution
-      failed_when: 
-        - file_filter_result.failed or "Command fail. Return code" in file_filter_result.stdout
-      ignore_errors: false
+        command: get firewall file-filter-profile
+      register: file_filter_output
+      # IDEMPOTENCY: 'get' commands are read-only; changed_when: false ensures the task is reported as 'ok'
+      changed_when: false
+      # ERROR HANDLING: Ensure the command executed successfully on the device
+      failed_when:
+        - "command parse error" in file_filter_output.stdout | lower
+        - "unknown command" in file_filter_output.stdout | lower
 
-    - name: Validate retrieval success
-      # Observability: Assert that the output is not empty to verify successful communication
+    - name: Verify file filter data integrity
+      # OBSERVABILITY: Assert that the command returned meaningful content
       ansible.builtin.assert:
         that:
-          - file_filter_result.stdout is defined
-          - "firewall file-filter-profile" in file_filter_result.stdout
-        fail_msg: "The file-filter-profile configuration could not be retrieved or is not configured."
-        success_msg: "Successfully validated file-filter-profile configuration retrieval."
+          - file_filter_output.stdout is defined
+          - file_filter_output.stdout | length > 0
+        fail_msg: "File filter profile could not be retrieved or is empty."
+        success_msg: "File filter profile successfully retrieved and validated."
 
-    - name: Display File Filter Profile details
-      # Using FQCN for the debug module
+    - name: Display File Filter Configuration
+      # Documentation: Formatted output for operator visibility
       ansible.builtin.debug:
         msg: |
-          ======================= FILE FILTER CONFIGURATION =======================
-          {{ file_filter_result.stdout }}
+          ======================= FILE FILTER PROFILE =======================
+          {{ file_filter_output.stdout }}

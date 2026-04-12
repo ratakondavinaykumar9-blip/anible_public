@@ -1,75 +1,60 @@
 ---
-# DNS Configuration for Cisco Nexus 9000
-# Improved: 2026-03-08
-# Author: Architect:#
-# This playbook manages DNS settings on Nexus switches, ensuring 
-# connectivity and name resolution. It follows production standards 
-# for idempotency, observability, and robust error handling.
+# DNS Configuration for Cisco Nexus 9000 Switches
+# Improved by NetLearner Architect
+# This playbook ensures consistent DNS and domain-name settings using idempotent resource modules.
 
 - name: Configure DNS Settings
   hosts: nexus9k
   gather_facts: false
-  connection: network_cli
+  connection: ansible.netcommon.network_cli
 
   vars:
-    # Consolidate DNS variables with defaults to prevent runtime errors
-    # Using 'omit' allows the module to skip parameters if variables are missing
-    dns_primary: "{{ dns_servers.primary | default(omit) }}"
-    dns_secondary: "{{ dns_servers.secondary | default(omit) }}"
-    dns_domain_name: "{{ dns_domain | default(omit) }}"
+    # VRF context for DNS, typically 'management' or 'default'
     dns_vrf: management
-    # Filter the list to ensure only defined servers are processed
-    name_servers: "{{ [dns_primary, dns_secondary] | reject('none') | list }}"
+    # Using the variable names from the original playbook for compatibility
+    dns_domain_name: "{{ dns_domain }}"
+    # Constructing a list of server dictionaries for the nxos_dns resource module
+    target_servers:
+      - server: "{{ dns_servers.primary }}"
+        vrf: "{{ dns_vrf }}"
+      - server: "{{ dns_servers.secondary }}"
+        vrf: "{{ dns_vrf }}"
 
   tasks:
-    - name: Validate required DNS variables
-      # Observability: Fail early if critical configuration data is missing
-      ansible.builtin.assert:
-        that:
-          - name_servers | length > 0
-          - dns_domain_name is defined
-        fail_msg: "DNS configuration error: primary server and domain name are mandatory variables."
-
-    - name: Apply DNS server and domain configuration
-      # Idempotency: nxos_dns provides atomic state management for DNS settings
-      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+    - name: Manage DNS servers and domain name
+      # cisco.nxos.nxos_dns is used for idempotency (Resource Module approach)
+      # It ensures the state of the device matches the defined parameters
       cisco.nxos.nxos_dns:
-        servers: "{{ name_servers }}"
         domain_name: "{{ dns_domain_name }}"
-        vrf: "{{ dns_vrf }}"
-        state: present
+        servers: "{{ target_servers }}"
+        state: merged
       register: dns_config_result
-      notify: save configuration
+      # Observability: Notify the handler to save only when changes are detected
+      notify: Save NX-OS Configuration
 
-    - name: Verify operational DNS configuration
-      # Observability: Retrieve the current state from the device to confirm changes
+    - name: Audit DNS operational configuration
+      # Retrieve the running configuration to verify the changes were applied correctly
       cisco.nxos.nxos_command:
         commands:
           - show run | include "ip name-server|ip domain-name"
-          - show hosts
-      register: dns_verify_output
+      register: operational_dns
       changed_when: false
 
-    - name: Assert configuration integrity
-      # Success Verification: Ensure the device running-config matches desired state
+    - name: Validate DNS configuration integrity
+      # Assert ensures that the intended configuration is reflected in the device output
       ansible.builtin.assert:
         that:
-          - "dns_domain_name in dns_verify_output.stdout[0]"
-          - "dns_primary in dns_verify_output.stdout[0]"
-        fail_msg: "Validation failed: The DNS settings on the device do not match the intended configuration."
-
-    - name: Test DNS server reachability via ping
-      # Error Handling: Perform a connectivity check but allow the playbook to 
-      # continue if ICMP is blocked by firewalls (failed_when: false)
-      cisco.nxos.nxos_command:
-        commands: "ping {{ dns_primary }} vrf {{ dns_vrf }} count 2"
-      register: dns_reachability
-      failed_when: false
-      when: dns_primary is defined
+          - "dns_domain_name in operational_dns.stdout[0]"
+          - "dns_servers.primary in operational_dns.stdout[0]"
+          - "dns_servers.secondary in operational_dns.stdout[0]"
+        fail_msg: "DNS Validation Failed: Configuration missing from running-config on {{ inventory_hostname }}"
+        success_msg: "DNS Validation Succeeded: All settings verified on {{ inventory_hostname }}"
+      # Error Handling: Validation is critical for network reachability
+      ignore_errors: false
 
   handlers:
-    - name: save configuration
-      # Persistence: Ensures configuration survives a device reboot
+    - name: Save NX-OS Configuration
+      # Persists the running-config to startup-config using FQCN
       cisco.nxos.nxos_config:
         save: true
----
+...

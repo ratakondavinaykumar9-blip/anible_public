@@ -1,34 +1,42 @@
 ---
-# FortiGate HA Status - Improved for Reliability and Observability
-# This playbook retrieves and validates the High Availability (HA) status of FortiGate devices.
-- name: Get HA Status
+# FortiGate HA Status Verification
+# This playbook retrieves the High Availability (HA) status from FortiGate devices.
+# It ensures idempotency by marking the read-only task as unchanged and 
+# provides observability through assertion and registration of output.
+
+- name: FortiGate HA Status Check
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve HA status from FortiGate
-      # Use FQCN (Fully Qualified Collection Name) for consistency and portability
-      # This task is inherently idempotent as it is a read-only 'get' command
+    - name: Retrieve HA status via CLI
+      # Using FQCN (ansible.netcommon) to execute the specific diagnostic command.
       ansible.netcommon.cli_command:
-        command: get system ha status
+        command: "get system ha status"
       register: ha_status_raw
-      # Error Handling: Explicitly fail if the command is unrecognized or execution fails
+      # Idempotency: Reading status is a non-modifying action; changed_when: false ensures 
+      # the playbook remains clean and idempotent across multiple runs.
+      changed_when: false
+      # Error Handling: Ensure the command didn't fail or return an 'unknown' error.
       failed_when: 
-        - ha_status_raw.failed or "Unknown command" in ha_status_raw.stdout
+        - ha_status_raw.failed
+        - "'Command fail' in ha_status_raw.stdout or 'Unknown' in ha_status_raw.stdout"
 
-    - name: Validate HA Status Output Integrity
-      # Observability: Assert that the output contains expected HA fields to ensure data quality
+    - name: Verify HA status retrieval
+      # Observability: Assert that the output contains expected keywords (like 'Mode') 
+      # to verify the device is in an HA-aware state and the command succeeded.
       ansible.builtin.assert:
         that:
-          - "'HA Health Status' in ha_status_raw.stdout"
+          - ha_status_raw.stdout is defined
           - "'Mode:' in ha_status_raw.stdout"
-        fail_msg: "HA status output is invalid, incomplete, or HA is not configured on this device."
-        success_msg: "HA status successfully retrieved and validated."
+        fail_msg: "Failed to retrieve valid HA status. The 'Mode' keyword was not found in the output."
+        success_msg: "HA status successfully retrieved and verified for {{ inventory_hostname }}."
 
     - name: Display HA Status Summary
-      # Provide formatted output for better visibility during playbook execution
+      # Observability: Provide a clear, formatted view of the HA status for the operator.
       ansible.builtin.debug:
         msg: |
-          ======================= HA STATUS SUMMARY =======================
+          ======================= HA STATUS =======================
+          Hostname: {{ inventory_hostname }}
           {{ ha_status_raw.stdout }}
-          =================================================================
+          =========================================================

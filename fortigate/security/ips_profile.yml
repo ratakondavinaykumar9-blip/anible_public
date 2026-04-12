@@ -1,40 +1,34 @@
 ---
-# FortiGate IPS Profile Retrieval
-# Improved: 2026-03-08
-# Author: Architect:#
-# This playbook retrieves the IPS profile (sensor) configuration from FortiGate devices.
-# It follows automation best practices for idempotency, observability, and error handling.
+# FortiGate IPS Profile Retrieval and Validation
+# This playbook retrieves IPS profile information from FortiGate devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
 
-- name: Retrieve and Verify FortiGate IPS Profiles
+- name: FortiGate IPS Profile
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Get IPS Profile configuration from device
-      # Use FQCN for network common CLI command
+    - name: Retrieve IPS Profile information via CLI
+      # Using FQCN for network command execution. 
+      # This operation is idempotent as it is a read-only 'get' command.
       ansible.netcommon.cli_command:
-        command: show firewall ips sensor
-      register: ips_profile_output
-      # Idempotency: Read-only 'show' commands must not trigger a 'changed' state
-      changed_when: false
-      # Error Handling: Ensure the command was successful and not rejected by the CLI
-      failed_when:
-        - ips_profile_output.stdout is not defined
-        - "'Command fail' in ips_profile_output.stdout"
-        - "'Unknown action' in ips_profile_output.stdout"
+        command: get firewall ipsprofile
+      register: ips_output
+      # Error Handling: Ensure the task fails explicitly if the command execution fails.
+      failed_when: ips_output.failed or "Unknown action" in ips_output.stdout
 
-    - name: Validate IPS Profile response data
-      # Observability: Verify that the output contains expected configuration keywords
+    - name: Validate IPS Profile data retrieval
+      # Observability: Verifying that the command returned non-empty content.
       ansible.builtin.assert:
         that:
-          - ips_profile_output.stdout | length > 0
-          - "'edit' in ips_profile_output.stdout or 'config' in ips_profile_output.stdout"
-        fail_msg: "The IPS profile configuration could not be retrieved or is empty."
-        success_msg: "IPS profile configuration successfully retrieved and validated."
+          - ips_output.stdout is defined
+          - ips_output.stdout | length > 0
+        fail_msg: "Failed to retrieve IPS profile data or the device returned an empty response."
+        success_msg: "IPS profile data successfully retrieved and validated."
 
-    - name: Display IPS Profile configuration
-      # Observability: Present the retrieved configuration in a readable format
+    - name: Display IPS Profile details
+      # Documentation: Providing clear visibility of the operational state for the operator.
       ansible.builtin.debug:
         msg: |
-          ======================= IPS PROFILE (SENSORS) =======================
-          {{ ips_profile_output.stdout }}
+          ======================= IPS PROFILE =======================
+          {{ ips_output.stdout }}

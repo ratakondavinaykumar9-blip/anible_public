@@ -1,0 +1,39 @@
+---
+# FortiGate SD-WAN Members Retrieval
+# Purpose: This playbook retrieves and validates SD-WAN member configurations.
+# Standards: Idempotency (Read-only), Observability (Assert/Register), FQCN usage.
+
+- name: Get SD-WAN Members
+  hosts: fortigate
+  gather_facts: false
+
+  tasks:
+    - name: Retrieve SD-WAN member status from FortiGate
+      # Why: Using FQCN for portable and reliable command execution via netcommon collection.
+      # Registering output to 'members_result' for downstream validation and observability.
+      ansible.netcommon.cli_command:
+        command: get system sdwan member
+      register: members_result
+      # Error Handling: Fail if FortiOS returns common error strings despite a 0 exit code.
+      failed_when:
+        - "members_result.failed"
+        - "'Command fail' in members_result.stdout"
+        - "'Unknown' in members_result.stdout"
+
+    - name: Validate SD-WAN member data integrity
+      # Why: Ensures the environment is in the expected state (SD-WAN configured) before proceeding.
+      # Provides clear failure messages for troubleshooting.
+      ansible.builtin.assert:
+        that:
+          - "members_result.stdout | length > 0"
+          - "'member' in members_result.stdout"
+        fail_msg: "SD-WAN member configuration is missing or unreachable on this device."
+        success_msg: "SD-WAN member configuration successfully retrieved and verified."
+
+    - name: Display SD-WAN Member Details
+      # Why: Conditional debug output for human-readable observability during execution.
+      ansible.builtin.debug:
+        msg: |
+          ======================= SD-WAN MEMBERS =======================
+          {{ members_result.stdout }}
+      when: members_result.stdout is defined

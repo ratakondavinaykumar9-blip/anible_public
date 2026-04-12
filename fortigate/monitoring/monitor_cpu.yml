@@ -1,57 +1,67 @@
 ---
-# FortiGate CPU Monitoring and Performance Analysis
-# Improved by Architect:# Standards Compliance: Idempotency, Observability, Documentation, Error Handling, FQCN
+# FortiGate CPU Monitoring
+# Improved: 2026-03-15
+# Author: NetLearner Architect
+#
+# Purpose: Retrieves real-time CPU performance and process statistics.
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
+---
 - name: Monitor FortiGate CPU Performance
   hosts: fortigate
   gather_facts: false
+  vars:
+    # Defining expected patterns for observability validation
+    cpu_header: "CPU"
+    top_header: "RunTime"
 
   tasks:
-    - name: Retrieve current CPU performance status
-      # Use FQCN for network commands. Read-only operation ensures idempotency.
+    - name: "MONITOR | Retrieve system performance status"
+      # Idempotency: Read-only CLI command execution has no impact on device state.
+      # FQCN: Using fully qualified collection name for portability and best practice.
       ansible.netcommon.cli_command:
-        command: "get system performance status | grep CPU"
-      register: cpu_perf
-      # Error Handling: Ensure the command was accepted by the device
-      failed_when: cpu_perf.rc != 0
-      changed_when: false
+        command: "get system performance status"
+      register: cpu_raw
+      # Error Handling: Explicitly fail if the command fails or returns no output.
+      failed_when: 
+        - cpu_raw.failed
+        - cpu_raw.stdout | length == 0
 
-    - name: Validate CPU status output
-      # Observability: Assert that the output contains expected data patterns
+    - name: "ASSERT | Validate CPU data integrity"
+      # Observability: Confirm that the output actually contains the expected CPU metrics.
       ansible.builtin.assert:
         that:
-          - cpu_perf.stdout is defined
-          - "'CPU' in cpu_perf.stdout"
-        fail_msg: "Failed to retrieve valid CPU performance metrics."
+          - "cpu_header in cpu_raw.stdout"
+        fail_msg: "The command 'get system performance status' did not return valid CPU data."
         quiet: true
 
-    - name: Capture snapshot of system processes (Top)
-      # Improved: Using non-interactive iteration (1 second, 20 lines, 1 iteration)
-      # to prevent the automation from hanging on a persistent process view.
+    - name: "MONITOR | Retrieve top process usage"
+      # 'diagnose system top 1 20 1' ensures the command is non-interactive.
+      # Parameters: 1s delay, 20 lines, 1 iteration.
       ansible.netcommon.cli_command:
         command: "diagnose system top 1 20 1"
-      register: top_snapshot
-      failed_when: top_snapshot.rc != 0
-      changed_when: false
+      register: top_raw
+      # Error Handling: We allow the playbook to continue if process monitoring fails, 
+      # but we capture the failure state via registration.
+      ignore_errors: true
 
-    - name: Validate process snapshot data
-      # Observability: Verify that the process list was successfully captured
+    - name: "ASSERT | Validate process list retrieval"
+      # Observability: Verify that the process table header is present in the output.
       ansible.builtin.assert:
         that:
-          - top_snapshot.stdout is defined
-          - top_snapshot.stdout | length > 0
-        fail_msg: "Process snapshot returned empty or failed."
+          - "not top_raw.failed"
+          - "top_header in top_raw.stdout"
+        fail_msg: "Process monitoring failed or returned an unrecognized format."
         quiet: true
 
-    - name: Display Consolidated CPU Monitoring Report
-      # Documentation: Clear visualization of the gathered performance data
+    - name: "DISPLAY | Report CPU Monitoring Results"
+      # Documentation: Providing a structured output for easy log analysis.
       ansible.builtin.debug:
         msg: |
-          ======================= CPU MONITORING REPORT =======================
-          TIMESTAMP: {{ lookup('pipe', 'date +%Y-%m-%d\ %H:%M:%S') }}
+          ======================= CPU MONITORING SUMMARY =======================
+          DEVICE: {{ inventory_hostname }}
           
-          CURRENT CPU METRICS:
-          {{ cpu_perf.stdout }}
-
-          PROCESS SNAPSHOT (TOP):
-          {{ top_snapshot.stdout }}
-          =====================================================================
+          --- SYSTEM PERFORMANCE ---
+          {{ cpu_raw.stdout }}
+          
+          --- TOP PROCESSES ---
+          {{ top_raw.stdout | default('No process data available.') }}

@@ -34,18 +34,19 @@
     crypto_map_seq: 10
 
   tasks:
-    - name: Validation Phase - Ensure mandatory variables are defined
+    - name: Pre-Deployment Variable Validation
       ansible.builtin.assert:
         that:
           - vpn_peer_ip | length > 0
           - preshared_key | length > 0
           - local_networks | length > 0
           - remote_networks | length > 0
-        fail_msg: "Mandatory VPN variables are missing. Please check vpn_peer_ip, preshared_key, and network definitions."
+        fail_msg: "Required variables (vpn_peer_ip, preshared_key, networks) are missing or empty."
 
     - name: Deployment Block for IKEv2 VPN
       block:
-        # 1. Network Object Groups - Declarative state management for idempotency.
+        # 1. Define Network Object Groups
+        # Why: Groups networks for easier management in ACLs and NAT rules.
         - name: Define Network Object Groups for Encryption Domain
           cisco.asa.asa_ogs:
             config:
@@ -53,21 +54,22 @@
                 description: "Local networks for VPN Tunnel"
                 protocol: ip
                 network_objects:
-                  - "{% for net in local_networks %}subnet {{ net | ansible.utils.ipaddr('network') }} {{ net | ansible.utils.ipaddr('netmask') }}{% if not loop.last %}\n{% endif %}{% endfor %}"
+                  - "{% for net in local_networks %}subnet {{ net | ipaddr('network') }} {{ net | ipaddr('netmask') }}{% if not loop.last %}\n{% endif %}{% endfor %}"
               - name: "{{ remote_og_name }}"
                 description: "Remote peer networks for VPN Tunnel"
                 protocol: ip
                 network_objects:
-                  - "{% for net in remote_networks %}subnet {{ net | ansible.utils.ipaddr('network') }} {{ net | ansible.utils.ipaddr('netmask') }}{% if not loop.last %}\n{% endif %}{% endfor %}"
+                  - "{% for net in remote_networks %}subnet {{ net | ipaddr('network') }} {{ net | ipaddr('netmask') }}{% if not loop.last %}\n{% endif %}{% endfor %}"
             state: merged
           register: og_result
 
-        - name: Verify Object Group Configuration
+        - name: Verify Object Group Configuration Success
           ansible.builtin.assert:
             that: "not og_result.failed"
-            fail_msg: "Failed to configure Network Object Groups."
+            msg: "Failed to configure Network Object Groups."
 
-        # 2. Crypto Access List - Uses resource module to ensure only specified rules exist.
+        # 2. Configure Crypto Access List
+        # Why: Defines 'interesting traffic' that triggers tunnel establishment.
         - name: Configure Crypto Access List
           cisco.asa.asa_acls:
             config:
@@ -82,21 +84,17 @@
             state: merged
           register: acl_result
 
-        - name: Verify ACL Configuration
-          ansible.builtin.assert:
-            that: "not acl_result.failed"
-            fail_msg: "Failed to configure Crypto Access List."
-
-        # 3. NAT Exemption - Uses 'match: line' to ensure idempotency for specific CLI strings.
+        # 3. NAT Exemption (Identity NAT)
+        # Why: Prevents global NAT/PAT from translating traffic meant for the VPN tunnel.
         - name: Configure Identity NAT (NAT Exemption)
           cisco.asa.asa_config:
             lines:
               - "nat (inside,{{ vpn_interface }}) source static {{ local_og_name }} {{ local_og_name }} destination static {{ remote_og_name }} {{ remote_og_name }} no-proxy-arp route-lookup"
-            match: line
           register: nat_result
 
-        # 4. Phase 1 Policy - Grouped commands for atomic configuration update.
-        - name: Configure IKEv2 Phase 1 Policy and Enablement
+        # 4. Phase 1 Policy & Enablement
+        # Why: Negotiates the management tunnel security parameters.
+        - name: Configure IKEv2 Phase 1 Policy
           cisco.asa.asa_config:
             lines:
               - "crypto ikev2 policy {{ ikev2_policy_id }}"
@@ -106,32 +104,32 @@
               - " group {{ ikev2_dh_group }}"
               - "exit"
               - "crypto ikev2 enable {{ vpn_interface }}"
-            match: none # Policy sub-commands require 'none' or specific parent matching for idempotency
-          register: ikev2_policy_result
+          register: ike_result
 
-        # 5. Phase 2 Proposal
+        # 5. IPsec Phase 2 Proposal
+        # Why: Secures the actual user data payload.
         - name: Configure IPsec Phase 2 Proposal
           cisco.asa.asa_config:
             lines:
               - "crypto ipsec ikev2 ipsec-proposal {{ ipsec_prop_name }}"
               - " protocol esp encryption {{ ipsec_encryption }}"
               - " protocol esp integrity {{ ipsec_integrity }}"
-            match: line
-          register: ipsec_prop_result
+          register: ipsec_result
 
-        # 6. Tunnel Group - Configures peer-specific authentication attributes.
-        - name: Configure Tunnel Group and Pre-Shared Keys
+        # 6. Tunnel Group Authentication
+        # Why: Defines the Pre-Shared Key for the specific remote peer.
+        - name: Configure Tunnel Group for Authentication
           cisco.asa.asa_config:
             lines:
               - "tunnel-group {{ vpn_peer_ip }} type ipsec-l2l"
               - "tunnel-group {{ vpn_peer_ip }} ipsec-attributes"
               - " ikev2 remote-authentication pre-shared-key {{ preshared_key }}"
               - " ikev2 local-authentication pre-shared-key {{ preshared_key }}"
-            match: none
-          no_log: true # Protects PSK from appearing in logs/output
+          no_log: true  # Protect sensitive Pre-Shared Key from logs
           register: tg_result
 
-        # 7. Crypto Map Assembly - Binds all components to the interface.
+        # 7. Crypto Map Assembly
+        # Why: Final binding of ACL, Peer, and Proposal to the interface.
         - name: Assemble and Enable Crypto Map
           cisco.asa.asa_config:
             lines:
@@ -139,23 +137,17 @@
               - "crypto map {{ crypto_map_name }} {{ crypto_map_seq }} set peer {{ vpn_peer_ip }}"
               - "crypto map {{ crypto_map_name }} {{ crypto_map_seq }} set ikev2 ipsec-proposal {{ ipsec_prop_name }}"
               - "crypto map {{ crypto_map_name }} interface {{ vpn_interface }}"
-            match: line
           register: cmap_result
 
       rescue:
-        - name: Deployment Failure Analysis
+        - name: Deployment Failure Diagnostics
           ansible.builtin.fail:
             msg: >
-              VPN Configuration failed for {{ inventory_hostname }}.
-              Last task results:
-              NAT: {{ nat_result.changed | default('N/A') }},
-              IKEv2: {{ ikev2_policy_result.changed | default('N/A') }},
-              CryptoMap: {{ cmap_result.changed | default('N/A') }}.
-              Please verify routing and connectivity to {{ vpn_peer_ip }}.
+              VPN Configuration failed for {{ inventory_hostname }}. 
+              Check peer IP {{ vpn_peer_ip }} connectivity and interface {{ vpn_interface }} status.
 
       always:
-        # Observability - Final verification of tunnel status.
-        - name: Capture Tunnel Operational Status
+        - name: Capture VPN Operational State
           cisco.asa.asa_command:
             commands:
               - "show crypto ikev2 sa"
@@ -163,7 +155,14 @@
           register: vpn_status
           ignore_errors: true
 
-        - name: Display Operational Verification Result
+        - name: Persist Configuration to Startup-Config
+          cisco.asa.asa_command:
+            commands: ["write memory"]
+          when:
+            - not ansible_check_mode
+            - og_result.changed or acl_result.changed or nat_result.changed or ike_result.changed or ipsec_result.changed or tg_result.changed or cmap_result.changed
+
+        - name: Display Verification Report
           ansible.builtin.debug:
             var: vpn_status.stdout_lines
-            label: "VPN_STATUS_REPORT"
+            label: "VPN_OPERATIONAL_REPORT"

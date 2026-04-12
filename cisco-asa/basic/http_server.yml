@@ -1,36 +1,35 @@
 ---
-# HTTP Server Status Verification
-# Purpose: Retrieves and validates the HTTP server configuration on Cisco ASA/Firepower devices.
-# This playbook follows industry standards for idempotency, observability, and robust error handling.
+# NetLearner Architect - Improved HTTP Server Status Playbook
+# This playbook retrieves and validates the HTTP server configuration on Cisco ASA/Firepower devices.
+# It follows enterprise standards for idempotency (read-only), observability, and error handling.
 
-- name: Get HTTP Server Status
+- name: Retrieve and Validate HTTP Server Status
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Facts are not required for simple CLI command execution, reducing overhead.
 
   tasks:
-    - name: Retrieve HTTP server configuration state
-      # Best Practice: Using Fully Qualified Collection Name (FQCN)
-      # Documentation: Executes the operational command to check if the HTTP server is enabled and configured.
+    - name: Execute 'show http server' command
+      # Using FQCN (Fully Qualified Collection Name) for cross-platform reliability.
       ansible.netcommon.cli_command:
         command: show http server
-      register: http_output
-      # Error Handling: Catch scenarios where the command is rejected by the device parser.
+      register: http_server_output
+      # Error Handling: Identify failure if output is missing or indicates an invalid command.
       failed_when: 
-        - http_output.failed or "Invalid input" in http_output.stdout or "ERROR" in http_output.stdout
+        - http_server_output.stdout is not defined
+        - "'Invalid' in http_server_output.stdout or 'Error' in http_server_output.stdout"
 
-    - name: Validate command execution integrity
-      # Observability: Assert that the command returned a valid, non-empty response.
-      # Idempotency: Read-only operations are inherently idempotent; validation ensures consistent state reading.
+    - name: Assert HTTP Server status retrieval was successful
+      # Observability: Programmatic verification that the command returned expected data.
       ansible.builtin.assert:
         that:
-          - "http_output.stdout is defined"
-          - "http_output.stdout | length > 0"
-        fail_msg: "The HTTP server status could not be retrieved or the response was empty."
-        success_msg: "Successfully retrieved HTTP server status."
+          - "http_server_output.stdout | length > 0"
+          - "'http server' in http_server_output.stdout"
+        fail_msg: "Failed to retrieve a valid HTTP server status response from {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved and validated HTTP server status for {{ inventory_hostname }}."
 
-    - name: Display HTTP Server Operational Details
-      # Documentation: Provide clear visibility into the current device configuration for logging and auditing.
+    - name: Display Formatted HTTP Server Status
+      # Documentation/Visibility: Providing structured output for operational logs.
       ansible.builtin.debug:
         msg: |
-          ======================= HTTP SERVER STATUS =======================
-          {{ http_output.stdout }}
+          ======================= HTTP SERVER STATUS [{{ inventory_hostname }}] =======================
+          {{ http_server_output.stdout }}

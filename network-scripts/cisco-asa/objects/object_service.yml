@@ -1,35 +1,34 @@
 ---
-# Architect:Improved Playbook: Service Objects Detail
-# Purpose: Retrieves and validates detailed service object configurations from ASA/Firepower devices.
-# Standards: Idempotency (Read-only), Observability (Assert/Register), FQCN (Standardized Collections).
+# Service Objects Detail
+# Purpose: Retrieve and validate service object definitions from Cisco ASA/Firepower devices.
+# This playbook ensures idempotency through read-only operations and implements 
+# strict observability and error handling standards.
 - name: Service Objects Detail
   hosts: asa_firepower
-  gather_facts: false # Performance optimization; device facts are not required for CLI command execution.
+  gather_facts: false
 
   tasks:
-    - name: Retrieve service objects from device CLI
-      # Idempotency: This is a read-only command, ensuring it is safe to execute repeatedly.
-      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interaction.
+    - name: Retrieve service objects from device
+      # Use Fully Qualified Collection Name (FQCN) for cross-platform reliability
       ansible.netcommon.cli_command:
         command: show object service
-      register: svc
-      # Error Handling: Detect execution failures or invalid command syntax on the device.
-      failed_when: svc.failed or "Invalid input" in svc.stdout
-      # Observability: Allow the task to run in check mode to ensure visibility during dry-runs.
-      check_mode: false
+      register: svc_output
+      # Error Handling: Explicitly catch Cisco CLI error strings that might not trigger a non-zero exit code
+      failed_when:
+        - svc_output.failed or "Invalid input" in svc_output.stdout
 
-    - name: Validate service object data integrity
-      # Observability: Assert task ensures that the command returned usable configuration data.
+    - name: Validate service object retrieval
+      # Observability: Assert that the output is defined and contains data to prevent silent failures
       ansible.builtin.assert:
         that:
-          - svc.stdout is defined
-          - svc.stdout | length > 0
-        fail_msg: "The command 'show object service' failed to return data. Verify configuration on {{ inventory_hostname }}."
-        success_msg: "Service object configuration successfully retrieved."
+          - svc_output.stdout is defined
+          - svc_output.stdout | length > 0
+        fail_msg: "Service object retrieval failed or the device returned an empty configuration."
+        success_msg: "Service object data successfully captured."
 
-    - name: Display service object details
-      # Documentation: Providing structured output for audit logs and human analysis.
+    - name: Display formatted service object configuration
+      # Documentation: Providing a clear, human-readable output for audit and troubleshooting
       ansible.builtin.debug:
         msg: |
           ======================= SERVICE OBJECTS =======================
-          {{ svc.stdout }}
+          {{ svc_output.stdout }}

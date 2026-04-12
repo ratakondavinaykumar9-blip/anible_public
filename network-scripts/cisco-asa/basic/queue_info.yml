@@ -1,34 +1,35 @@
 ---
-# Playbook: Get Network Interface Queue Information
-# Purpose: Retrieves and validates interface queue statistics from Cisco ASA/Firepower devices.
-# Standards: Idempotency (Read-only), Observability (Assert), Documentation (Comments), FQCN usage.
+# Playbook: Retrieve Cisco ASA/Firepower Interface Queue Information
+# Why: This playbook monitors hardware and software queues to diagnose interface congestion and packet drops.
+# Standards: Uses FQCN, ensures observability via assertions, and maintains idempotency through read-only operations.
+
 - name: Get Queue Info
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
     - name: Execute 'show queue' command on the device
-      # Using FQCN for better portability and consistency across environments.
-      # Read-only 'show' commands are inherently idempotent.
+      # FQCN: Using ansible.netcommon for standardized network command execution.
+      # Idempotency: 'show' commands are inherently idempotent as they do not modify device state.
       ansible.netcommon.cli_command:
         command: show queue
       register: queue_output
-      # Error Handling: Ensure we catch command-level failures or unsupported syntax.
-      failed_when: 
-        - queue_output.failed or "Invalid input" in queue_output.stdout
+      # Error Handling: Fail if the output indicates the command is unsupported or if execution fails.
+      failed_when:
+        - queue_output.stdout is not defined
+        - "'Invalid input' in queue_output.stdout or 'Error' in queue_output.stdout"
 
-    - name: Verify queue information was successfully retrieved
-      # Observability: Assert that the output is not empty to ensure data integrity before reporting.
+    - name: Validate that queue data was successfully captured
+      # Observability: Using assertions to verify the device returned a non-empty response.
       ansible.builtin.assert:
         that:
-          - queue_output.stdout is defined
           - queue_output.stdout | length > 0
-        fail_msg: "Failed to retrieve queue information or command returned an empty result."
-        success_msg: "Queue information successfully captured."
+        fail_msg: "No queue information was returned from the device. Check interface status."
+        success_msg: "Queue information successfully retrieved and validated."
 
     - name: Display formatted queue statistics
-      # Documentation: Providing a clear, readable summary for network administrators.
+      # Documentation: Providing clear, human-readable output for network operations monitoring.
       ansible.builtin.debug:
         msg: |
-          ======================= QUEUES ({{ inventory_hostname }}) =======================
+          ======================= INTERFACE QUEUE DATA =======================
           {{ queue_output.stdout }}

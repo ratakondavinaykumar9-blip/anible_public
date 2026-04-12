@@ -1,90 +1,79 @@
 ---
 # Backup ASA Configuration
-# Improved by Architect:# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: Backup ASA Configuration
+# Improved for: Idempotency, Observability, and Error Handling
+# Standards: FQCN usage, Assertions, and Contextual Documentation
+- name: Backup Cisco ASA Configuration
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: no
   vars:
+    # Defined directory for local backup storage on the control node
     backup_path: "/tmp/asa_backups"
+    # ISO8601 timestamp for unique file naming across multiple runs
+    timestamp: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
+    backup_name: "{{ inventory_hostname }}_{{ timestamp }}"
 
   tasks:
-    - name: Gather local facts for consistent timestamping
-      # Documentation: Collects time facts from the control node to ensure a synchronized timestamp
-      ansible.builtin.setup:
-      delegate_to: localhost
+    - name: "FACTS: Generate timestamp if not provided"
+      ansible.builtin.set_fact:
+        run_timestamp: "{{ timestamp }}"
       run_once: true
 
-    - name: Set backup filename variable
-      # Idempotency: Using a fixed timestamp from localhost facts for all hosts in this run
-      ansible.builtin.set_fact:
-        backup_name: "{{ inventory_hostname }}_{{ hostvars['localhost']['ansible_date_time']['iso8601_basic_short'] }}"
-
-    - name: Ensure backup directory exists
-      # Idempotency: ansible.builtin.file ensures the directory state without redundant changes
+    - name: "DIR: Ensure backup directory exists on control node"
       ansible.builtin.file:
         path: "{{ backup_path }}"
         state: directory
         mode: '0755'
+      delegate_to: localhost
       run_once: true
-      register: dir_creation
 
-    - name: Verify backup directory accessibility
-      # Observability: Explicitly assert that the directory is ready for storage
-      ansible.builtin.assert:
-        that:
-          - dir_creation is not failed
-        fail_msg: "The backup directory '{{ backup_path }}' is not accessible or could not be created."
-
-    - name: Retrieve running configuration
-      # FQCN: Using ansible.netcommon for standardized CLI command execution
+    - name: "ASA: Retrieve running-config from device"
       ansible.netcommon.cli_command:
         command: show running-config
       register: running_output
-      # Error Handling: Check for empty output or common Cisco CLI error strings
       failed_when: 
-        - running_output.stdout | length == 0
+        - running_output.stdout is not defined
         - "'Invalid' in running_output.stdout"
-        - "'Incomplete' in running_output.stdout"
 
-    - name: Retrieve startup configuration
+    - name: "OBSERVE: Verify running-config content is valid"
+      ansible.builtin.assert:
+        that:
+          - "running_output.stdout | length > 0"
+          - "': Saved' in running_output.stdout or 'description' in running_output.stdout"
+        fail_msg: "Running configuration retrieved from {{ inventory_hostname }} is empty or invalid."
+
+    - name: "ASA: Retrieve startup-config from device"
       ansible.netcommon.cli_command:
         command: show startup-config
       register: startup_output
-      failed_when: 
-        - startup_output.stdout | length == 0
-        - "'Invalid' in startup_output.stdout"
+      # Use ignore_errors if startup-config might not exist, but here we expect it
+      ignore_errors: yes
 
-    - name: Validate configuration capture integrity
-      # Observability: Ensure we have actual content before proceeding to the save step
-      ansible.builtin.assert:
-        that:
-          - running_output.stdout is defined
-          - startup_output.stdout is defined
-        fail_msg: "Configuration retrieval returned null or undefined content for {{ inventory_hostname }}."
-
-    - name: Persist running configuration to disk
-      # Documentation: Saves content locally; using copy ensures we only update if content changes
+    - name: "SAVE: Write running-config to local filesystem"
       ansible.builtin.copy:
         content: "{{ running_output.stdout }}"
         dest: "{{ backup_path }}/{{ backup_name }}_running.cfg"
         mode: '0644'
+      delegate_to: localhost
       register: save_running
 
-    - name: Persist startup configuration to disk
+    - name: "SAVE: Write startup-config to local filesystem"
       ansible.builtin.copy:
         content: "{{ startup_output.stdout }}"
         dest: "{{ backup_path }}/{{ backup_name }}_startup.cfg"
         mode: '0644'
+      delegate_to: localhost
+      when: startup_output.stdout is defined and startup_output.stdout | length > 0
       register: save_startup
 
-    - name: Confirm successful file persistence
-      # Observability: Final check to confirm filesystem operations were successful
+    - name: "VERIFY: Ensure backup files were successfully created"
       ansible.builtin.assert:
         that:
-          - save_running is success
-          - save_startup is success
-        fail_msg: "Failed to write configuration files to {{ backup_path }} on the control node."
+          - save_running.changed or save_running.dest is defined
+        fail_msg: "Failed to persist the running configuration for {{ inventory_hostname }}."
 
-    - name: Display backup summary
+    - name: "SUMMARY: Display backup location"
       ansible.builtin.debug:
-        msg: "Backup verified and stored: {{ backup_path }}/{{ backup_name }}_*.cfg"
+        msg: 
+          - "Backup operation completed for {{ inventory_hostname }}"
+          - "Running: {{ save_running.dest | default('FAILED') }}"
+          - "Startup: {{ save_startup.dest | default('SKIPPED/FAILED') }}"

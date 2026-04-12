@@ -1,31 +1,41 @@
 ---
-# Environmentals - Improved for Standard:s
-# Purpose: Retrieves hardware health metrics (temperature, voltage, fans) from ASA/Firepower devices.
-- name: Get Environmental Info
+# Environmental Status Retrieval Playbook
+# Purpose: Check and verify environmental health on Cisco ASA/Firepower devices.
+# Standards: Idempotency, Observability (register/assert), Documentation, Error Handling, FQCN.
+# Author: NetLearner Architect
+
+- name: Get Environmental Information
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve environmental status via cli_command
-      # Why: Direct execution of operational command to gather current hardware state.
-      # Idempotency: show commands are read-only and inherently idempotent.
+    - name: Retrieve environmental status via CLI
+      # Use FQCN for best practices and portability.
+      # This task is inherently idempotent as it performs a non-destructive read operation.
       ansible.netcommon.cli_command:
         command: show environment
       register: env_output
-      # Error Handling: Fail if no data is returned to prevent silent failures in automation pipelines.
-      failed_when: 
-        - env_output.stdout is not defined or env_output.stdout == ""
+      # Error Handling: Ensure the command was recognized and executed successfully.
+      failed_when:
+        - env_output.failed or "Invalid command" in env_output.stdout
 
-    - name: Validate environmental output content
-      # Observability: Ensures the returned data is not just empty but contains expected information.
+    - name: Verify environmental health status
+      # Observability: Use assertions to confirm hardware sensors are within normal parameters.
+      # This validates the registered output rather than just displaying it.
       ansible.builtin.assert:
         that:
-          - env_output.stdout | length > 0
-        fail_msg: "The 'show environment' command returned empty or invalid data."
+          - "'Critical' not in env_output.stdout"
+          - "'Failure' not in env_output.stdout"
+        fail_msg: "Hardware health alert! 'Critical' or 'Failure' detected in 'show environment' output."
+        success_msg: "Environmental status verified: All hardware sensors report within normal range."
 
-    - name: Display environmental summary
-      # Observability: Formatted output for operator visibility during playbook execution.
+    - name: Display environmental status report
+      # Observability: Provide a human-readable summary of the current state.
       ansible.builtin.debug:
         msg: |
-          ======================= ENVIRONMENT DATA =======================
+          ======================================================================
+          DEVICE: {{ inventory_hostname }}
+          STATUS: VERIFIED HEALTHY
+          ========================= ENVIRONMENT DATA ==========================
           {{ env_output.stdout }}
+          ======================================================================
