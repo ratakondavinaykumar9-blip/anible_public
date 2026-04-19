@@ -1,33 +1,41 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: Get and Validate VLAN Information on ASA/Firepower
+# NetLearner Architect Standard: Network Observability & Validation
+# Purpose: Retrieves and validates VLAN configuration from Cisco ASA/Firepower appliances.
+# Compliance: Idempotent (Read-Only), Observable (Assert), and Error-Aware.
+
+- name: Get VLAN Info
   hosts: asa_firepower
   gather_facts: false
-  # Standard: Idempotency is inherent as this is a read-only operational command.
 
   tasks:
-    - name: Retrieve VLAN details via CLI
-      # Standard: Use Fully Qualified Collection Name (FQCN)
+    - name: Retrieve VLAN configuration from device
+      # FQCN: Using fully qualified collection names for stability and clarity.
       ansible.netcommon.cli_command:
         command: show vlan
-      register: vlan_result
-      # Standard: Error Handling - catch specific failure strings or execution errors
-      failed_when:
-        - vlan_result.failed or "Invalid input" in vlan_result.stdout or "ERROR" in vlan_result.stdout
+      # Idempotency: Read-only tasks are set to check_mode: false to ensure data is gathered during dry-runs.
+      check_mode: false
+      register: vlan_output
+      # Error Handling: Fail on execution error or if the device returns a CLI syntax error.
+      failed_when: >
+        vlan_output.failed or 
+        "Invalid input" in vlan_output.stdout or 
+        "incomplete command" in vlan_output.stdout.lower()
 
-    - name: Verify VLAN output integrity
-      # Standard: Observability - Ensure the command returned data before proceeding
+    - name: Validate VLAN information integrity
+      # Observability: Assert that the returned data is present and contains expected keywords.
       ansible.builtin.assert:
         that:
-          - vlan_result.stdout is defined
-          - vlan_result.stdout | length > 0
-        fail_msg: "VLAN information is empty or the command was not recognized by the device."
-        success_msg: "VLAN information successfully captured from {{ inventory_hostname }}."
+          - vlan_output.stdout is defined
+          - vlan_output.stdout | length > 0
+          - "'VLAN' in vlan_output.stdout or 'Name' in vlan_output.stdout"
+        fail_msg: "VLAN information is missing or the output format is unrecognized."
+        quiet: true
 
-    - name: Display formatted VLAN report
-      # Standard: Documentation - Provide clear, readable output for the operator
+    - name: Display formatted VLAN information
+      # Documentation: Provides clear operational visibility for logs and console output.
       ansible.builtin.debug:
         msg: |
-          ===========================================================
-          VLAN STATUS REPORT: {{ inventory_hostname }}
-          ===========================================================
-          {{ vlan_result.stdout }}
+          ======================= VLAN STATUS =======================
+          {{ vlan_output.stdout }}
+```

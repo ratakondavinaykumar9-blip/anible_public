@@ -1,46 +1,56 @@
----
-- name: "OPERATIONAL: Retrieve and Archive Cisco ASA/Firepower Tech Support Information"
+MCP issues detected. Run /mcp list for status.---
+# Show Tech Support - Enhanced for Enterprise NetLearner Standards
+# Purpose: Securely retrieve and archive technical support diagnostic data from ASA/Firepower devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+
+- name: Get Tech Support Info
   hosts: asa_firepower
   gather_facts: false
-  # Why: Gathering facts is disabled to speed up execution as we only need CLI access.
+  # Note: 'show tech-support' is resource-intensive; ensure ansible_command_timeout 
+  # is adjusted in ansible.cfg or inventory for large configurations.
 
   tasks:
-    - name: "DATA_COLLECTION: Execute 'show tech-support' on the remote device"
+    - name: Execute diagnostic command on remote device
+      # Use FQCN for network CLI operations
       ansible.netcommon.cli_command:
         command: show tech-support
-      register: tech_support_output
-      # Why: Capture the command output for validation and subsequent file writing.
-      # Error Handling: Fail if output is missing or contains common Cisco CLI error strings.
-      failed_when: >
-        tech_support_output.stdout is not defined or
-        'Invalid input' in tech_support_output.stdout or
-        '% Invalid' in tech_support_output.stdout
+      register: tech_output
+      # Error Handling: Explicitly catch command failures or invalid syntax responses
+      failed_when: 
+        - tech_output.failed or "Invalid input" in tech_output.stdout
+      # Documentation: This task is read-only and inherently idempotent
 
-    - name: "OBSERVABILITY: Validate that the tech-support output is not empty"
+    - name: Validate retrieved data integrity
+      # Observability: Ensure we didn't receive an empty or truncated buffer
       ansible.builtin.assert:
         that:
-          - "tech_support_output.stdout | length > 0"
-        fail_msg: "The tech-support output was empty. Check device status or connectivity."
-        success_msg: "Successfully captured tech-support data."
-      # Why: Ensure we have actual data before attempting to persist it to the filesystem.
+          - tech_output.stdout is defined
+          - tech_output.stdout | length > 0
+        fail_msg: "Tech support retrieval returned empty content for {{ inventory_hostname }}."
+        success_msg: "Tech support data validated for {{ inventory_hostname }}."
 
-    - name: "PERSISTENCE: Save captured tech-support data to a local file"
+    - name: Archive tech support data to local filesystem
+      # Idempotency: builtin.copy only writes if content differs from existing file
       ansible.builtin.copy:
-        content: "{{ tech_support_output.stdout }}"
+        content: "{{ tech_output.stdout }}"
         dest: "/tmp/asa_tech_support_{{ inventory_hostname }}.txt"
-        mode: '0644'
-      register: file_save_status
-      # Why: The copy module is idempotent; it only updates the file if the content has changed.
-      # Using a local path allows for centralized collection and offline analysis.
+        owner: root
+        group: root
+        mode: '0600' # Restricted permissions for sensitive diagnostic data
+      register: archive_result
 
-    - name: "OBSERVABILITY: Confirm file write operation status"
+    - name: Confirm persistence of diagnostic archive
+      # Observability: Verify the file system operation succeeded
       ansible.builtin.assert:
         that:
-          - "file_save_status.dest is defined"
-        fail_msg: "Failed to save the tech-support file to /tmp. Check local permissions."
-      # Why: Explicitly verify that the data was successfully written to the management station.
+          - archive_result.dest is defined
+          - archive_result.state == "file"
+        fail_msg: "Critical failure: Could not save tech support info to {{ archive_result.dest | default('destination') }}."
 
-    - name: "REPORTING: Display the summary of the capture operation"
+    - name: Report execution summary
       ansible.builtin.debug:
-        msg: "Tech support capture complete. File saved at: {{ file_save_status.dest }}"
-      # Why: Provide immediate feedback to the operator with the exact location of the artifact.
+        msg: 
+          - "Host: {{ inventory_hostname }}"
+          - "Status: {{ 'New/Updated File Created' if archive_result.changed else 'No Changes Detected (File current)' }}"
+          - "Path: {{ archive_result.dest }}"
+          - "Size: {{ tech_output.stdout | length }} bytes"

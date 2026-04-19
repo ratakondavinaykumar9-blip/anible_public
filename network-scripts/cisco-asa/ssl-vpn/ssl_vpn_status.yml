@@ -1,51 +1,59 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# SSL VPN Status Monitoring Playbook
-# This playbook retrieves operational state data from Cisco ASA/Firepower devices.
-# It follows NetLearner standards for idempotency, observability, and error handling.
-- name: Get SSL VPN Status
+# SSL VPN Operational Status Audit
+# Purpose: This playbook retrieves and validates the current state of SSL VPN sessions and statistics
+# on Cisco ASA/Firepower devices. It is designed for observability and idempotent execution.
+- name: SSL VPN Status Audit
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Get SSL VPN sessions
-      # Using cli_command for raw output retrieval; safe and idempotent for read-only operations.
+    - name: Retrieve active SSL VPN session database
+      # Why: Captures current user sessions to identify usage and potential capacity issues.
+      # This operation is read-only and inherently idempotent across multiple runs.
       ansible.netcommon.cli_command:
         command: show vpn-sessiondb ssl
-      register: ssl_sessions
-      # We allow failure here in case SSL VPN is not configured, preventing playbook termination.
-      ignore_errors: true
+      register: ssl_sessions_raw
+      # Error Handling: Fail only if the command itself is unrecognized or the connection fails.
+      failed_when: 
+        - ssl_sessions_raw.failed or "Invalid input" in ssl_sessions_raw.stdout
 
-    - name: Verify SSL VPN session command execution
-      # Observability: Ensure the command was accepted by the device.
+    - name: Validate SSL session data integrity
+      # Observability: Asserts that the register variable contains the expected stdout attribute.
       ansible.builtin.assert:
         that:
-          - ssl_sessions.failed is false
-        fail_msg: "Failed to retrieve SSL VPN sessions. Check if the command is supported in the current context."
-        success_msg: "Successfully retrieved SSL VPN session data."
+          - ssl_sessions_raw.stdout is defined
+        fail_msg: "Data Integrity Error: Failed to capture SSL VPN sessions from {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Get SSL VPN statistics
-      # Retrieves global SSL statistics to monitor handshake performance and cipher usage.
+    - name: Retrieve SSL protocol engine statistics
+      # Why: Monitors SSL negotiation versions and cipher suite usage for security auditing.
       ansible.netcommon.cli_command:
         command: show ssl
-      register: ssl_stats
-      failed_when: 
-        - ssl_stats.failed
-        - "'Invalid input' in ssl_stats.stderr"
+      register: ssl_protocol_stats
+      failed_when: ssl_protocol_stats.failed
 
-    - name: Verify SSL VPN statistics retrieval
-      # Observability: Validate that the statistics output is not empty.
+    - name: Validate SSL protocol data integrity
+      # Observability: Asserts that the protocol statistics were successfully registered.
       ansible.builtin.assert:
         that:
-          - ssl_stats.stdout is defined
-          - ssl_stats.stdout | length > 0
-        fail_msg: "SSL statistics output is empty or undefined."
+          - ssl_protocol_stats.stdout is defined
+        fail_msg: "Data Integrity Error: SSL protocol stats are missing from {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display SSL VPN Operational State
-      # Formatted output for human operators or logging systems.
+    - name: Display consolidated SSL VPN operational report
+      # Why: Aggregates captured data into a single, observable output for logging or monitoring.
       ansible.builtin.debug:
         msg: |
-          ======================= SSL VPN SESSION SUMMARY =======================
-          {{ ssl_sessions.stdout | default('No session data available') }}
-
-          ======================= SSL PROTOCOL STATISTICS =======================
-          {{ ssl_stats.stdout }}
+          ===========================================================
+          SSL VPN OPERATIONAL REPORT | Target: {{ inventory_hostname }}
+          ===========================================================
+          
+          --- SESSION DATABASE ---
+          {{ ssl_sessions_raw.stdout | default('No session data captured') }}
+          
+          --- PROTOCOL ENGINE STATUS ---
+          {{ ssl_protocol_stats.stdout | default('No protocol stats captured') }}
+          
+          ===========================================================
+```

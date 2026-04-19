@@ -1,36 +1,49 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# CPU History Monitoring Playbook
-# Purpose: Retrieves and validates CPU usage history from Cisco ASA/Firepower devices.
-# Standards: Idempotent (Read-only), uses FQCN, includes validation and error handling.
-- name: Retrieve Cisco ASA/Firepower CPU History
+# ASA/Firepower CPU Performance History Audit
+# Improved by: NetLearner Architect
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
+#
+# Purpose: This playbook retrieves historical CPU metrics from Cisco ASA/Firepower 
+# devices to identify performance trends. It is designed to be safe for repeated 
+# execution and provides explicit verification of the gathered data.
+
+- name: ASA/Firepower CPU Performance History Audit
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Get CPU history from device
-      # Using FQCN ansible.netcommon.cli_command for standardized network interaction.
-      # This task is idempotent as it does not modify device configuration.
+    - name: Retrieve CPU utilization history from security appliance
+      # FQCN: Using the fully qualified collection name for portability.
+      # Idempotency: This is a read-only operation and is safe to run repeatedly.
       ansible.netcommon.cli_command:
         command: show cpu history
-      register: cpu_result
-      # Error Handling: Fail if the device returns common Cisco error indicators.
-      failed_when: 
-        - '"Invalid input" in cpu_result.stdout'
-        - '"%" in cpu_result.stdout'
+      register: cpu_history_output
+      # Error Handling: Explicitly fail if the command is unrecognized or the module reports failure.
+      failed_when: >
+        cpu_history_output.failed or 
+        "Invalid input" in cpu_history_output.stdout or
+        "ERROR:" in cpu_history_output.stdout
 
-    - name: Validate CPU data observability
-      # Observability: Ensure that the command returned meaningful content.
+    - name: Validate telemetry data integrity and observability
+      # Observability: Using assertions to verify that meaningful data was returned.
+      # This prevents the playbook from silently passing if the output is malformed or empty.
       ansible.builtin.assert:
         that:
-          - cpu_result.stdout is defined
-          - cpu_result.stdout | length > 0
-        fail_msg: "CPU history retrieval failed: Received empty output from {{ inventory_hostname }}."
-        success_msg: "CPU history data successfully captured from {{ inventory_hostname }}."
+          - cpu_history_output.stdout is defined
+          - cpu_history_output.stdout | length > 0
+          - "'CPU' in cpu_history_output.stdout"
+        fail_msg: "Data Integrity Check Failed: No valid CPU telemetry returned from {{ inventory_hostname }}."
+        success_msg: "Data Integrity Check Passed: CPU telemetry successfully validated."
 
-    - name: Display formatted CPU history
-      # Documentation: Provides a clear, structured view of the retrieved data.
+    - name: Display formatted CPU performance trends
+      # Documentation: Providing a clear, structured view for audit logging and manual review.
       ansible.builtin.debug:
         msg: |
-          ======================= {{ inventory_hostname }} CPU HISTORY =======================
-          {{ cpu_result.stdout }}
-          ========================================================================
+          ======================================================================
+          DEVICE: {{ inventory_hostname }}
+          AUDIT: CPU PERFORMANCE HISTORY TRENDS
+          ======================================================================
+          {{ cpu_history_output.stdout }}
+          ======================================================================
+```

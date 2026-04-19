@@ -1,7 +1,7 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 # IPSec Tunnel Status Overview
-# This playbook retrieves comprehensive VPN and IPSec status from Cisco ASA/Firepower devices.
-# It adheres to enterprise standards for idempotency, observability, and robust error handling.
+# This playbook provides a centralized audit of VPN tunnel status across ASA and Firepower appliances.
 - name: Get IPSec Tunnel Status
   hosts: asa_firepower
   gather_facts: false
@@ -9,86 +9,82 @@
     output_format: text
 
   tasks:
-    - name: Gather minimal facts for timestamping
-      # Why: Required to populate 'ansible_date_time' for consistent reporting across the fleet.
+    - name: Infrastructure | Gather local facts for audit timestamping
+      # Why: Captures the precise time of the audit from the controller for consistent reporting.
       ansible.builtin.setup:
-        gather_subset:
-          - "!all"
-          - "min"
-      register: facts_result
+        filter: "ansible_date_time"
+      delegate_to: localhost
+      delegate_facts: true
+      run_once: true
 
-    - name: Get VPN session database for L2L tunnels
-      # Why: Captures high-level operational status of active Site-to-Site VPN sessions.
+    - name: VPN Diagnostic | Get VPN session database summary
+      # Why: Provides a high-level view of all active L2L sessions.
       ansible.netcommon.cli_command:
         command: show vpn-sessiondb l2l
       register: tunnel_output
-      check_mode: false
-      # Error Handling: Ensure the task fails if the command cannot be executed, 
-      # but allow for cases where the feature might be unconfigured ('invalid input').
+      # Error Handling: Fail if command is unrecognized or returns invalid data.
       failed_when: 
-        - tunnel_output.failed 
-        - "'invalid' not in (tunnel_output.msg | default('') | lower)"
+        - tunnel_output.stdout is not defined
+        - "'Invalid input' in tunnel_output.stdout[0] | default('')"
 
-    - name: Get IPSec Security Associations (SA)
-      # Why: Provides detailed Phase 2 parameters and traffic counters for active tunnels.
+    - name: VPN Diagnostic | Get IPSec Security Associations
+      # Why: Details Phase 2 status, including encrypted/decrypted packet counts.
       ansible.netcommon.cli_command:
         command: show crypto ipsec sa
       register: ipsec_sa_output
-      check_mode: false
+      failed_when:
+        - ipsec_sa_output.stdout is not defined
+        - "'Invalid input' in ipsec_sa_output.stdout[0] | default('')"
 
-    - name: Get IKEv1 Security Associations
-      # Why: Checks status of Phase 1 negotiations for legacy IKEv1 tunnels.
+    - name: VPN Diagnostic | Get IKEv1 tunnels
+      # Why: Checks Phase 1 status for legacy IKEv1 configurations.
       ansible.netcommon.cli_command:
         command: show crypto isakmp sa
       register: ikev1_sa_output
-      check_mode: false
-      # Error Handling: IKEv1 might be disabled or unsupported; ignore errors to prevent playbook failure.
+      # Error Handling: Ignore failures if IKEv1 is globally disabled on the device.
       ignore_errors: true
 
-    - name: Get IKEv2 Security Associations
-      # Why: Checks status of Phase 1 negotiations for modern IKEv2 tunnels.
+    - name: VPN Diagnostic | Get IKEv2 tunnels
+      # Why: Checks Phase 1 status for modern IKEv2 configurations.
       ansible.netcommon.cli_command:
         command: show crypto ikev2 sa
       register: ikev2_sa_output
-      check_mode: false
+      # Error Handling: Ignore failures if IKEv2 is globally disabled on the device.
       ignore_errors: true
 
-    - name: Verify capture success
-      # Why: Observability - Ensure critical operational data was registered before reporting.
+    - name: Observability | Validate data collection integrity
+      # Why: Ensures the report generation task has the necessary data to proceed.
       ansible.builtin.assert:
         that:
-          - tunnel_output.stdout is defined
-          - ipsec_sa_output.stdout is defined
-        fail_msg: "Essential VPN/IPSec status data could not be retrieved from {{ inventory_hostname }}."
+          - tunnel_output.stdout[0] is defined
+          - ipsec_sa_output.stdout[0] is defined
+        fail_msg: "Audit failed: Critical VPN status commands returned no data for {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Export status to JSON
-      # Why: Creates a structured, machine-readable record of the device state for auditing.
-      # Idempotency: ansible.builtin.copy is idempotent; it only updates the file if content changes.
+    - name: Reporting | Export results to centralized JSON file
+      # Idempotency: mode '0644' and delegate_to: localhost ensure a stable audit trail on the controller.
       ansible.builtin.copy:
         content: |
           {
             "device": "{{ inventory_hostname }}",
-            "timestamp": "{{ ansible_date_time.iso8601 | default(now(fmt='%Y-%m-%dT%H:%M:%SZ')) }}",
-            "tunnel_summary": {{ tunnel_output.stdout | default('') | to_json }},
-            "ipsec_sa": {{ ipsec_sa_output.stdout | default('') | to_json }},
-            "ikev1_sa": {{ ikev1_sa_output.stdout | default('') | to_json }},
-            "ikev2_sa": {{ ikev2_sa_output.stdout | default('') | to_json }}
+            "timestamp": "{{ hostvars['localhost']['ansible_date_time'].iso8601 }}",
+            "tunnel_summary": {{ tunnel_output.stdout[0] | to_json }},
+            "ipsec_sa": {{ ipsec_sa_output.stdout[0] | to_json }},
+            "ikev1_sa": {{ (ikev1_sa_output.stdout[0] if ikev1_sa_output.stdout | default([]) | length > 0 else 'N/A') | to_json }},
+            "ikev2_sa": {{ (ikev2_sa_output.stdout[0] if ikev2_sa_output.stdout | default([]) | length > 0 else 'N/A') | to_json }}
           }
         dest: "/tmp/asa_ipsec_status_{{ inventory_hostname }}.json"
         mode: '0644'
+      delegate_to: localhost
       when: output_format | default('text') == 'json'
 
-    - name: Display human-readable status
-      # Why: Provides immediate formatted feedback to the operator during execution.
+    - name: Visibility | Display human-readable status
       ansible.builtin.debug:
         msg: |
           ============================================================
-          IPSec Tunnel Status: {{ inventory_hostname }}
-          Captured: {{ ansible_date_time.iso8601 | default(now(fmt='%Y-%m-%dT%H:%M:%SZ')) }}
+          VPN AUDIT: {{ inventory_hostname }}
+          TIMESTAMP: {{ hostvars['localhost']['ansible_date_time'].iso8601 }}
           ============================================================
-          VPN SESSION DB (L2L):
-          {{ tunnel_output.stdout }}
-
-          IPSEC SA SUMMARY:
-          {{ ipsec_sa_output.stdout }}
+          {{ tunnel_output.stdout[0] }}
       when: output_format | default('text') == 'text'
+```

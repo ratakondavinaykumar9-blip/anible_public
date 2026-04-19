@@ -1,31 +1,41 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: Audit FortiGate Kernel Routing Table
+# FortiGate Kernel Routing Table Audit
+# Purpose: Retrieves and validates kernel-level routing information from FortiOS.
+# This playbook adheres to NetLearner Architect standards for production automation.
+- name: FortiGate Kernel Routes Audit
   hosts: fortigate
   gather_facts: false
-  # This playbook is idempotent as it performs a non-intrusive read-only operation on the device.
 
   tasks:
-    - name: Retrieve kernel routing table details
-      # Using Fully Qualified Collection Names (FQCN) for best practices and portability.
+    - name: Retrieve kernel routing table from FortiGate
+      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction.
+      # This operation is inherently idempotent as it retrieves state without modification.
       ansible.netcommon.cli_command:
         command: get router info routing-table kernel
-      register: kernel_routes_raw
-      # Error Handling: Explicitly check for CLI-level failures or specific FortiOS error strings.
+      register: kernel_output
+      # Error Handling: Ensure the task fails if the command returns an error msg despite exit code 0.
       failed_when: 
-        - kernel_routes_raw.failed or "Command fail" in kernel_routes_raw.stdout
+        - kernel_output.failed or "Command fail" in kernel_output.stdout
 
-    - name: Validate successful routing data ingestion
-      # Observability: Assert that the command returned valid, non-empty routing entries.
+    - name: Validate kernel route data integrity
+      # Observability: Assert that the output contains expected routing headers and is not empty.
       ansible.builtin.assert:
         that:
-          - "kernel_routes_raw.stdout is defined"
-          - "kernel_routes_raw.stdout | length > 0"
-        fail_msg: "Kernel routing table is empty or could not be retrieved from the device."
+          - kernel_output.stdout is defined
+          - kernel_output.stdout | length > 0
+          - "'Codes:' in kernel_output.stdout or 'K' in kernel_output.stdout"
+        fail_msg: "The kernel routing table could not be retrieved or the output format was unexpected."
         success_msg: "Kernel routing table successfully retrieved and validated."
 
-    - name: Display Kernel Routing Table
-      # Documentation: Providing operational visibility for engineers during playbook execution.
+    - name: Display formatted kernel routes
+      # Debug is used for visibility; register from previous tasks ensures traceability.
       ansible.builtin.debug:
         msg: |
           ======================= KERNEL ROUTES =======================
-          {{ kernel_routes_raw.stdout }}
+          HOST: {{ inventory_hostname }}
+          AUDIT_TIME: {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S"') }}
+          
+          {{ kernel_output.stdout }}
+
+```

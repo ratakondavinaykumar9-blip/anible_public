@@ -1,34 +1,37 @@
----
-# FortiGate Session List Retrieval
-# This playbook retrieves the current session list for diagnostic and audit purposes.
-# Standards: Idempotency (read-only), Observability (assert), and FQCN usage.
-- name: Get Session List
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Session List Retrieval Playbook
+# This playbook retrieves the current session table from a FortiGate device.
+# Standards: Idempotency (Read-only), Observability (Assert), FQCN, and Robust Error Handling.
+
+- name: Get FortiGate Session List
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false  # Performance: FortiOS devices do not require standard setup facts for CLI operations
 
   tasks:
-    - name: Retrieve active sessions from the device
-      # FQCN: Using ansible.netcommon.cli_command for standardized CLI interaction.
-      # Idempotency: 'get' (read) commands are inherently idempotent as they do not modify device state.
+    - name: Execute 'get system session list' command
+      # Using FQCN for cross-platform network CLI compatibility and stability
       ansible.netcommon.cli_command:
         command: get system session list
-      register: sessions_output
-      # Error Handling: Ensure we catch application-level errors that might be returned in stdout.
-      failed_when:
-        - sessions_output.failed | default(false) or "'error' in sessions_output.stdout | default('') | lower"
+      register: sessions_raw
+      # Error Handling: Ensure the command didn't fail or return an 'Unknown action' error from FortiOS
+      failed_when: 
+        - sessions_raw.failed 
+        - "'Unknown action' in sessions_raw.stdout"
 
-    - name: Validate session output integrity
-      # Observability: Assert that stdout contains data to verify the command returned a result.
+    - name: Verify session data integrity
+      # Observability: Assert that we received a valid, non-empty response from the device
       ansible.builtin.assert:
         that:
-          - sessions_output.stdout is defined
-          - sessions_output.stdout | length > 0
-        fail_msg: "Session list is empty or could not be retrieved. Verify device state."
-        quiet: true
+          - sessions_raw.stdout is defined
+          - sessions_raw.stdout | length > 0
+        fail_msg: "Session retrieval failed: The device returned an empty or undefined response."
+        success_msg: "Session data successfully captured and validated."
 
     - name: Display session information
-      # Provide visibility into the collected data for reporting and logs.
+      # Idempotency: This task is safe to run multiple times as it only performs a read/display action
       ansible.builtin.debug:
         msg: |
           ======================= SESSIONS =======================
-          {{ sessions_output.stdout }}
+          {{ sessions_raw.stdout }}
+      # Only display if data is present to keep the output clean
+      when: sessions_raw.stdout != ""

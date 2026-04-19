@@ -1,36 +1,43 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Multicast Routing Table Audit
-# This playbook retrieves and validates the multicast routing table from FortiGate devices.
-# Purpose: Ensures visibility into multicast traffic flow for network troubleshooting and auditing.
-# Standards: Idempotency (Read-only operation), Observability (Assert/Register), FQCN usage.
+# Multicast Routes
+# Standard: NetLearner Architect v2.0
+# WHY: High-availability multicast visibility is critical for NetLearner Staging validation.
+# This playbook provides idempotent, observable data collection for multicast RIB state.
 
-- name: FortiGate Multicast Route Verification
+- name: FortiGate Multicast Routes
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Optimization: System facts not required for CLI state inspection
 
   tasks:
-    - name: Retrieve Multicast Routing Table
-      # Using FQCN ansible.netcommon.cli_command for standardized network interaction.
-      # This task is idempotent as 'get' commands do not modify the device configuration.
+    - name: Retrieve multicast routing table via CLI
+      # WHY: Fetching the active multicast routing information to verify PIM/IGMP convergence.
       ansible.netcommon.cli_command:
         command: get router info routing-table multicast
       register: mc
-      # Error Handling: Detect CLI-level failures that may not trigger a transport error.
-      failed_when: 
-        - mc.failed or "Command fail" in mc.stdout or "Unknown action" in mc.stdout
+      # Idempotency: Read-only operations are inherently safe.
+      # check_mode: false ensures this runs even when the operator is performing a dry run.
+      check_mode: false
+      # Error Handling: Fail if the device returns an error or command is unsupported.
+      failed_when:
+        - mc.failed or "Unknown action" in mc.stdout or "Command fail" in mc.stdout
 
-    - name: Validate Multicast Data Retrieval
-      # Observability: Verify that the command returned meaningful data before proceeding.
+    - name: Validate multicast data integrity
+      # Observability: Assert that the command execution resulted in valid output.
       ansible.builtin.assert:
         that:
           - mc.stdout is defined
           - mc.stdout | length > 0
-        fail_msg: "Multicast routing table is empty or could not be retrieved."
-        success_msg: "Multicast routing table successfully captured."
+        fail_msg: "Data retrieval failed: Multicast table is empty or command was rejected."
+        success_msg: "Multicast routing table captured successfully."
 
     - name: Display Multicast Routes
-      # Observability: Formatted output for audit logs and real-time verification.
+      # Observability: Human-readable output for real-time audit and logging.
       ansible.builtin.debug:
         msg: |
           ======================= MULTICAST ROUTES =======================
+          Device: {{ inventory_hostname }}
+          Status: SUCCESS
+          Payload:
           {{ mc.stdout }}
+```

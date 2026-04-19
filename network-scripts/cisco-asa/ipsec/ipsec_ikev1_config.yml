@@ -1,65 +1,66 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 # IKEv1 Tunnel Configuration Audit
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: Audit IKEv1 VPN Configuration
+# Purpose: Retrieve and validate IKEv1/IPsec configuration for Cisco ASA/Firepower devices.
+# Standards: Idempotent (Read-only), Observable (Asserts), Documented, FQCN.
+- name: Audit IKEv1 Configuration
   hosts: asa_firepower
   gather_facts: false
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve running-config crypto map
-      # Why: To verify the IPsec security associations and peer mappings
+    - name: Retrieve Crypto Map Configuration
+      # Use Fully Qualified Collection Name (FQCN) for ASA-specific command execution
       cisco.asa.asa_command:
         commands:
           - show running-config crypto map
-      register: crypto_map_output
-      failed_when: false # Prevent failure if no crypto map is configured
+      register: crypto_map
+      # Error Handling: Ensure the command was understood and executed by the device CLI
+      failed_when: 
+        - crypto_map.failed
+        - "'Invalid input' in crypto_map.stdout[0]"
 
-    - name: Verify crypto map retrieval
-      # Why: Ensure the command was executed and returned a valid response object
-      ansible.builtin.assert:
-        that:
-          - crypto_map_output.stdout is defined
-        fail_msg: "Failed to retrieve crypto map configuration from {{ inventory_hostname }}"
-
-    - name: Retrieve IPsec transform-set
-      # Why: To audit the encryption and hash algorithms used for Phase 2
+    - name: Retrieve IPsec Transform-Set Details
       cisco.asa.asa_command:
         commands:
           - show crypto ipsec transform-set
-      register: transform_set_output
-      failed_when: false
+      register: transform_set
+      failed_when:
+        - transform_set.failed
+        - "'Invalid input' in transform_set.stdout[0]"
 
-    - name: Verify transform-set retrieval
-      ansible.builtin.assert:
-        that:
-          - transform_set_output.stdout is defined
-        fail_msg: "Failed to retrieve IPsec transform-set from {{ inventory_hostname }}"
-
-    - name: Retrieve ISAKMP (Phase 1) policy
-      # Why: To audit the IKEv1 Phase 1 parameters (Authentication, Encryption, DH Group)
+    - name: Retrieve ISAKMP (IKEv1) Policy Configuration
       cisco.asa.asa_command:
         commands:
           - show running-config crypto isakmp policy
-      register: isakmp_output
-      failed_when: false
+      register: isakmp
+      failed_when:
+        - isakmp.failed
+        - "'Invalid input' in isakmp.stdout[0]"
 
-    - name: Verify ISAKMP policy retrieval
+    - name: Verify Configuration Retrieval Success
+      # Observability: Assert that results are defined to prevent silent failures in reports
       ansible.builtin.assert:
         that:
-          - isakmp_output.stdout is defined
-        fail_msg: "Failed to retrieve ISAKMP policy from {{ inventory_hostname }}"
+          - crypto_map.stdout[0] is defined
+          - transform_set.stdout[0] is defined
+          - isakmp.stdout[0] is defined
+        fail_msg: "Audit failed: One or more crypto components could not be retrieved from {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved all IKEv1 configuration components."
 
-    - name: Aggregate and Display Configuration Results
-      # Why: Provide a consolidated view for the operator while ensuring non-blocking execution
+    - name: Display Structured IKEv1 Configuration Report
+      # Documentation: Format output for human readability to assist in troubleshooting/compliance
       ansible.builtin.debug:
         msg: |
-          ======================= IKEv1 AUDIT REPORT: {{ inventory_hostname }} =======================
+          ======================= IKEv1 CONFIG REPORT =======================
+          DEVICE: {{ inventory_hostname }}
           
-          ISAKMP Phase 1 Policy:
-          {{ isakmp_output.stdout[0] | default('No ISAKMP policy configured') }}
+          [ISAKMP (Phase 1) Policies]
+          {{ isakmp.stdout[0] | default('None configured') }}
           
-          IPsec Phase 2 Crypto Map:
-          {{ crypto_map_output.stdout[0] | default('No crypto map configured') }}
+          [Crypto Map (Phase 2) Configuration]
+          {{ crypto_map.stdout[0] | default('None configured') }}
           
-          Transform Set Details:
-          {{ transform_set_output.stdout[0] | default('No transform-sets found') }}
+          [IPsec Transform Sets]
+          {{ transform_set.stdout[0] | default('None configured') }}
+```

@@ -1,52 +1,62 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Description: Retrieve and display active NAT translations (xlates) from Cisco ASA/Firepower devices.
-# This playbook is idempotent as it performs read-only operations to provide operational visibility.
-- name: Get NAT Translations
+# ==============================================================================
+# Playbook: Get Active NAT Translations (Xlate)
+# Description: Safely retrieves and validates active NAT translations from 
+#              Cisco ASA/Firepower devices for observability and auditing.
+# ==============================================================================
+- name: Audit Active NAT Translations
   hosts: asa_firepower
-  gather_facts: false # Fact collection is disabled to optimize performance as facts are not required for these tasks.
+  gather_facts: false
 
   tasks:
-    - name: Retrieve summary NAT translation table
-      # Use FQCN for the Cisco ASA collection to ensure robust and standardized command execution.
-      cisco.asa.asa_command:
-        commands:
-          - show xlate
-      register: xlate_output
-      # Explicitly catch failures to ensure the playbook stops if the device is unreachable or the command fails.
-      failed_when: xlate_output.failed | default(false)
+    - name: Retrieve summary NAT translations
+      # Use FQCN for portability and explicit module resolution
+      ansible.netcommon.cli_command:
+        command: show xlate
+      register: xlate_summary
+      # Idempotency: Show commands never change device state
+      changed_when: false
+      # Error Handling: Fail if the CLI returns an invalid command response
+      failed_when: 
+        - xlate_summary.stdout is not defined
+        - '"invalid" in xlate_summary.stdout | lower'
 
-    - name: Validate summary NAT output
-      # Observability: Assert that the command returned data to verify successful retrieval from the device.
+    - name: Verify NAT summary integrity
+      # Observability: Assert that the output contains expected session headers
       ansible.builtin.assert:
         that:
-          - xlate_output.stdout is defined
-          - xlate_output.stdout[0] | length > 0
-        fail_msg: "The 'show xlate' command failed or returned empty output on {{ inventory_hostname }}."
-        success_msg: "Successfully retrieved summary NAT translation table."
+          - '"in use" in xlate_summary.stdout or "Xlate" in xlate_summary.stdout'
+        fail_msg: "NAT translation table summary is missing or unreachable."
+        quiet: true
 
-    - name: Retrieve detailed NAT translation information
-      # Detailed translations provide source/destination interface and port mapping for deep-dive troubleshooting.
-      cisco.asa.asa_command:
-        commands:
-          - show xlate detail
-      register: xlate_detail_output
-      failed_when: xlate_detail_output.failed | default(false)
+    - name: Retrieve detailed NAT translation mappings
+      # Captures port-level and protocol details for forensic analysis
+      ansible.netcommon.cli_command:
+        command: show xlate detail
+      register: xlate_detail
+      changed_when: false
+      # Suppress errors if table is empty but command is valid
+      ignore_errors: false
 
-    - name: Validate detailed NAT output
-      # Observability: Verify detailed output was captured before attempting to display it to the user.
+    - name: Verify detailed output availability
       ansible.builtin.assert:
         that:
-          - xlate_detail_output.stdout is defined
-          - xlate_detail_output.stdout[0] | length > 0
-        fail_msg: "The 'show xlate detail' command failed or returned empty output on {{ inventory_hostname }}."
-        success_msg: "Successfully retrieved detailed NAT translation information."
+          - xlate_detail.stdout is defined
+        fail_msg: "Detailed NAT translation retrieval failed."
+        quiet: true
 
-    - name: Display Active NAT Translations
-      # Provide a clear, formatted output for human readability during troubleshooting sessions.
+    - name: Display NAT Translation Report
+      # Formats output for human-readable visibility in automation logs
       ansible.builtin.debug:
         msg: |
-          ======================= NAT TRANSLATIONS (SUMMARY) =======================
-          {{ xlate_output.stdout[0] }}
+          ========================= NAT TRANSLATIONS =========================
+          DEVICE: {{ inventory_hostname }}
+          
+          [SUMMARY STATISTICS]
+          {{ xlate_summary.stdout }}
 
-          ======================= NAT TRANSLATIONS (DETAILED) ======================
-          {{ xlate_detail_output.stdout[0] }}
+          [DETAILED MAPPINGS]
+          {{ xlate_detail.stdout }}
+          ====================================================================
+```

@@ -1,37 +1,35 @@
----
-# Playbook: FortiGate SD-WAN Health Check
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+MCP issues detected. Run /mcp list for status.---
+# FortiGate SD-WAN Status Monitoring
+# Standards: Idempotency (Read-only), Observability (Assert), FQCN, Error Handling
 - name: Get SD-WAN Status
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: Skipping fact gathering for network CLI tasks
 
   tasks:
-    - name: Fetch SD-WAN status via CLI
-      # Best Practice: Use Fully Qualified Collection Names (FQCN) for reliability
+    - name: Retrieve SD-WAN status via CLI
+      # Idempotency: Safe read-only operation. No state change on device.
       ansible.netcommon.cli_command:
         command: get system sdwan status
-      register: sdwan_response
-      # Idempotency: Operational 'get' commands should not trigger a 'changed' state in Ansible
-      changed_when: false
-      # Error Handling: Explicitly fail if the CLI returns an error string or non-zero return code
-      failed_when: 
-        - sdwan_response.rc | default(0) != 0
-        - "'error' in sdwan_response.stdout | lower"
-        - "'command fail' in sdwan_response.stdout | lower"
+      register: sdwan_raw
+      # Error Handling: Capture CLI-level errors that might not return a non-zero exit code
+      failed_when: >
+        sdwan_raw.stdout is not defined or 
+        sdwan_raw.stdout == "" or 
+        "error" in sdwan_raw.stdout | lower or 
+        "invalid" in sdwan_raw.stdout | lower
 
-    - name: Validate retrieved SD-WAN data
-      # Observability: Assert ensures the response is not empty before concluding the task
+    - name: Verify SD-WAN output integrity
+      # Observability: Explicitly assert that the response contains expected operational data
       ansible.builtin.assert:
         that:
-          - sdwan_response.stdout is defined
-          - sdwan_response.stdout | length > 0
-        fail_msg: "SD-WAN status retrieval failed or returned empty output."
-        success_msg: "SD-WAN status successfully captured and validated."
+          - sdwan_raw.stdout | length > 0
+          - "'SD-WAN' in sdwan_raw.stdout or 'Virtual-WAN-link' in sdwan_raw.stdout"
+        fail_msg: "Failed to retrieve valid SD-WAN status from {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Present SD-WAN Status Report
-      # Observability: Provides formatted, human-readable output for the network operator
+    - name: Display SD-WAN Operational Status
+      # Best Practices: Using FQCN and providing clear, formatted output for observability
       ansible.builtin.debug:
         msg: |
-          ======================= SD-WAN STATUS =======================
-          {{ sdwan_response.stdout }}
-      when: sdwan_response.stdout is defined
+          ======================= SD-WAN STATUS: {{ inventory_hostname }} =======================
+          {{ sdwan_raw.stdout }}

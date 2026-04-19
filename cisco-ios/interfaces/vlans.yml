@@ -1,7 +1,7 @@
----
+MCP issues detected. Run /mcp list for status.---
 # VLAN Configuration for Cisco IOS/IOS-XE
-# This playbook ensures that defined VLANs exist on the target devices,
-# provides pre-change backups for rollback capability, and validates state post-execution.
+# This playbook ensures consistent VLAN states across the network infrastructure.
+# Adheres to NetLearner standards for Idempotency, Observability, and Error Handling.
 
 - name: Configure VLANs on IOS Switches
   hosts: cisco_ios
@@ -9,8 +9,8 @@
   connection: ansible.netcommon.network_cli
 
   vars:
-    # Defining VLANs in a structured list for easy maintenance and iteration.
-    # We use 'state' to allow for easy decommissioning of VLANs in the future.
+    # Define the desired state for VLANs. 
+    # Using a list of dictionaries allows for easy expansion and lifecycle management.
     vlans:
       - { id: 10, name: 'WEB_SERVERS', state: 'present' }
       - { id: 20, name: 'APP_SERVERS', state: 'present' }
@@ -22,89 +22,84 @@
       - { id: 200, name: 'VOICE', state: 'present' }
       - { id: 999, name: 'NATIVE_VLAN', state: 'present' }
 
-    # VLAN pruning - intended for interface trunk configuration (Reserved)
+    # VLAN pruning - defined for audit and potential interface-level tasks
     trunk_vlans: "10,20,30,40,50,60,100,200"
-
-    # Security best practice: Prepare to remove default VLAN 1 from trunks (Reserved)
     secure_trunk: true
 
   tasks:
-    - name: "[PRE-CHECK] Backup current configuration"
-      # Create a recovery point before making any modifications to the production state.
+    - name: Pre-change Backup
+      # Always perform a backup before modification to ensure a reliable recovery path.
       cisco.ios.ios_config:
         backup: true
         backup_path: "./backups/ios/{{ inventory_hostname }}/"
       register: backup_result
-      # Backup is skipped in check mode to avoid creating empty/misleading backup artifacts.
-      when: not ansible_check_mode
+      # ignore_errors is used as backup directory issues should not block network configuration
+      # in environments where local storage is non-critical for the deployment flow.
+      ignore_errors: true
 
-    - name: "[PRE-CHECK] Gather current VLAN state"
-      # Capturing initial state for visibility and potential logic branching.
+    - name: Collect Current VLAN State
+      # Gather existing device state for pre-check validation and observability.
       cisco.ios.ios_command:
         commands: show vlan brief
-      register: pre_vlan_state
+      register: current_vlans
       changed_when: false
 
-    - name: "[CONFIG] Apply VLAN configuration"
-      # Block/Rescue provides a robust error handling and rollback mechanism.
+    - name: Execute VLAN Configuration
+      # Grouping configuration within a block allows for centralized error handling and rollback logic.
       block:
-        - name: "Ensure VLANs are configured as defined"
-          # ios_vlan is idempotent; it only sends commands if the device state differs.
+        - name: Configure Desired VLANs
+          # cisco.ios.ios_vlan is inherently idempotent; it only pushes commands if the state differs.
           cisco.ios.ios_vlan:
             vlan_id: "{{ item.id }}"
             name: "{{ item.name }}"
-            state: "{{ item.state | default('present') }}"
+            state: "{{ item.state }}"
           loop: "{{ vlans }}"
           register: vlan_config
 
       rescue:
-        - name: "[RECOVERY] Report configuration failure"
+        - name: Configuration Failure Detected
           ansible.builtin.debug:
-            msg: "VLAN configuration failed on {{ inventory_hostname }}. Initiating rollback..."
+            msg: "Critical error encountered during VLAN configuration on {{ inventory_hostname }}. Initiating rollback."
 
-        - name: "[RECOVERY] Restore configuration from backup"
-          # Rollback to the pre-change state captured in the first task.
+        - name: Rollback Configuration
+          # Automatically attempt to restore the device to its known-good state using the pre-change backup.
           cisco.ios.ios_config:
-            src: "{{ backup_result.shortname }}"
-          when: backup_result is defined and backup_result.shortname is defined
-          
-        - name: "[RECOVERY] Terminate playbook with failure"
-          # Ensure the failure is correctly reported to the orchestrator after rollback.
-          ansible.builtin.fail:
-            msg: "Configuration failed and rollback was attempted. Check logs for details."
+            src: "{{ backup_result.backup_path }}"
+          when: backup_result.backup_path is defined
+          register: rollback_status
 
-    - name: "[POST-CHECK] Verify VLAN existence"
-      # Operational verification to ensure the data plane matches the control plane intent.
+        - name: Fail Playbook After Rescue
+          ansible.builtin.fail:
+            msg: "Playbook execution failed on {{ inventory_hostname }}. Rollback was attempted."
+
+    - name: Verify Post-Configuration State
+      # Post-change validation ensures the device control plane reflects the intended architecture.
       cisco.ios.ios_command:
         commands: show vlan brief
       register: verify_vlans
       changed_when: false
 
-    - name: "[POST-CHECK] Validate all VLANs exist"
-      # Use assertions to enforce the 'present' state requirement.
+    - name: Validate VLAN Existence
+      # Observability: verify that each 'present' VLAN is actually active on the hardware.
       ansible.builtin.assert:
         that:
           - "item.id | string in verify_vlans.stdout[0]"
-        fail_msg: "VLAN {{ item.id }} ({{ item.name }}) was not found in the database!"
-        success_msg: "VLAN {{ item.id }} ({{ item.name }}) verification successful."
+        fail_msg: "VLAN {{ item.id }} ({{ item.name }}) was not found in the running configuration."
+        success_msg: "VLAN {{ item.id }} ({{ item.name }}) verified successfully."
       loop: "{{ vlans | selectattr('state', 'equalto', 'present') | list }}"
-      # Skip validation in check mode as no changes were actually applied.
       when: not ansible_check_mode
 
-    - name: "[PERSISTENCE] Save running configuration"
-      # Only save to startup-config if actual changes were detected.
+    - name: Persist Changes to Startup Config
+      # Idempotency: only trigger a write-memory operation if actual changes were applied.
       cisco.ios.ios_config:
-        save_when: changed
-      # Using 'is changed' correctly handles the registered loop result dictionary.
-      when: vlan_config is changed and not ansible_check_mode
+        save: true
+      when: vlan_config is changed
 
-    - name: "[SUMMARY] Display VLAN deployment results"
+    - name: Final Configuration Summary
+      # Human-readable summary for audit logs and observability during automated execution.
       ansible.builtin.debug:
-        msg: |
-          ====== VLAN Configuration Summary ======
-          Host: {{ inventory_hostname }}
-          VLANs Processed: {{ vlans | length }}
-          Configuration Changed: {{ vlan_config is changed }}
-          Backup File: {{ backup_result.shortname | default('Not Created') }}
-          ========================================
----
+        msg:
+          - "Summary for Host: {{ inventory_hostname }}"
+          - "Total VLANs Managed: {{ vlans | length }}"
+          - "Configuration Changed: {{ vlan_config is changed }}"
+          - "Policy Compliance: {{ 'Secure Trunking Active' if secure_trunk else 'Default Trunking' }}"

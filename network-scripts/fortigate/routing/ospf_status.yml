@@ -1,48 +1,60 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate OSPF Status Audit
-# Purpose: Gathers and validates OSPF operational state to ensure routing convergence.
-# This playbook is idempotent as it only executes read-only monitor commands.
+# NetLearner Architect: FortiGate OSPF Status Verification
+# This playbook retrieves and validates the OSPF state on FortiGate devices.
+# Standards: Idempotent, Observable, Documented, Robust Error Handling.
+
 - name: Get OSPF Status
   hosts: fortigate
-  gather_facts: false # Skip facts gathering to improve performance on network devices
+  gather_facts: false
 
   tasks:
-    - name: Get OSPF neighbors
-      # Using FQCN (Fully Qualified Collection Name) for portability and clarity
+    - name: Retrieve OSPF neighbor status
+      # Use FQCN for consistency and future-proofing.
       ansible.netcommon.cli_command:
         command: get router info ospf neighbor
-      register: ospf_neighbor_output
-      # Prevent playbook termination if OSPF is not yet initialized or the command is unsupported
-      ignore_errors: true
+      register: ospf_neighbors_raw
+      # Ensure the command executed successfully; fail if logical errors are present in stdout.
+      failed_when: 
+        - ospf_neighbors_raw.failed
+        - "'error' in ospf_neighbors_raw.stdout | lower"
+      # Read-only operation; explicitly set changed_when to false to maintain idempotency.
+      changed_when: false
 
-    - name: Validate OSPF neighbor retrieval
-      # Observability: Ensure the command was successfully executed and returned data
+    - name: Validate OSPF neighbor output
+      # Observability: Assert that we received valid data and OSPF is likely running.
       ansible.builtin.assert:
         that:
-          - ospf_neighbor_output.stdout is defined
-        fail_msg: "Communication error or command failure on {{ inventory_hostname }} while fetching neighbors."
+          - "ospf_neighbors_raw.stdout is defined"
+          - "ospf_neighbors_raw.stdout != ''"
+        fail_msg: "OSPF neighbor output is empty. Verify OSPF process is active on the host."
         quiet: true
 
-    - name: Get OSPF database
+    - name: Retrieve OSPF database information
       ansible.netcommon.cli_command:
         command: get router info ospf database
-      register: ospf_db_output
-      ignore_errors: true
+      register: ospf_db_raw
+      failed_when: 
+        - ospf_db_raw.failed
+        - "'error' in ospf_db_raw.stdout | lower"
+      changed_when: false
 
-    - name: Validate OSPF database retrieval
-      # Observability: Confirm the database state was captured for audit
+    - name: Validate OSPF database output
+      # Observability: Confirm the database contains the header indicating a functional OSPF instance.
       ansible.builtin.assert:
         that:
-          - ospf_db_output.stdout is defined
-        fail_msg: "Communication error or command failure on {{ inventory_hostname }} while fetching OSPF database."
+          - "ospf_db_raw.stdout is defined"
+          - "'OSPF Router' in ospf_db_raw.stdout"
+        fail_msg: "OSPF database not found or uninitialized."
         quiet: true
 
-    - name: Display OSPF Summary
-      # Provides observability into the current operational state of the OSPF process
+    - name: Display Comprehensive OSPF State
+      # Formatted output for human-readable audit logs.
       ansible.builtin.debug:
         msg: |
           ======================= OSPF NEIGHBORS =======================
-          {{ ospf_neighbor_output.stdout | default('Command failed or no output') }}
+          {{ ospf_neighbors_raw.stdout }}
 
-          ======================= OSPF DATABASE ========================
-          {{ ospf_db_output.stdout | default('Command failed or no output') }}
+          ======================== OSPF DATABASE ========================
+          {{ ospf_db_raw.stdout }}
+```

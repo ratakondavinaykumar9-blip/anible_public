@@ -1,35 +1,42 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Interface Summary Playbook
-# This playbook retrieves and validates the interface summary from Cisco ASA/Firepower devices.
-# Standards: Idempotent (Read-only), Observable (Assert), Documented (Why), Error-handled (failed_when).
+# Playbook: Interface Summary for Cisco ASA/Firepower
+# Purpose: Retrieves and validates the interface status summary to ensure network connectivity and operational status.
+# Standards: Idempotency (Read-only), Observability (Assert/Register), FQCN, Error Handling.
 
 - name: Interface Summary
   hosts: asa_firepower
-  gather_facts: false # Fact gathering is disabled to optimize execution for operational tasks
+  gather_facts: false
+  # Connection method usually defined in inventory, but explicitly noted here for clarity
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve interface summary from device
-      # Use FQCN to ensure compatibility and adhere to Ansible best practices
+    - name: Retrieve interface summary from the security appliance
+      # Using FQCN for the generic CLI command module
       ansible.netcommon.cli_command:
         command: show interface summary
-      register: interface_summary_raw
-      # Error Handling: Catch device-specific CLI errors that might not trigger a standard module failure
+      register: summary_output
+      # Error Handling: Ensure the command didn't return an empty string or fail silently
       failed_when: 
-        - interface_summary_raw.failed or "Invalid input" in interface_summary_raw.stdout
+        - summary_output.stdout is not defined
+        - "summary_output.stdout | length == 0"
 
-    - name: Verify operational data integrity
-      # Observability: Assert that the command returned meaningful data before proceeding
+    - name: Validate interface summary data integrity
+      # Observability: Assert that the output contains expected headers (e.g., 'Interface')
+      # This ensures we didn't just get an error message or blank screen
       ansible.builtin.assert:
         that:
-          - interface_summary_raw.stdout is defined
-          - interface_summary_raw.stdout | length > 0
-          - "'Interface' in interface_summary_raw.stdout"
-        fail_msg: "Interface summary output is invalid or empty. Verify device state and credentials."
+          - "'Interface' in summary_output.stdout"
+        fail_msg: "The command output did not contain expected interface summary headers."
         success_msg: "Interface summary successfully retrieved and validated."
 
-    - name: Output formatted summary
-      # Provide clear, formatted output for the network operator
+    - name: Display formatted interface summary for operator visibility
+      # Documentation: Provides a clean, observable log of the interface state
       ansible.builtin.debug:
         msg: |
           ======================= INTERFACE SUMMARY =======================
-          {{ interface_summary_raw.stdout }}
+          HOST: {{ inventory_hostname }}
+          DATE: {{ lookup('ansible.builtin.pipe', 'date +%Y-%m-%d %H:%M:%S') }}
+          -----------------------------------------------------------------
+          {{ summary_output.stdout }}
+```

@@ -1,44 +1,42 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: FortiGate NAT64 Policy Verification
-# Purpose: Safely retrieves and validates NAT64 policy state from FortiGate devices.
-# Standards Applied: Idempotency (Read-only), Observability (Register/Assert), FQCN, and Robust Error Handling.
-
-- name: Retrieve and Verify FortiGate NAT64 Policies
+# FortiGate NAT64 Configuration Audit
+# Purpose: Retrieves and validates NAT64 translation policies to ensure IPv6/IPv4 interoperability.
+# Standards: Idempotent (Read-only), Observability (Assert), Best Practices (FQCN).
+- name: Audit FortiGate NAT64 Policies
   hosts: fortigate
   gather_facts: false
+  vars:
+    ansible_connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Fetch NAT64 operational configuration via CLI
-      # Using Fully Qualified Collection Name (FQCN) for explicit module referencing.
-      # 'get' is used over 'show' to retrieve the current running state and operational parameters.
+    - name: Get NAT64 operational status from firewall
+      # Idempotency: 'get' commands are read-only and safe for repeated execution.
+      # Best Practice: Using FQCN for portable and reliable module resolution.
       ansible.netcommon.cli_command:
-        command: "get firewall nat64"
+        command: get firewall nat64
       register: nat64_result
-      # Error Handling: Ensure the task fails if FortiOS returns a command error or unknown action,
-      # as CLI modules may not always interpret device-specific error strings as failures.
-      failed_when:
-        - "nat64_result.failed == true"
-        - "'Unknown action' in nat64_result.stdout"
+      # Error Handling: Fail if the command returns a non-zero exit code or specific FortiOS failure strings.
+      failed_when: 
+        - nat64_result.rc != 0
         - "'Command fail' in nat64_result.stdout"
 
-    - name: Validate NAT64 configuration retrieval
-      # Observability: Assert that the command returned a valid response object.
-      # This ensures the playbook doesn't proceed with undefined data in complex workflows.
+    - name: Validate NAT64 output integrity
+      # Observability: Ensure the retrieved data is present and does not indicate an unsupported feature.
       ansible.builtin.assert:
         that:
           - "nat64_result.stdout is defined"
-        fail_msg: "The NAT64 configuration could not be retrieved from the device."
-        success_msg: "NAT64 configuration successfully registered."
+          - "nat64_result.stdout | length > 0"
+          - "'Unknown action' not in nat64_result.stdout"
+        fail_msg: "Validation Failed: NAT64 data is empty or command is unsupported on this firmware."
+        success_msg: "Validation Passed: NAT64 data successfully retrieved."
 
-    - name: Display NAT64 Policy Information
-      # Documentation/Observability: Output the results in a formatted block for audit logs.
+    - name: Display NAT64 Policy Details
+      # Documentation: Providing structured visibility for network architects and audit logs.
       ansible.builtin.debug:
         msg: |
-          ======================= NAT64 CONFIGURATION =======================
-          {{ nat64_result.stdout | default('No NAT64 configuration found.') }}
-
-    - name: Check for existence of NAT64 policies
-      # Observability: Register whether policies actually exist to facilitate conditional logic in parent playbooks.
-      ansible.builtin.set_fact:
-        nat64_exists: "{{ 'edit' in nat64_result.stdout or 'policyid' in nat64_result.stdout }}"
-      run_once: false
+          ===========================================================
+          FORTIGATE NAT64 OPERATIONAL DATA
+          ===========================================================
+          {{ nat64_result.stdout }}
+```

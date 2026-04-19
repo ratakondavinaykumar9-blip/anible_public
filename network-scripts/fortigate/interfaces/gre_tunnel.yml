@@ -1,32 +1,43 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: Audit FortiGate GRE Tunnel Configuration
+# FortiGate GRE Tunnels Audit
+# Purpose: This playbook retrieves the operational status of GRE (Generic Routing Encapsulation) 
+# tunnels. It adheres to NetLearner standards for idempotency, observability, and FQCN usage.
+
+- name: FortiGate GRE Tunnel Operational Audit
   hosts: fortigate
   gather_facts: false
-  # This playbook performs a read-only audit of GRE tunnels to ensure operational visibility
-  # without modifying device state, satisfying idempotency requirements for repeated runs.
 
   tasks:
-    - name: Retrieve GRE operational state from FortiGate
-      # Use FQCN for portability and to align with Ansible Galaxy standards
+    - name: Retrieve GRE tunnel status from FortiOS CLI
+      # Use Fully Qualified Collection Name (FQCN) for predictable module resolution.
       ansible.netcommon.cli_command:
         command: get system gre
-      register: gre_data
-      # Error Handling: Catch specific FortiOS CLI execution errors or connection timeouts
-      failed_when: 
-        - gre_data.rc != 0
-        - "'Command fail' in gre_data.stdout"
+      register: gre_result
+      # Idempotency: Read-only 'get' operations must always report 'changed: false'.
+      changed_when: false
+      # Error Handling: Fail if return code is non-zero or if the CLI returns an 'unknown' error.
+      failed_when:
+        - gre_result.rc != 0
+        - "'Unknown action' in gre_result.stdout"
 
-    - name: Validate GRE data retrieval success
-      # Observability: Verify the task returned a valid stdout object before proceeding
+    - name: Verify GRE tunnel data integrity
+      # Observability: Assert that the command returned meaningful output.
       ansible.builtin.assert:
         that:
-          - gre_data.stdout is defined
-        fail_msg: "GRE tunnel data collection failed on {{ inventory_hostname }}"
-        success_msg: "GRE tunnel data successfully captured for {{ inventory_hostname }}"
+          - gre_result.stdout is defined
+          - gre_result.stdout | length > 0
+        fail_msg: "Operational data retrieval failed or the GRE table is empty."
+        success_msg: "GRE tunnel data successfully validated for {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display GRE Tunnel Statistics
-      # Observability: Provide formatted, human-readable output for the automation operator
+    - name: Display GRE tunnel operational status
+      # Documentation/Visibility: Provide a structured view for human-in-the-loop review.
       ansible.builtin.debug:
         msg: |
-          ======================= GRE TUNNELS: {{ inventory_hostname }} =======================
-          {{ gre_data.stdout | default('No operational GRE tunnels found on this device.', true) }}
+          ===========================================================
+          DEVICE: {{ inventory_hostname }}
+          SERVICE: GRE TUNNELS
+          ===========================================================
+          {{ gre_result.stdout }}
+```

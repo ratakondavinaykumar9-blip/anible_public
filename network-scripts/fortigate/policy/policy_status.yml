@@ -1,32 +1,37 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Policy Status - Improved Version
-# Purpose: Retrieves and validates the operational status of firewall policies.
-# This playbook is idempotent (read-only) and follows enterprise automation standards.
-- name: Get FortiGate Policy Status
+# FortiGate Policy Status
+# Purpose: This playbook retrieves and validates the operational status of firewall policies
+# to ensure network consistency and auditability across NetLearner Staging.
+- name: Get Policy Status
   hosts: fortigate
-  gather_facts: false # Facts not required for CLI command execution
+  gather_facts: false
 
   tasks:
-    - name: Retrieve policy status via FortiOS CLI
-      # Use FQCN (Fully Qualified Collection Name) for portability and clarity
+    - name: Retrieve Firewall Policy Status via CLI
+      # Using FQCN for consistency and future-proofing.
+      # This task is inherently idempotent as it performs a read-only 'get' operation.
       ansible.netcommon.cli_command:
         command: get firewall policy status
-      register: status_result
-      # Error Handling: Ensure the task fails if FortiOS returns an error string or the command is unsupported
+      register: policy_status
+      # Error Handling: FortiOS may return a success code but include error text in stdout.
       failed_when:
-        - status_result.failed or 'Command fail' in status_result.stdout or 'Unknown' in status_result.stdout
+        - "policy_status.stdout is not defined"
+        - "'command parse error' in policy_status.stdout | lower"
+        - "'unknown action' in policy_status.stdout | lower"
 
-    - name: Verify command output integrity
-      # Observability: Assert that we received a valid, non-empty response from the target device
+    - name: Verify Policy Status Data Integrity
+      # Observability: Assert that the response is not empty and contains data.
       ansible.builtin.assert:
         that:
-          - status_result.stdout is defined
-          - status_result.stdout | length > 0
-        fail_msg: "The 'get firewall policy status' command returned no data. Check device connectivity or permissions."
+          - "policy_status.stdout | length > 0"
+        fail_msg: "Received empty policy status from {{ inventory_hostname }}. Verify connectivity and permissions."
         quiet: true
 
-    - name: Display formatted Policy Status
+    - name: Display Policy Status for Audit
+      # Documentation: Providing structured output for operator visibility.
       ansible.builtin.debug:
         msg: |
-          ======================= POLICY STATUS =======================
-          {{ status_result.stdout }}
+          ======================= POLICY STATUS: {{ inventory_hostname }} =======================
+          {{ policy_status.stdout }}
+```

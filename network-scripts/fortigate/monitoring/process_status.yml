@@ -1,34 +1,37 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Process Status Diagnostics
-# This playbook retrieves the current process list for monitoring and troubleshooting.
-# Idempotency: This is a read-only diagnostic command and is safe to run multiple times.
-- name: Get Process Status
+# NetLearner Architect Standard: FortiGate Process Monitoring
+# Purpose: Retrieves real-time process list for health monitoring and troubleshooting.
+# This playbook is idempotent as it performs read-only operations and does not modify state.
+
+- name: Get FortiGate Process Status
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Fact gathering is disabled to improve performance on network devices
 
   tasks:
-    - name: Execute process list diagnostic command
-      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+    - name: Retrieve system process list from CLI
+      # FQCN: Using the network common collection for consistent CLI execution
       ansible.netcommon.cli_command:
         command: diagnose system process list
-      register: proc
-      # Error Handling: Define failure conditions for specific FortiOS error strings
+      register: proc_status
+      # Error Handling: Catch FortiOS-specific CLI errors that might return an exit code of 0
       failed_when: 
-        - proc.failed or "Unknown action" in proc.stdout or "Command fail" in proc.stdout
+        - proc_status.failed or "Unknown action" in proc_status.stdout or "Command fail" in proc_status.stdout
 
-    - name: Validate process data integrity
-      # Observability: Assert that the command returned meaningful output
+    - name: Observability - Assert valid process data retrieval
+      # Verification: Ensures the automation pipeline doesn't proceed with null or invalid data
       ansible.builtin.assert:
         that:
-          - proc.stdout is defined
-          - proc.stdout | length > 0
-          - "'process' in proc.stdout or 'Runtime' in proc.stdout"
-        fail_msg: "The process diagnostic command returned empty or unexpected results."
-        success_msg: "Process data successfully retrieved and validated."
+          - "proc_status.stdout is defined"
+          - "proc_status.stdout | length > 0"
+          - "'PID' in proc_status.stdout or 'process' in proc_status.stdout"
+        fail_msg: "Process retrieval failed or returned incomplete data on {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display formatted process information
-      # Observability: Provide clear visibility into the command output
+    - name: Observability - Display formatted process report
+      # Documentation: Provides visibility into the current state of the device for the operator
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE PROCESSES =======================
-          {{ proc.stdout }}
+          ======================= PROCESS REPORT: {{ inventory_hostname }} =======================
+          {{ proc_status.stdout }}
+```

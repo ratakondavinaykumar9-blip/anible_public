@@ -1,39 +1,48 @@
+MCP issues detected. Run /mcp list for status.---
+# NAT by Interface
+# Improved: 2026-04-12
+# Standards: Idempotency, Observability, FQCN, Error Handling
+#
+# WHY: This playbook retrieves the NAT configuration mapped to interfaces on Cisco ASA/Firepower.
+# It is critical for validating that translation rules are correctly applied to the logical 
+# interface security zones (nameif).
 ---
-# NAT by Interface Analysis
-# This playbook retrieves and validates NAT configuration per interface on Cisco ASA/FTD devices.
-# Standards: Idempotency (Read-only), Observability (Register/Assert), FQCN usage.
-
-- name: Retrieve and Verify NAT Interface Configuration
+- name: Get NAT by Interface
   hosts: asa_firepower
-  gather_facts: false # Fact gathering is disabled to optimize performance for CLI-based tasks
+  gather_facts: false
 
   tasks:
-    - name: Execute 'show nat interface' on the target device
-      # Using Fully Qualified Collection Name (FQCN) for reliability and portability
+    - name: Retrieve NAT table details from CLI
+      # Using FQCN for network-agnostic CLI execution
       ansible.netcommon.cli_command:
         command: show nat interface
       register: nat_intf
-      # Error Handling: Explicitly check for command errors or unsupported syntax on legacy versions
+      # Error Handling: Fail if output contains common Cisco error strings or is undefined
       failed_when:
-        - nat_intf.failed or "Invalid input" in nat_intf.stdout or "ERROR" in nat_intf.stdout
-      # Idempotency: Read-only operations must never indicate a state change
-      changed_when: false
+        - nat_intf.stdout is not defined
+        - "'Invalid input' in nat_intf.stdout"
+        - "'ERROR:' in nat_intf.stdout"
+      tags:
+        - fetch
+        - nat
 
-    - name: Validate that NAT information was successfully captured
-      # Observability: Ensure the stdout is populated before attempting to display or parse
+    - name: Verify NAT output integrity
+      # Observability: Assert that we received meaningful data before proceeding
       ansible.builtin.assert:
         that:
-          - nat_intf.stdout is defined
           - nat_intf.stdout | length > 0
-        fail_msg: "The command 'show nat interface' returned no data. Check device NAT configuration."
-        success_msg: "NAT interface data successfully retrieved and verified."
+        fail_msg: "No NAT configuration found or command failed to return data."
+        success_msg: "NAT interface mapping successfully captured."
+      tags:
+        - validate
+        - nat
 
-    - name: Display formatted NAT Interface report
-      # Documentation: Provide human-readable output for network operational visibility
+    - name: Display NAT interface mapping
+      # Observability: Clean output formatting for human review
       ansible.builtin.debug:
         msg: |
-          ======================= NAT BY INTERFACE REPORT =======================
-          Device: {{ inventory_hostname }}
-          Timestamp: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
-          -----------------------------------------------------------------------
+          ======================= NAT BY INTERFACE =======================
           {{ nat_intf.stdout }}
+      tags:
+        - debug
+        - nat

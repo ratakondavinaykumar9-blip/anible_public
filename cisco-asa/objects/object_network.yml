@@ -1,34 +1,40 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 # Network Objects Detail
-# Improved for: Idempotency, Observability, Documentation, Error Handling, and FQCN.
+# Improved: 2026-04-12
+# Standards: Idempotent, Observable, Documented, Error-Resilient, FQCN
 - name: Network Objects Detail
   hosts: asa_firepower
-  gather_facts: false # Facts are disabled to speed up execution as they are not required for this task.
+  gather_facts: false # Optimization: Disable fact gathering for read-only CLI tasks
 
   tasks:
-    - name: Retrieve network objects from the security appliance
-      # Use FQCN for consistency and to avoid module resolution ambiguities.
-      # This task is idempotent as 'show' commands do not modify the device state.
-      ansible.netcommon.cli_command:
-        command: show object network
-      register: network_objects_output
-      # Error Handling: Ensure the task fails if the command is unrecognized or returns an error.
-      failed_when: 
-        - network_objects_output.failed
-        - "'Invalid input' in network_objects_output.stdout or 'Usage' in network_objects_output.stdout"
+    - name: Retrieve Network Object Configuration
+      # Why: Using FQCN for vendor-specific module support and reliable command execution.
+      # Idempotency: 'show' commands are inherently idempotent (read-only).
+      cisco.asa.asa_command:
+        commands:
+          - show object network
+      register: network_obj_result
+      # Error Handling: Explicitly identify and fail on ASA-specific error strings.
+      failed_when:
+        - "'Invalid input' in network_obj_result.stdout[0]"
+        - "'% Permission denied' in network_obj_result.stdout[0]"
 
-    - name: Validate that network objects were successfully retrieved
-      # Observability: Assert that the command returned data to prevent silent failures in downstream automation.
+    - name: Validate Data Retrieval
+      # Observability: Assert that the command returned non-empty data to ensure visibility.
       ansible.builtin.assert:
         that:
-          - network_objects_output.stdout is defined
-          - network_objects_output.stdout | length > 0
-        fail_msg: "The 'show object network' command returned no data or failed."
-        success_msg: "Network objects successfully retrieved and verified."
+          - network_obj_result.stdout[0] is defined
+          - network_obj_result.stdout[0] | length > 0
+        fail_msg: "Failed to retrieve network objects or no objects configured on {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display retrieved network objects
-      # Documentation: Providing a clean visual output for logs and terminal feedback.
+    - name: Display Network Objects
+      # Documentation: Providing a clean, formatted view for operational auditing.
       ansible.builtin.debug:
         msg: |
           ======================= NETWORK OBJECTS =======================
-          {{ network_objects_output.stdout }}
+          Device: {{ inventory_hostname }}
+          ---------------------------------------------------------------
+          {{ network_obj_result.stdout[0] }}
+```

@@ -1,33 +1,41 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
+# FortiGate VLAN Retrieval and Validation
+# This playbook provides a safe, idempotent method to audit VLAN interfaces.
+# It includes health checks to verify the management session is valid and returns data.
 - name: Get FortiGate VLAN List
   hosts: fortigate
   gather_facts: false
-  # Using gather_facts: false to speed up execution since we only need CLI access.
 
   tasks:
-    - name: Execute 'get system vlan' on FortiGate
-      # ansible.netcommon.cli_command is used for generic CLI interaction.
-      # This operation is inherently idempotent as it is read-only.
+    - name: Execute VLAN retrieval command
+      # Retrieves operational state of VLAN interfaces using FQCN.
+      # 'get system vlan' provides the operational summary in FortiOS.
       ansible.netcommon.cli_command:
-        command: get system vlan
+        command: "get system vlan"
       register: vlan_result
-      # Error Handling: Explicitly fail if the output contains common FortiOS error strings.
-      failed_when: 
-        - vlan_result.failed or "Command fail" in vlan_result.stdout
-        - "'Unknown action' in vlan_result.stdout"
+      # Read-only operations are inherently idempotent.
+      # 'failed_when' ensures the task stops if the command returns an error or unknown response.
+      failed_when:
+        - vlan_result.rc != 0
+        - "'Unknown' in vlan_result.stdout"
 
-    - name: Validate VLAN output integrity
-      # Observability: Ensure the command returned meaningful data before attempting to display it.
+    - name: Validate VLAN data observability
+      # Verification step to ensure the result is actionable before display.
       ansible.builtin.assert:
         that:
-          - vlan_result.stdout is defined
-          - vlan_result.stdout | length > 0
-        fail_msg: "The VLAN list returned was empty or undefined."
-        success_msg: "VLAN list successfully retrieved and validated."
+          - "vlan_result.stdout is defined"
+          - "vlan_result.stdout | length > 0"
+        fail_msg: "VLAN retrieval failed: CLI response was empty or invalid."
+        quiet: true
 
-    - name: Display formatted VLAN information
-      # Providing clear visibility into the operational state of the network device.
+    - name: Display VLAN Inventory
+      # Formats raw CLI output for NetLearner audit logs and observability.
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE VLAN LIST =======================
+          ======================= FORTIGATE VLANS =======================
+          Host: {{ inventory_hostname }}
+          Status: Success
+          ===============================================================
           {{ vlan_result.stdout }}
+```

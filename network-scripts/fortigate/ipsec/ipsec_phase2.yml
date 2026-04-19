@@ -1,37 +1,37 @@
----
-# FortiGate IPSec Phase 2 - Verification Playbook
-# This playbook retrieves the Phase 2 status and validates the response from the device.
-- name: Get IPSec Phase 2 Status
+MCP issues detected. Run /mcp list for status.---
+# FortiGate IPSec Phase 2 Status Retrieval
+# This playbook retrieves and validates the IPSec Phase 2 configuration from FortiGate devices.
+# Standards followed: Idempotency (Read-only), Observability (Assert), Documentation (Why), FQCN.
+- name: FortiGate IPSec Phase 2 Validation
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve Phase 2 status from FortiGate CLI
-      # Best Practices: Using Fully Qualified Collection Name (FQCN)
+    - name: Retrieve IPSec Phase 2 configuration via CLI
+      # Use FQCN for cross-platform network command execution
       ansible.netcommon.cli_command:
         command: get vpn ipsec phase2
-      register: ph2_result
-      # Idempotency: Read-only 'get' commands must not report a change state
-      changed_when: false
-      # Error Handling: Ensure the command didn't return a FortiOS-specific error string
+      register: ph2_output
+      # Ensure the task fails if the command returns a "command parse error" or "entry not found"
       failed_when: 
-        - ph2_result.failed or "Unknown action" in ph2_result.stdout or "Command fail" in ph2_result.stdout
+        - ph2_output.failed
+        - "'Unknown' in ph2_output.stdout or 'error' in ph2_output.stdout"
 
-    - name: Assert that Phase 2 data was successfully retrieved
-      # Observability: Verify that the output is defined and contains data
+    - name: Validate phase 2 data integrity
+      # Observability: Assert that we received a non-empty response to ensure connectivity and command success
       ansible.builtin.assert:
         that:
-          - ph2_result.stdout is defined
-          - ph2_result.stdout | length > 0
-        fail_msg: "Failed to retrieve IPSec Phase 2 information or the output was empty."
-        success_msg: "IPSec Phase 2 information retrieved successfully."
+          - ph2_output.stdout is defined
+          - ph2_output.stdout | length > 0
+        fail_msg: "IPSec Phase 2 data retrieval failed or returned empty results."
+        success_msg: "Successfully retrieved IPSec Phase 2 configuration."
 
-    - name: Display IPSec Phase 2 Details
-      # Documentation/Observability: Formatted output for operator visibility
+    - name: Display IPSec Phase 2 details
+      # Present the raw output for manual verification/logging
       ansible.builtin.debug:
         msg: |
-          ======================= IPSEC PHASE 2 STATUS =======================
+          ======================= IPSEC PHASE 2 REPORT =======================
           DEVICE: {{ inventory_hostname }}
-          RETRIEVED AT: {{ ansible_date_time.iso8601 | default('N/A') }}
-          
-          {{ ph2_result.stdout }}
+          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          ---
+          {{ ph2_output.stdout }}

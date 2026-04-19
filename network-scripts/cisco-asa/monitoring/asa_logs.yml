@@ -1,38 +1,45 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Get Recent Logs from Cisco ASA/Firepower
-# Purpose: Retrieves the last N entries from the device logging buffer for troubleshooting.
-# Standards: Idempotent, Observable, Documented, Error-Resilient.
-- name: Get Recent Logs
+- name: Get Recent Logs from ASA Firepower
   hosts: asa_firepower
   gather_facts: false
+  # Standardize log retrieval count as a configurable variable
   vars:
-    # Default log count to retrieve; can be overridden via extra_vars
     log_count: 50
 
   tasks:
-    - name: Retrieve logging buffer contents
-      # Using FQCN for network CLI interaction to ensure compatibility and stability
-      ansible.netcommon.cli_command:
-        command: "show logging | last {{ log_count }}"
-      register: logs_output
-      # Use failed_when to customize failure conditions (e.g., command not found or auth failure)
-      # ignore_errors is avoided here to ensure we handle the state explicitly in assertions
-      ignore_errors: true
-
-    - name: Verify log retrieval success
-      # Observability: Ensure the command executed and returned content
+    - name: Validate log_count input
+      # Observability: Ensure variables are within expected bounds before execution
       ansible.builtin.assert:
         that:
-          - logs_output is success
-          - logs_output.stdout is defined
-          - "logs_output.stdout | length > 0"
-        fail_msg: "Failed to retrieve logs. Check if 'logging buffered' is enabled or if the buffer is empty."
-        success_msg: "Successfully retrieved the last {{ log_count }} log entries."
+          - log_count is defined
+          - log_count | int > 0
+        fail_msg: "The variable 'log_count' must be a positive integer."
+        quiet: true
+
+    - name: Retrieve recent logs from device
+      # FQCN: Using fully qualified collection name for portability
+      # Idempotency: Read-only command ensures no state change on the device
+      ansible.netcommon.cli_command:
+        command: "show logging | last {{ log_count }}"
+      register: logs_result
+      # Error Handling: Fail if the device returns an error message or undefined output
+      failed_when:
+        - logs_result.stdout is not defined
+        - "'Invalid' in logs_result.stdout or 'Error' in logs_result.stdout"
+
+    - name: Verify log content integrity
+      # Observability: Assert that the command actually returned data to prevent silent failures
+      ansible.builtin.assert:
+        that:
+          - logs_result.stdout | length > 0
+        fail_msg: "Log buffer appears to be empty or command failed to return data."
+        success_msg: "Successfully captured {{ log_count }} log lines."
 
     - name: Display retrieved logs
-      # Formatted output for operator visibility
+      # Documentation: Provide a clear, formatted header for operational visibility
       ansible.builtin.debug:
         msg: |
-          ======================= RECENT LOGS (Last {{ log_count }}) =======================
-          {{ logs_output.stdout }}
-      when: logs_output.stdout is defined and (logs_output.stdout | length > 0)
+          ======================= RECENT LOGS: {{ inventory_hostname }} =======================
+          {{ logs_result.stdout }}
+```

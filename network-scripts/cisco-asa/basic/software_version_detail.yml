@@ -1,38 +1,37 @@
----
-- name: Get Detailed Software Version from Cisco ASA/Firepower
-  # Purpose: Retrieves and validates software version information for inventory and compliance auditing.
-  # This playbook is designed to be idempotent and provides robust validation of device responses.
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect Standard: Detailed Software Version Retrieval
+# This playbook retrieves and validates the software version of ASA/Firepower devices.
+# It adheres to NetLearner Staging standards for idempotency, observability, and error handling.
+
+- name: Get Detailed Version
   hosts: asa_firepower
-  gather_facts: false
-  vars:
-    # Defining expected pattern to ensure we received a valid response from an ASA/Firepower device
-    valid_version_pattern: "Cisco"
+  gather_facts: false # Performance optimization: Fact gathering is not required for command execution.
 
   tasks:
-    - name: Retrieve software version details via CLI
-      # Use FQCN for the network common CLI module
-      # Task is idempotent as it performs a read-only 'show' operation
+    - name: Retrieve software version from device
+      # Using FQCN for cross-platform network command execution.
+      # This operation is inherently idempotent as it only performs a read-only 'show' command.
       ansible.netcommon.cli_command:
         command: show version
-      register: ver
-      # Error Handling: Fail explicitly if the command is not recognized or execution fails
+      register: version_output
+      # Error Handling: Ensure the task fails if the command returns an error string despite a zero exit status.
       failed_when:
-        - ver.failed or "Invalid input" in ver.stdout
-      # Ensure this task runs even in check mode to support read-only validation
-      check_mode: false
+        - version_output.stdout is not defined
+        - "'Invalid input' in version_output.stdout"
+        - "'ERROR:' in version_output.stdout"
 
-    - name: Validate command output integrity
-      # Observability: Use assert to verify that the retrieved data meets expected format/content
+    - name: Verify version data integrity
+      # Observability: Assert that the output contains expected identifying strings to confirm successful retrieval.
       ansible.builtin.assert:
         that:
-          - "ver.stdout is defined"
-          - "valid_version_pattern in ver.stdout"
-        fail_msg: "The 'show version' output is empty or does not contain expected Cisco headers."
-        success_msg: "Successfully retrieved and validated software version."
+          - "'Cisco' in version_output.stdout"
+          - "'Software' in version_output.stdout"
+        fail_msg: "The retrieved version output does not appear to be valid Cisco ASA/Firepower data."
+        success_msg: "Version data successfully retrieved and validated."
 
     - name: Display formatted version information
-      # Observability: Output the results for manual review or logging systems
+      # Provides a human-readable summary of the validated output for observability.
       ansible.builtin.debug:
         msg: |
           ======================= DETAILED VERSION =======================
-          {{ ver.stdout }}
+          {{ version_output.stdout }}

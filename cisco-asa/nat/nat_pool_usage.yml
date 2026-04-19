@@ -1,49 +1,55 @@
----
-# NAT Pool Usage Monitoring
-# Improved: 2026-03-15
-# Author: NetLearner Architect
-# Purpose: Retrieves and validates NAT pool utilization for Cisco ASA/Firepower.
-# Standards: Idempotent, Observable, Documented, Error-Resilient, FQCN-compliant.
-
+MCP issues detected. Run /mcp list for status.---
+# NAT Pool Utilization and Statistics Retrieval
+# Improved by Architect: 2026-04-12
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Author: Arjun (OpenClaw)
+#
 - name: Get NAT Pool Usage
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve NAT pool configuration and status
-      # FQCN: Using the netcommon collection for standardized CLI interaction.
-      # Idempotency: 'show' commands are read-only and inherently safe to run multiple times.
+    - name: Retrieve NAT pool configuration and current usage
+      # Why: Capture the configured NAT pools to monitor IP address exhaustion and allocation status.
+      # This operation is inherently idempotent as it only reads device state without modification.
       ansible.netcommon.cli_command:
         command: show ip nat pool
       register: pool
-      # Error Handling: Explicitly fail if the command is not supported by the current firmware.
+      # Error Handling: Ensure the command was executed successfully and returned meaningful output.
       failed_when:
-        - pool.failed
-        - "'Invalid input' in pool.stdout"
+        - pool.failed or pool.stdout | length == 0 or "Invalid" in pool.stdout or "Error" in pool.stdout
 
-    - name: Retrieve granular translation statistics for pools
-      # Capturing specific pool usage data from the global NAT table for capacity planning.
-      ansible.netcommon.cli_command:
-        command: show nat | include pool
-      register: nat_stats
-      # Error Handling: Use ignore_errors because 'include' may return non-zero if no pools are active.
-      ignore_errors: true
-
-    - name: Validate data observability
-      # Observability: Using assertions to ensure that the required data structures were returned.
+    - name: Validate NAT pool information retrieval
+      # Observability: Assert that the output contains expected pool configuration indicators for verification.
       ansible.builtin.assert:
         that:
           - pool.stdout is defined
-          - nat_stats.stdout is defined
-        fail_msg: "Required NAT utilization data could not be retrieved from the host."
-        quiet: true
+        fail_msg: "NAT pool information retrieval failed or returned unexpected data for {{ inventory_hostname }}."
+        success_msg: "NAT pool configuration successfully captured for {{ inventory_hostname }}."
 
-    - name: Display consolidated NAT utilization report
-      # Documentation: Providing a formatted summary for operator visibility and troubleshooting.
+    - name: Retrieve NAT translation statistics for pool mappings
+      # Why: Collect translation counters and hit counts for NAT pools to assess traffic flow and rule effectiveness.
+      # This read-only task is safe to run multiple times, ensuring consistency across repeated executions.
+      ansible.netcommon.cli_command:
+        command: show nat | include pool
+      register: nat_stats
+      # Error Handling: Verify the command returned valid translation statistics or at least a known valid state.
+      failed_when:
+        - nat_stats.failed or "Invalid" in nat_stats.stdout or "Error" in nat_stats.stdout
+
+    - name: Validate NAT statistics retrieval
+      # Observability: Ensure that statistics were successfully gathered, even if no current hits exist.
+      ansible.builtin.assert:
+        that:
+          - nat_stats.stdout is defined
+        fail_msg: "NAT statistics retrieval failed for {{ inventory_hostname }}."
+
+    - name: Display NAT pool and statistics summary
+      # Why: Provide immediate visibility into NAT operations during playbook execution for capacity planning and troubleshooting.
       ansible.builtin.debug:
         msg: |
-          ======================= NAT POOL DEFINITIONS ======================
-          {{ pool.stdout | default('No pool configuration retrieved.') }}
-
-          ======================= ACTIVE POOL STATISTICS ====================
-          {{ nat_stats.stdout | default('No active translations found for configured pools.') }}
+          ======================= NAT POOL: {{ inventory_hostname }} =======================
+          {{ pool.stdout }}
+          
+          ======================= NAT STATS: {{ inventory_hostname }} =======================
+          {{ nat_stats.stdout }}

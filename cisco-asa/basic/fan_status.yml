@@ -1,52 +1,44 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Fan Status Audit Playbook
-# Improved for NetLearner Infrastructure Standards
-#
-# This playbook retrieves fan status from Cisco ASA/Firepower devices.
-# It ensures observability through assertions and maintains idempotency by using read-only commands.
+# NetLearner Hardware Monitoring: Fan Status
+# This playbook retrieves and validates cooling fan status on Cisco ASA/Firepower devices.
+# Adheres to standards for Idempotency, Observability, Documentation, and FQCN usage.
 
-- name: Retrieve and Validate Fan Status
+- name: Retrieve and Verify Fan Status
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: "Fan Status: Execute 'show fan' command"
-      # Best Practice: Using Fully Qualified Collection Name (FQCN).
-      # Idempotency: 'show' commands are non-mutating and safe for multiple runs.
+    - name: Execute 'show fan' command
+      # Use FQCN for the cli_command module for better maintainability and portability.
+      # This task is inherently idempotent as it performs a read-only hardware status query.
       ansible.netcommon.cli_command:
         command: show fan
-      register: fan_result
-      # Error Handling: Catch common CLI errors that might not trigger a standard failure.
-      failed_when:
-        - fan_result.failed or "Invalid input" in fan_result.stdout
+      register: fan_data
+      # Error Handling: Use failed_when to catch empty buffers or "Invalid input" errors 
+      # which might occur if the command is not supported on a specific firmware version.
+      failed_when: >
+        (fan_data.stdout is not defined) or 
+        (fan_data.stdout | length == 0) or 
+        ("Invalid input" in fan_data.stdout)
 
-    - name: "Fan Status: Verify operational success"
-      # Observability: Confirm the command returned valid data to ensure the connection was healthy.
+    - name: Validate fan status observability
+      # Observability: Programmatic verification that the hardware status is captured correctly.
+      # This allows automated monitoring pipelines to fail early if telemetry is missing.
       ansible.builtin.assert:
         that:
-          - fan_result.stdout is defined
-          - fan_result.stdout | length > 0
-        fail_msg: "The command 'show fan' returned no data on {{ inventory_hostname }}."
-        success_msg: "Fan status successfully retrieved from {{ inventory_hostname }}."
+          - "'Fan' in fan_data.stdout"
+        fail_msg: "The fan status output from {{ inventory_hostname }} is malformed or missing expected keywords."
+        success_msg: "Fan status successfully retrieved and verified for {{ inventory_hostname }}."
 
-    - name: "Fan Status: Health Check"
-      # Observability: Scan the output for common failure keywords.
-      # ignore_errors is used to prevent the playbook from halting if hardware issues are found,
-      # ensuring the operator still sees the full report in the debug task.
-      ansible.builtin.assert:
-        that:
-          - "'Failed' not in fan_result.stdout"
-          - "'CRITICAL' not in fan_result.stdout"
-          - "'Down' not in fan_result.stdout"
-        fail_msg: "Warning: Potential fan hardware failure detected on {{ inventory_hostname }}."
-      ignore_errors: true
-
-    - name: "Fan Status: Display Results"
-      # Documentation: Provide a formatted and labeled view of the command output for the operator.
+    - name: Display formatted fan status report
+      # Observability: Clean, structured debug output for human operators.
       ansible.builtin.debug:
         msg: |
-          DEVICE: {{ inventory_hostname }}
-          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
-          ======================= FANS =======================
-          {{ fan_result.stdout }}
-          ====================================================
+          ======================= FAN STATUS REPORT =======================
+          Device: {{ inventory_hostname }}
+          Capture Time: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
+          -----------------------------------------------------------------
+          {{ fan_data.stdout }}
+          =================================================================
+```

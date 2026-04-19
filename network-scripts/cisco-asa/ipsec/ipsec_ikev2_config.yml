@@ -1,52 +1,59 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 # IKEv2 Tunnel Configuration Audit
-# This playbook retrieves and validates IKEv2 and IPsec profile configurations
-# to ensure cryptographic settings are correctly applied and visible on the device.
-- name: Audit IKEv2 and IPsec Configuration
+# Purpose: Retrieves and validates IKEv2 and IPsec profile configurations from ASA/Firepower devices.
+# Standards: Idempotent read-only execution, FQCN modules, and observability via assertions.
+- name: Get IKEv2 Configuration
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false  # Fact gathering is disabled to minimize execution overhead for CLI tasks.
 
   tasks:
-    - name: Retrieve IKEv2 policy and proposal configuration
-      # FQCN: Using ansible.netcommon for platform-agnostic CLI command execution
-      ansible.netcommon.cli_command:
-        command: show running-config crypto ikev2
-      register: ikev2_output
-      # Error Handling: Ensure the command was recognized by the device
-      failed_when: 
-        - ikev2_output.failed 
-        - "'invalid' in ikev2_output.stdout | lower"
+    - name: Retrieve IKEv2 configuration from device
+      # Using FQCN cisco.asa.asa_command for platform-specific terminal and error handling.
+      cisco.asa.asa_command:
+        commands:
+          - show running-config crypto ikev2
+      register: ikev2_raw
+      # Error Handling: Explicitly fail on common Cisco CLI error patterns that don't return non-zero exit codes.
+      failed_when: >
+        ikev2_raw.failed or 
+        '% Invalid input' in ikev2_raw.stdout[0] or
+        '% Ambiguous command' in ikev2_raw.stdout[0]
 
-    - name: Validate that IKEv2 configuration exists
-      # Observability: Assert that the security policy is actually defined and not an empty return
+    - name: Verify IKEv2 configuration capture success
+      # Observability: Confirm the output exists and is properly structured before proceeding.
       ansible.builtin.assert:
         that:
-          - "ikev2_output.stdout | length > 0"
-        fail_msg: "IKEv2 configuration is missing or could not be retrieved from the device."
-        success_msg: "IKEv2 configuration successfully verified."
+          - "ikev2_raw.stdout is defined"
+          - "ikev2_raw.stdout | length > 0"
+        fail_msg: "Critical: Unable to retrieve IKEv2 configuration from {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Retrieve Crypto IPsec profile configuration
-      ansible.netcommon.cli_command:
-        command: show running-config crypto ipsec profile
-      register: ipsec_profile_output
-      failed_when: 
-        - ipsec_profile_output.failed 
-        - "'invalid' in ipsec_profile_output.stdout | lower"
+    - name: Retrieve crypto IPsec profile configuration
+      cisco.asa.asa_command:
+        commands:
+          - show running-config crypto ipsec profile
+      register: ipsec_raw
+      failed_when: >
+        ipsec_raw.failed or 
+        '% Invalid input' in ipsec_raw.stdout[0] or
+        '% Ambiguous command' in ipsec_raw.stdout[0]
 
-    - name: Validate that IPsec profiles exist
-      # Observability: Ensure profiles are configured to prevent downstream VPN failures
+    - name: Verify IPsec profile configuration capture success
       ansible.builtin.assert:
         that:
-          - "ipsec_profile_output.stdout | length > 0"
-        fail_msg: "IPsec profile configuration is missing or could not be retrieved."
-        success_msg: "IPsec profile configuration successfully verified."
+          - "ipsec_raw.stdout is defined"
+          - "ipsec_raw.stdout | length > 0"
+        fail_msg: "Critical: Unable to retrieve IPsec profile configuration from {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display consolidated cryptographic configuration
-      # Documentation: Provide a formatted view of the running configuration for audit logs
+    - name: Display formatted security configuration summary
+      # Provides a human-readable summary of the running configuration; handles cases where config is missing.
       ansible.builtin.debug:
         msg: |
           ======================= IKEv2 CONFIG =======================
-          {{ ikev2_output.stdout }}
+          {{ ikev2_raw.stdout[0] | default('No IKEv2 configuration detected') }}
 
-          ======================= IPSEC PROFILE CONFIG =======================
-          {{ ipsec_profile_output.stdout }}
+          ==================== IPSEC PROFILE CONFIG ==================
+          {{ ipsec_raw.stdout[0] | default('No IPsec profile configuration detected') }}
+```

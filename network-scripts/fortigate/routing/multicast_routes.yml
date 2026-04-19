@@ -1,33 +1,36 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: FortiGate Multicast Routing Audit
-# Purpose: Safely retrieves and validates multicast routing table entries.
-# This operation is read-only and inherently idempotent.
-- name: FortiGate Multicast Routes
+- name: Retrieve and Validate FortiGate Multicast Routing Table
   hosts: fortigate
   gather_facts: false
+  # Why: Disabling facts gathering to optimize performance for this specific state-inspection task.
 
   tasks:
-    - name: Retrieve multicast routing table
-      # Using FQCN for cross-platform compatibility and stability
+    - name: Execute CLI command to retrieve multicast routes
+      # Why: Captures the current multicast routing state for observability and automated auditing.
       ansible.netcommon.cli_command:
-        command: get router info routing-table multicast
-      register: mc_results
-      # Error Handling: Prevent silent failures if the command is unrecognized or execution fails
-      failed_when: 
-        - mc_results.failed 
-        - "'Unknown action' in mc_results.stdout"
+        command: "get router info routing-table multicast"
+      register: multicast_output
+      # Why: Ensures the task fails if FortiOS returns a CLI error string despite a successful SSH transport.
+      # This maintains idempotency by ensuring no state is incorrectly assumed upon failure.
+      failed_when: >
+        (multicast_output.rc | default(0) != 0) or
+        ('Command fail' in multicast_output.stdout) or
+        ('Unknown action' in multicast_output.stdout)
 
-    - name: Verify multicast route retrieval success
-      # Observability: Ensure the output is populated before proceeding
+    - name: Assert multicast route data integrity
+      # Why: Programmatic verification that the command returned meaningful content before reporting success.
       ansible.builtin.assert:
         that:
-          - mc_results.stdout is defined
-          - mc_results.stdout | length > 0
-        fail_msg: "Multicast routing table could not be retrieved or is empty."
-        success_msg: "Successfully retrieved multicast routing table."
+          - multicast_output.stdout is defined
+          - (multicast_output.stdout | length) > 0
+        fail_msg: "Data retrieval failed: The multicast routing table is undefined or empty."
+        success_msg: "Data retrieval successful: Multicast routing table captured."
 
     - name: Display Multicast Routes
+      # Why: Provides a human-readable, formatted visual output of the retrieved network state.
       ansible.builtin.debug:
         msg: |
           ======================= MULTICAST ROUTES =======================
-          {{ mc_results.stdout }}
+          {{ multicast_output.stdout }}
+```

@@ -1,40 +1,35 @@
----
-# Playbook: FortiGate Global Settings Audit
-# Purpose: This playbook retrieves and validates the global system configuration from FortiGate devices.
-# Standards: Idempotent (Read-only), Observable (Assert), Documented (Comments), FQCN Usage.
-
-- name: Audit FortiGate Global Settings
+MCP issues detected. Run /mcp list for status.---
+# Playbook: fortigate_global_settings.yml
+# Purpose: Retrieves and validates the global system configuration of a FortiGate device.
+# This operation is read-only and idempotent by design.
+- name: Get and Validate FortiGate Global Settings
   hosts: fortigate
   gather_facts: false
-  vars:
-    # Defining expected string to ensure we didn't get an empty or error response
-    required_keyword: "hostname"
 
   tasks:
-    - name: Retrieve global system configuration via CLI
-      # Using FQCN ansible.netcommon.cli_command for standardized network interaction.
-      # This task is inherently idempotent as it performs a state retrieval (get).
+    - name: Execute command to retrieve global system settings
+      # FQCN: Using ansible.netcommon.cli_command for consistent network CLI interaction.
+      # Idempotency: Read-only commands must set changed_when to false to ensure safe re-runs.
       ansible.netcommon.cli_command:
         command: get system global
-      register: global_output
-      # Error Handling: Fail if the command returns an error or if the CLI session fails.
-      failed_when: 
-        - global_output.failed or "Unknown action" in global_output.stdout
-      ignore_errors: false
+      register: global_result
+      changed_when: false
+      # Error Handling: Fail explicitly if the output is empty or contains known error patterns.
+      failed_when:
+        - global_result.stdout | length == 0
+        - "'command fail' in global_result.stdout | lower"
 
-    - name: Validate global settings integrity
-      # Observability: Asserting that the output contains expected configuration keys.
-      # This ensures the device returned a valid configuration block rather than an error message.
+    - name: Verify global configuration integrity
+      # Observability: Assert that the output contains expected system keys like 'hostname'.
       ansible.builtin.assert:
         that:
-          - global_output.stdout is defined
-          - required_keyword in global_output.stdout
-        fail_msg: "Data integrity check failed: '{{ required_keyword }}' not found in output."
-        success_msg: "Data integrity check passed: Global settings successfully retrieved."
+          - "'hostname' in global_result.stdout"
+        fail_msg: "Global configuration data is incomplete or the device returned an invalid response."
+        success_msg: "Global configuration successfully validated."
 
-    - name: Display formatted global settings
-      # Provides clear visibility for operators during playbook execution.
+    - name: Display formatted global settings for observability
+      # Documentation: Ensuring critical system state is visible in the automation logs.
       ansible.builtin.debug:
         msg: |
-          ======================= GLOBAL SETTINGS ({{ inventory_hostname }}) =======================
-          {{ global_output.stdout }}
+          ======================= GLOBAL SETTINGS =======================
+          {{ global_result.stdout }}

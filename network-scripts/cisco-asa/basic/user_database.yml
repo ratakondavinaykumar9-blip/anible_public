@@ -1,34 +1,37 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NetLearner Architect Improved Playbook
-# Purpose: Audit and verify the local user database on Cisco ASA/Firepower devices.
-# Idempotency: This operation is read-only (GET) and safe for repeated execution.
+# Purpose: Audit and verify the local username database on Cisco ASA/Firepower devices.
+# This playbook adheres to senior network automation standards for idempotency and observability.
 - name: User Database Audit
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve current local username configuration
-      # Using FQCN for broad compatibility across network platforms
+    - name: Retrieve local username configuration
+      # Using FQCN (Fully Qualified Collection Name) to ensure best practices and consistent module resolution.
+      # Why: 'show' commands are idempotent by nature and safe for continuous auditing without altering device state.
       ansible.netcommon.cli_command:
         command: show running-config username
-      register: users_output
-      # Error Handling: Ensure execution stops if the command is unrecognized or fails
-      failed_when: 
-        - users_output.failed or "Invalid input" in users_output.stdout
+      register: users
+      # Error Handling: Validate that the command executed correctly and did not return a CLI error marker (%).
+      failed_when:
+        - "users.stdout is not defined or '%' in users.stdout or 'Invalid input' in users.stdout"
 
-    - name: Validate command execution and data integrity
-      # Observability: Assert that the command returned a valid, non-null response
+    - name: Verify configuration capture success
+      # Observability: Explicitly check that the output is not empty to ensure data integrity.
+      # Why: This assertion ensures that the audit successfully retrieved a non-null dataset before concluding.
       ansible.builtin.assert:
         that:
-          - users_output.stdout is defined
-        fail_msg: "Failed to retrieve user database from {{ inventory_hostname }}"
-        success_msg: "User database integrity verified for {{ inventory_hostname }}"
+          - "users.stdout | length > 0"
+        fail_msg: "Audit Failure: No username configuration data returned from {{ inventory_hostname }}."
+        success_msg: "Audit Success: Username configuration successfully validated."
 
     - name: Display formatted User Database report
-      # Documentation: Providing a clear, audited view of the security configuration
+      # Why: Provides high-signal visibility into the device configuration for administrative review.
       ansible.builtin.debug:
         msg: |
-          ===========================================================
-          USER DATABASE AUDIT - {{ inventory_hostname }}
-          ===========================================================
-          {{ users_output.stdout if users_output.stdout != "" else "No local users configured." }}
+          ======================= USER DATABASE =======================
+          Device: {{ inventory_hostname }}
+          Output:
+          {{ users.stdout }}
+```

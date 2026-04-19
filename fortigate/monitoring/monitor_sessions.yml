@@ -1,48 +1,52 @@
----
-# FortiGate Session Monitoring - NetLearner Architect Optimized
-# This playbook retrieves real-time session metrics and validates data integrity.
-# Standards: Idempotent (Read-only), Observability (Asserts), FQCN, Error Handling.
-
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Session Monitoring - Production Grade
+# Purpose: Gathers session telemetry from FortiGate firewalls for health monitoring.
+# Why: Essential for identifying session table exhaustion or abnormal traffic patterns.
 - name: Monitor FortiGate Sessions
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: Facts gathering disabled to reduce overhead on network control planes.
 
   tasks:
     - name: Retrieve detailed session list
-      # Using FQCN for consistent network-agnostic command execution.
-      # This task is inherently idempotent as it does not modify device state.
+      # Why: Necessary for granular analysis of individual flow states.
       ansible.netcommon.cli_command:
         command: "get system session list"
       register: sessions_output
-      # Error Handling: Catch empty responses or CLI-level execution errors.
-      failed_when: 
-        - sessions_output.stdout is not defined or sessions_output.stdout == ""
-        - "'command fail' in sessions_output.stdout | lower"
+      # Idempotency: Read-only telemetry fetch marked as 'changed_when: false'.
+      changed_when: false
+      # Error Handling: Fail if output is empty or indicates a CLI execution failure.
+      failed_when: >
+        (sessions_output.stdout | length == 0) or
+        ("Command fail" in sessions_output.stdout)
 
-    - name: Retrieve session statistics summary
+    - name: Retrieve session counters and statistics
+      # Why: Provides high-level metrics like session count, high-water marks, and protocol distribution.
       ansible.netcommon.cli_command:
         command: "get system session stat"
       register: stats_output
-      failed_when: 
-        - stats_output.stdout is not defined or stats_output.stdout == ""
+      # Idempotency: Read-only command ensures safe repeated execution.
+      changed_when: false
+      # Error Handling: Ensure the command was accepted and processed by FortiOS.
+      failed_when: >
+        (stats_output.stdout | length == 0) or
+        ("error" in stats_output.stdout | lower)
 
-    - name: Assert session data validity
-      # Observability: Verify that the response contains expected session metric keywords.
+    - name: Verify telemetry integrity
+      # Observability: Assert that the statistics output contains the expected 'sessions' metric key.
+      # This prevents false positives if the device returns an empty but successful CLI response.
       ansible.builtin.assert:
         that:
-          - "'sessions' in stats_output.stdout | lower"
-        fail_msg: "The session statistics response was invalid or missing expected metrics."
-        success_msg: "Session statistics successfully captured and validated."
+          - "'sessions:' in stats_output.stdout"
+        fail_msg: "Incomplete or malformed session statistics received from {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display Session Monitoring Report
-      # Documentation: Provides operational visibility into firewall session load.
+    - name: Display formatted session telemetry
+      # Observability: Provides formatted visibility into the device state for the automation operator.
       ansible.builtin.debug:
         msg: |
-          ======================= SESSION MONITORING =======================
-          TARGET HOST: {{ inventory_hostname }}
-          
-          STATISTICS SUMMARY:
+          ======================= SESSION MONITORING: {{ inventory_hostname }} =======================
           {{ stats_output.stdout }}
           
-          TOTAL SESSIONS COUNTED: {{ sessions_output.stdout_lines | length if sessions_output.stdout_lines is defined else 'Unknown' }}
-          ==================================================================
+          TELEMETRY SUMMARY:
+          - Total flows in session table: {{ sessions_output.stdout_lines | length }}
+          - Data Integrity Status: Validated

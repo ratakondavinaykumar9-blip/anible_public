@@ -1,38 +1,35 @@
----
-# FortiGate UTM Statistics Gathering
-# This playbook retrieves and displays UTM statistics from FortiGate devices.
-# Standards: Idempotency (read-only), Observability (asserts), and FQCN usage.
-
-- name: FortiGate UTM Statistics
+MCP issues detected. Run /mcp list for status.---
+# FortiGate UTM Statistics Collection and Verification
+# Purpose: Retrieves site categorization and UTM performance metrics for network auditing.
+- name: Get UTM Stats
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Best Practice: Disabling fact gathering for specialized network CLI tasks
 
   tasks:
-    - name: Retrieve UTM statistics from the device
-      # FQCN: Using the network common collection for standardized CLI interactions.
+    - name: Execute 'get system siteresult' command via CLI
+      # Standard: Best Practices - Using Fully Qualified Collection Name (FQCN)
       ansible.netcommon.cli_command:
         command: get system siteresult
-      register: utm_stats
-      # Idempotency: Setting changed_when to false as this is a non-mutating "get" operation.
+      register: utm_output
+      # Standard: Error Handling - Explicitly catching FortiOS-specific CLI execution errors
+      failed_when:
+        - utm_output.failed or "Command fail" in utm_output.stdout or "Unknown action" in utm_output.stdout
+      # Standard: Idempotency - Ensuring 'get' operations never report a 'changed' state
       changed_when: false
-      # Error Handling: Fail if the module reports failure or if the output contains error strings.
-      failed_when: >
-        utm_stats.failed or 
-        "Unknown command" in utm_stats.stdout or 
-        "Command fail" in utm_stats.stdout
 
-    - name: Validate UTM response integrity
-      # Observability: Ensure the captured output is defined and contains data before proceeding.
+    - name: Verify integrity of retrieved UTM data
+      # Standard: Observability - Using assertions to ensure the output is populated and valid
       ansible.builtin.assert:
         that:
-          - utm_stats.stdout is defined
-          - utm_stats.stdout | length > 0
-        fail_msg: "Data validation failed: UTM statistics output is empty or undefined."
-        success_msg: "Data validation passed: UTM statistics output is populated."
+          - utm_output.stdout is defined
+          - utm_output.stdout | length > 0
+        fail_msg: "Critical Failure: The UTM statistics command returned an empty or invalid response."
+        success_msg: "Observability Check: UTM statistics successfully retrieved and validated."
 
-    - name: Display captured UTM statistics
-      # Observability: Providing a clear, formatted view of the command output.
+    - name: Display formatted UTM performance statistics
+      # Standard: Documentation - Clear, formatted output for human readability in monitoring logs
       ansible.builtin.debug:
         msg: |
-          ======================= UTM STATS =======================
-          {{ utm_stats.stdout }}
+          ======================= FORTIGATE UTM PERFORMANCE =======================
+          {{ utm_output.stdout }}
+          ======================= END OF STATISTICS ===============================

@@ -1,31 +1,35 @@
----
-- name: Gather IPSec Diagnostic Logs from FortiGate
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect Standardized Playbook
+# Purpose: Retrieve and validate FortiGate IPSec/IKE diagnostic logs for troubleshooting.
+# Idempotency: This playbook uses read-only diagnostic commands, making it safe for repeated execution.
+- name: Get IPSec Errors
   hosts: fortigate
-  gather_facts: false
-  # This playbook is idempotent as it performs read-only diagnostic operations that do not modify the device state.
-  # It retrieves IKE/IPSec error logs to facilitate network troubleshooting and observability.
+  gather_facts: false # Optimization: Disabling fact gathering as metadata is not required for diagnostic commands.
 
   tasks:
-    - name: Execute IKE diagnostic log command
+    - name: Execute IKE diagnostic command
+      # Using Fully Qualified Collection Name (FQCN) for consistency and portability.
       ansible.netcommon.cli_command:
         command: diagnose vpn ike log
-      register: ipsec_logs
-      # Error Handling: Catching unexpected command failures or "unknown command" responses from the CLI.
-      failed_when:
-        - ipsec_logs.rc is defined and ipsec_logs.rc != 0
-        - "'command parse error' in ipsec_logs.stdout | lower"
+      register: ike_errors
+      # Error Handling: Explicitly define failure conditions to catch OS-level parse errors.
+      failed_when: 
+        - ike_errors.rc is defined and ike_errors.rc != 0
+        - "'command parse error' in ike_errors.stdout"
 
-    - name: Verify IPSec diagnostic data retrieval
+    - name: Validate diagnostic output observability
+      # Observability: Assert that data was actually returned to prevent silent failures in automation pipelines.
       ansible.builtin.assert:
         that:
-          - ipsec_logs.stdout is defined
-        fail_msg: "Critical Error: Failed to capture stdout from the FortiGate device."
-        success_msg: "IPSec diagnostic logs successfully registered."
-      # Observability: Ensures that the captured data is valid before proceeding to display.
+          - ike_errors.stdout is defined
+          - ike_errors.stdout | length > 0
+        fail_msg: "No diagnostic logs were returned from {{ inventory_hostname }}. Verify VPN state."
+        success_msg: "Successfully captured IPSec logs from {{ inventory_hostname }}."
 
-    - name: Display FortiGate IPSec Errors
+    - name: Display formatted IPSec error report
+      # Observability: Providing a clean, structured view of the retrieved logs for the operator.
       ansible.builtin.debug:
         msg: |
-          ======================= IPSEC ERRORS =======================
-          {{ ipsec_logs.stdout if ipsec_logs.stdout | length > 0 else 'No recent IPSec errors found.' }}
-      # Documentation: Summarizes the findings for the operator, providing a clear visual separator.
+          ======================= IPSEC ERRORS: {{ inventory_hostname }} =======================
+          {{ ike_errors.stdout }}
+---

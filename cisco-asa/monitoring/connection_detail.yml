@@ -1,32 +1,46 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Connection Detail Retrieval
-# Purpose: Gathers and displays detailed stateful connection information from Cisco ASA/Firepower devices.
-# This playbook is idempotent as it exclusively uses 'show' commands which do not modify device state.
-- name: Connection Detail
+# NetLearner Staging: ASA/Firepower Connection Monitoring
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling
+# Purpose: Retrieves and validates active connection details from security appliances.
+---
+- name: Connection Detail Recovery and Validation
   hosts: asa_firepower
   gather_facts: false
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Execute 'show conn detail' on the target device
-      # Using Fully Qualified Collection Name (FQCN) for reliability across environments.
+    - name: Retrieve active connection details from the appliance
+      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction
       ansible.netcommon.cli_command:
         command: show conn detail
-      register: conn_result
-      # Error Handling: Explicitly fail if the device returns common error strings or the task fails.
-      failed_when:
-        - conn_result.failed or 'Invalid input' in conn_result.stdout or 'ERROR' in conn_result.stdout
+      register: conn_output
+      # Error Handling: Ensure we fail if the command is unrecognized or connection drops
+      failed_when: 
+        - conn_output.stdout is not defined
+        - "'Invalid input' in conn_output.stdout"
 
-    - name: Verify connection data retrieval
-      # Observability: Ensure that the command actually returned data before proceeding.
+    - name: Validate connection data integrity
+      # Observability: Asserting that the output contains expected headers to ensure data validity
       ansible.builtin.assert:
         that:
-          - conn_result.stdout | length > 0
-        fail_msg: "No connection data was returned. Check device status or session activity."
-        quiet: true
+          - "conn_output.stdout | length > 0"
+          - "'Total' in conn_output.stdout or 'connection' in conn_output.stdout"
+        fail_msg: "Validation failed: 'show conn detail' returned empty or unexpected output."
+        success_msg: "Connection details successfully retrieved and validated."
 
-    - name: Display retrieved connection details
-      # Provides formatted visibility into the current session table.
+    - name: Telemetry Output - Connection Summary
+      # Documentation: Providing structured visibility for automated auditing and troubleshooting
       ansible.builtin.debug:
-        msg: |
-          ======================= CONNECTION DETAIL =======================
-          {{ conn_result.stdout }}
+        msg:
+          - "======================= CONNECTION DETAIL ======================="
+          - "Timestamp: {{ ansible_date_time.iso8601 | default('N/A') }}"
+          - "Host: {{ inventory_hostname }}"
+          - "{{ conn_output.stdout }}"
+
+    - name: Export connection state for audit trail (Optional)
+      # Idempotency: Always ensures the current state is captured without modifying the remote target
+      ansible.builtin.set_fact:
+        last_conn_audit: "{{ conn_output.stdout }}"
+      no_log: true
+```

@@ -1,35 +1,40 @@
+MCP issues detected. Run /mcp list for status.---
+# FortiGate VXLAN Status Audit
+# Auto-improved: 2026-04-12 09:00 (NetLearner Architect)
+# Author: Arjun (OpenClaw)
+# Purpose: Idempotent retrieval of VXLAN configuration with validation and observability.
 ---
-# FortiGate VXLAN Operational Status Retrieval
-# Standards: Idempotency (Read-only), Observability (Register/Assert), FQCN
-- name: Get VXLAN Status
+- name: FortiGate VXLAN Audit
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve VXLAN information from FortiGate
-      # FQCN: Utilizing the network common CLI module for standard command execution
-      # Idempotency: This is a read-only operation and safe to run repeatedly
+    - name: Retrieve VXLAN configuration from FortiOS CLI
+      # Why: Using FQCN (ansible.netcommon) for standardized network command execution.
+      # Why: 'get' commands are inherently idempotent as they do not modify device state.
       ansible.netcommon.cli_command:
-        command: "get system vxlan"
-      register: vxlan_raw
-      # Error Handling: Ensure the command was accepted and executed by FortiOS
-      failed_when: 
-        - vxlan_raw.failed | default(false)
-        - "'Command fail' in vxlan_raw.stdout"
-        - "'Unknown action' in vxlan_raw.stdout"
+        command: get system vxlan
+      register: vxlan_result
+      # Why: Prevent total playbook failure if a specific device model does not support VXLAN.
+      ignore_errors: true
 
-    - name: Verify VXLAN output consistency
-      # Observability: Confirm that the device returned non-empty data for validation
+    - name: Verify VXLAN command success and output integrity
+      # Why: Observability - Assert that the device recognized the command and returned data.
       ansible.builtin.assert:
         that:
-          - vxlan_raw.stdout is defined
-          - vxlan_raw.stdout | length > 0
-        fail_msg: "The VXLAN status query returned no data. Check if VXLAN is enabled or configured."
-        quiet: true
+          - vxlan_result.failed == false
+          - "vxlan_result.stdout != ''"
+          - "'Unknown action' not in vxlan_result.stdout"
+        fail_msg: "VXLAN command failed or is unsupported on {{ inventory_hostname }}."
+        success_msg: "VXLAN configuration successfully captured for {{ inventory_hostname }}."
+      when: vxlan_result is defined
 
-    - name: Display VXLAN Operational State
-      # Documentation: Provides a clean, formatted output of the operational status
+    - name: Display structured VXLAN status
+      # Why: Observability - Provide the operator with clear, formatted output of the results.
       ansible.builtin.debug:
         msg: |
-          ======================= VXLAN STATUS: {{ inventory_hostname }} =======================
-          {{ vxlan_raw.stdout }}
+          =====================================================
+          VXLAN STATUS: {{ inventory_hostname }}
+          =====================================================
+          {{ vxlan_result.stdout | default('No output returned from device.') }}
+      when: not vxlan_result.failed or vxlan_result.stdout != ""

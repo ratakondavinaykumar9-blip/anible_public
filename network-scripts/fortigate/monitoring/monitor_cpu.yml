@@ -1,67 +1,61 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate CPU Monitoring
-# Improved: 2026-03-15
-# Author: NetLearner Architect
-#
-# Standards:
-# 1. Idempotency: Read-only CLI commands are inherently idempotent as they do not alter device state.
-# 2. Observability: Employs 'register' to capture output and 'assert' to validate data integrity.
-# 3. Documentation: Clear step-by-step logic explaining the purpose of each monitoring task.
-# 4. Error Handling: Uses 'failed_when' and 'ignore_errors' to manage potential command failures gracefully.
-# 5. Best Practices: Implements Fully Qualified Collection Names (FQCN) for all modules.
+# FortiGate CPU Monitoring and Health Check
+# This playbook gathers real-time CPU performance metrics from FortiGate devices.
+# It ensures idempotency through read-only operations and provides high observability via assertions.
 
-- name: Monitor FortiGate CPU Performance
+- name: Monitor CPU Performance
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: "MONITOR | Retrieve CPU performance status"
-      # Using FQCN for portability and explicit module sourcing.
-      # Idempotency: Reading performance status is safe for repeated execution.
+    - name: Retrieve instantaneous CPU utilization per core
+      # Why: Gathers the current CPU load to identify performance bottlenecks.
       ansible.netcommon.cli_command:
-        command: "get system performance status | grep CPU"
-      register: cpu_raw
-      # Error Handling: Ensure we fail if the command execution fails or returns empty.
+        command: get system performance status | grep "CPU"
+      register: cpu_results
       failed_when: 
-        - cpu_raw.failed 
-        - cpu_raw.stdout | length == 0
+        - cpu_results.rc is defined and cpu_results.rc != 0
+        - "not 'CPU' in cpu_results.stdout"
 
-    - name: "ASSERT | Validate CPU data retrieval"
-      # Observability: Confirm the output contains the 'CPU' keyword to ensure the grep was successful.
+    - name: Validate CPU data retrieval
+      # Why: Observability check to ensure the output contains expected metrics before proceeding.
       ansible.builtin.assert:
         that:
-          - "'CPU' in cpu_raw.stdout"
-        fail_msg: "Failed to retrieve valid CPU metrics from 'get system performance status'."
+          - cpu_results.stdout is defined
+          - cpu_results.stdout | length > 0
+        fail_msg: "Critical: Unable to parse CPU performance data from {{ inventory_hostname }}."
         quiet: true
 
-    - name: "MONITOR | Retrieve top process usage"
-      # 'diagnose system top 1 20 1' is used to make the command non-interactive (1s delay, 20 lines, 1 iteration).
-      # This prevents the Ansible task from hanging while waiting for a manual break.
+    - name: Capture system process snapshot
+      # Why: Provides visibility into which specific processes are consuming system resources.
       ansible.netcommon.cli_command:
-        command: "diagnose system top 1 20 1"
-      register: top_raw
-      # Error Handling: We allow the playbook to continue if specific process monitoring fails,
-      # but we register the result for subsequent validation.
+        command: diagnose system top 1 20
+      register: top_results
+      # Why: This command may timeout or be restricted under high load; ignore_errors ensures monitoring continues.
       ignore_errors: true
 
-    - name: "ASSERT | Validate process data integrity"
-      # Observability: Check that the process table header 'RunTime' or 'top' is present.
+    - name: Validate process snapshot data
+      # Why: Observability check to confirm if process data was successfully captured.
       ansible.builtin.assert:
         that:
-          - "not top_raw.failed"
-          - "'RunTime' in top_raw.stdout or 'top' in top_raw.stdout"
-        fail_msg: "Process monitoring failed or returned an unexpected output format."
+          - top_results.stdout is defined
+        fail_msg: "Warning: Could not retrieve process list from {{ inventory_hostname }}."
         quiet: true
 
-    - name: "DISPLAY | Report CPU Monitoring Results"
-      # Documentation: Providing a clear, formatted summary of the gathered metrics.
+    - name: Display consolidated CPU monitoring report
+      # Why: Provides a formatted, human-readable view of collected performance data for observability.
       ansible.builtin.debug:
         msg: |
-          ======================= CPU MONITORING =======================
-          DEVICE: {{ inventory_hostname }}
+          ======================================================================
+          FORTIGATE PERFORMANCE MONITOR: {{ inventory_hostname }}
+          ======================================================================
           
-          --- CPU STATUS ---
-          {{ cpu_raw.stdout }}
+          CPU UTILIZATION BY CORE:
+          {{ cpu_results.stdout }}
+
+          PROCESS SNAPSHOT (TOP 20):
+          {{ top_results.stdout | default('N/A - Data retrieval failed') }}
           
-          --- TOP PROCESSES ---
-          {{ top_raw.stdout | default('No process data available.') }}
+          ======================================================================
+```

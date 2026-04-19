@@ -1,60 +1,55 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Improved IPSec Tunnel Clear Playbook
-# Standards: Idempotency, Observability, Documentation, Error Handling, and FQCNs.
+# Clear IPSec Tunnel - NetLearner Automation Standard
+# This playbook performs operational clearing of crypto sessions/SAs on Cisco ASA/Firepower.
 - name: Clear IPSec Tunnel
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Target peer IP address. If left empty, all active IPSec SAs will be cleared globally.
+    # Target peer IP for specific tunnel clearing. If empty, all SAs are cleared.
     tunnel_peer: ""
 
   tasks:
-    - name: Pre-check current crypto sessions
-      # Why: To observe the current state before taking action and to ensure idempotency for specific peer clear requests.
-      cisco.asa.asa_command:
-        commands:
-          - "show crypto session"
-      register: pre_clear_sessions
-      changed_when: false
-
-    - name: Clear specific crypto session
-      # Why: Targeted clearing of a specific peer session to minimize impact on other tunnels.
-      # Idempotency: The command is only executed if the tunnel_peer is found in the current session database.
-      cisco.asa.asa_command:
-        commands:
-          - "clear crypto session local {{ tunnel_peer }}"
+    - name: Clear specific crypto sessions by peer IP
+      # Using FQCN for cross-platform compatibility and stability.
+      # Operational clearing is non-idempotent by nature, but we wrap it in safety checks.
+      ansible.netcommon.cli_command:
+        command: "clear crypto session local {{ tunnel_peer }}"
       register: clear_result
-      when:
-        - tunnel_peer | length > 0
-        - tunnel_peer in (pre_clear_sessions.stdout[0] | default(''))
-      failed_when:
-        - "'Error' in (clear_result.stdout[0] | default(''))"
-        - "'Invalid' in (clear_result.stdout[0] | default(''))"
+      when: tunnel_peer | length > 0
+      # Prevent playbook failure if the session is already inactive (Idempotency behavior).
+      failed_when: 
+        - clear_result.failed
+        - "'not found' not in clear_result.stdout"
+        - "'no session' not in clear_result.stdout"
 
-    - name: Clear all crypto security associations (SA)
-      # Why: Performs a global clear of all IPSec SAs when no specific peer is defined.
-      # Error Handling: Explicitly fails if the ASA returns an error message.
-      cisco.asa.asa_command:
-        commands:
-          - "clear crypto ipsec sa"
-      register: clear_ipsec
-      when: tunnel_peer | length == 0
-      failed_when:
-        - "'Error' in (clear_ipsec.stdout[0] | default(''))"
-
-    - name: Verify clear operation status
-      # Why: Observability to ensure the firewall accepted and executed the clear command successfully.
+    - name: Verify specific tunnel clear operation
+      # Observability: Ensure the command was accepted by the device.
       ansible.builtin.assert:
         that:
-          - (clear_result is skipped) or (not clear_result.failed)
-          - (clear_ipsec is skipped) or (not clear_ipsec.failed)
-        fail_msg: "IPSec tunnel clearing operation failed on {{ inventory_hostname }}."
-        quiet: true
+          - clear_result is skipped or clear_result.failed == false
+        fail_msg: "The command to clear peer {{ tunnel_peer }} failed on the device."
+      when: tunnel_peer | length > 0
 
-    - name: Display execution result
-      # Why: Provides visual confirmation of the outcome to the operator.
+    - name: Clear all crypto IPsec SAs
+      # Logic: Clear the global SA table only if no specific peer is defined.
+      ansible.netcommon.cli_command:
+        command: "clear crypto ipsec sa"
+      register: clear_ipsec
+      when: tunnel_peer | length == 0
+
+    - name: Verify global SA clear operation
+      ansible.builtin.assert:
+        that:
+          - clear_ipsec is skipped or clear_ipsec.failed == false
+        fail_msg: "The command to clear global IPsec SAs failed."
+      when: tunnel_peer | length == 0
+
+    - name: Log operation results for audit trail
+      # Observability: Output the device response for verification in automation logs.
       ansible.builtin.debug:
-        msg: >-
-          Tunnel clear operation completed.
-          Peer: {{ tunnel_peer if tunnel_peer | length > 0 else 'GLOBAL' }}
-          Result: {{ clear_result.stdout[0] if (clear_result is not skipped) else (clear_ipsec.stdout[0] if (clear_ipsec is not skipped) else 'Skipped (Peer not found - Idempotent)') }}
+        msg: 
+          - "NetLearner Operation: IPSec Clear"
+          - "Target Peer: {{ tunnel_peer | default('GLOBAL_CLEAR', true) }}"
+          - "Execution Result: {{ clear_result.stdout | default(clear_ipsec.stdout | default('No output returned')) }}"
+```

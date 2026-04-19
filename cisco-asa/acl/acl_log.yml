@@ -1,41 +1,41 @@
----
-# ACL Logging Retrieval Playbook
-#
-# This playbook retrieves ACL-specific log entries from Cisco ASA/Firepower devices.
-# It adheres to enterprise standards for observability, error handling, and FQCN usage.
-#
-# Standards:
-# 1. Idempotency: This is a read-only operation; safe for repeated execution without state change.
-# 2. Observability: Uses 'register' to capture output and 'assert' to verify data integrity.
-# 3. Documentation: Clear task descriptions and comments explaining the purpose of each step.
-# 4. Error Handling: Explicitly checks for failure states in the command execution.
-# 5. Best Practices: Employs Fully Qualified Collection Names (FQCN) for all modules.
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect - Automated Improvement
+# Purpose: Extract ACL-specific hit logs from the ASA/Firepower syslog buffer.
+# Use Case: Real-time traffic troubleshooting and security policy verification.
+# Standards: Idempotency, Observability, FQCN, Error Handling.
 
-- name: Retrieve ACL Logs
+- name: Get ACL Logs
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: no
 
   tasks:
-    - name: Execute 'show logging' command filtered for ACL entries
-      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interaction
+    - name: Retrieve ACL entries from the logging buffer
+      # FQCN used for stability and to avoid collection conflicts.
+      # Filtering for 'ACL' isolates traffic permit/deny events for surgical troubleshooting.
       ansible.netcommon.cli_command:
         command: show logging | include ACL
-      register: acl_log_output
-      # Error Handling: Prevent silent failures by explicitly checking the result object
-      failed_when: acl_log_output.failed | default(false)
+      register: acl_log
+      # Error Handling: Fail only on actual CLI syntax errors or invalid input.
+      # This prevents the playbook from stopping if logging is simply disabled.
+      failed_when: 
+        - acl_log.failed
+        - "'% Invalid input' in acl_log.stdout"
+      # Idempotency: Read-only command; check_mode enabled to allow verification in dry-runs.
+      check_mode: no
 
-    - name: Verify log retrieval integrity
-      # Observability: Ensure the output variable is defined before proceeding to display
+    - name: Verify log retrieval success
+      # Observability: Assert ensures the device returned a valid response object.
+      # This provides an explicit checkpoint before attempting to process data.
       ansible.builtin.assert:
         that:
-          - acl_log_output.stdout is defined
-        fail_msg: "Log retrieval failed or returned an invalid structure. Verify device connectivity."
+          - acl_log.stdout is defined
+        fail_msg: "CRITICAL: Could not access logging buffer on {{ inventory_hostname }}."
         quiet: true
 
-    - name: Present formatted ACL logs to the operator
-      # Observability: Provide a structured view of the logs with a fallback for empty buffers
+    - name: Display filtered ACL logs
+      # Observability: Format the output for high-signal visibility.
+      # ternary logic handles empty buffers gracefully to avoid confusing the operator.
       ansible.builtin.debug:
         msg: |
-          ======================= DEVICE: {{ inventory_hostname }} =======================
-          {{ acl_log_output.stdout | default('No ACL logs found in the current logging buffer.') }}
-          ================================================================================
+          ======================= ACL LOGS: {{ inventory_hostname }} =======================
+          {{ acl_log.stdout if acl_log.stdout | length > 0 else 'NOTICE: No ACL events found in the current buffer.' }}

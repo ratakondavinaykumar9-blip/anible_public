@@ -1,40 +1,56 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate DNS Settings - Improved Version
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: Get FortiGate DNS Settings
+# FortiGate DNS Configuration Audit
+# This playbook retrieves, validates, and parses system DNS settings to ensure 
+# architectural compliance and operational observability.
+- name: Audit FortiGate DNS Settings
   hosts: fortigate
   gather_facts: false
+  # Ensuring the connection uses the standard network_cli for FortiOS devices.
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Get System DNS Settings via CLI
-      # Use FQCN (ansible.netcommon) for portability and adherence to best practices
-      # Registering results enables observability and downstream validation of configuration state
+    - name: Retrieve Operational DNS State
+      # Best Practices: Using Fully Qualified Collection Names (FQCN) for reliability.
+      # Observability: Registering output to 'dns_raw' for downstream verification.
       ansible.netcommon.cli_command:
-        command: "get system dns"
-      register: dns_result
-      # Idempotency: Read-only 'get' commands should never trigger a 'changed' status in Ansible
+        command: get system dns
+      register: dns_raw
+      # Idempotency: Retrieval is a read-only task and should not trigger a change status.
       changed_when: false
-      # Error Handling: Ensure the command was recognized and executed successfully by FortiOS
-      # Catches specific error strings that indicate command failures or parsing errors
-      failed_when: >
-        (dns_result.rc is defined and dns_result.rc != 0) or
-        "Command fail" in dns_result.stdout or
-        "Unknown action" in dns_result.stdout
+      # Error Handling: Identifying device-specific error strings to ensure task accuracy.
+      failed_when: 
+        - dns_raw.failed 
+        - "'Command fail' in dns_raw.stdout"
 
-    - name: Verify system DNS data retrieval
-      # Observability: Assert ensures the command returned meaningful data from the device
-      # Verifies operational success by checking for expected keywords in the CLI output
+    - name: Validate Configuration Integrity
+      # Observability: Using assertions to verify that both primary and secondary servers exist.
+      # This ensures the audit is actionable and prevents silent configuration gaps.
       ansible.builtin.assert:
         that:
-          - dns_result.stdout is defined
-          - dns_result.stdout | length > 0
-          - "'primary' in dns_result.stdout or 'secondary' in dns_result.stdout"
-        fail_msg: "The retrieved DNS settings are empty or could not be parsed from {{ inventory_hostname }}."
-        quiet: true
+          - "'primary' in dns_raw.stdout"
+          - "'secondary' in dns_raw.stdout"
+        fail_msg: "Critical: DNS configuration is missing or invalid on {{ inventory_hostname }}."
+        success_msg: "Success: DNS configuration structure verified on {{ inventory_hostname }}."
 
-    - name: Display system DNS settings output
-      # Observability: Provides clear visibility into the results for the operator and audit logs
+    - name: Parse DNS for Structured Reporting
+      # Documentation: Extracting key values into facts for clean logging and audit trails.
+      # This moves the playbook from raw text scraping to structured data management.
+      ansible.builtin.set_fact:
+        primary_dns: "{{ dns_raw.stdout | regex_search('primary\\s+:\\s+(\\d+\\.\\d+\\.\\d+\\.\\d+)', '\\1') | first | default('UNDEFINED') }}"
+        secondary_dns: "{{ dns_raw.stdout | regex_search('secondary\\s+:\\s+(\\d+\\.\\d+\\.\\d+\\.\\d+)', '\\1') | first | default('UNDEFINED') }}"
+
+    - name: Generate Audit Report
+      # Providing a human-readable summary of the validated operational state.
       ansible.builtin.debug:
         msg: |
-          ======================= DNS ({{ inventory_hostname }}) =======================
-          {{ dns_result
+          ==================================================
+          FORTIGATE DNS AUDIT REPORT
+          ==================================================
+          DEVICE:     {{ inventory_hostname }}
+          PRIMARY:    {{ primary_dns }}
+          SECONDARY:  {{ secondary_dns }}
+          ==================================================
+          RAW OUTPUT:
+          {{ dns_raw.stdout }}
+```

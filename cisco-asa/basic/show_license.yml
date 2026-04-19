@@ -1,37 +1,44 @@
----
-# Improved License Information Retrieval Playbook
-# This playbook retrieves and validates license/version information from Cisco ASA/Firepower devices.
-# Standards: Idempotency (Read-only), Observability (Assert), FQCN, and Error Handling.
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect Improved Playbook
+# Purpose: Retrieve and validate license/version information for ASA/Firepower devices.
+# Standards: Idempotency (Read-only), Observability (Register/Assert), FQCN usage.
 
 - name: Get License Details
   hosts: asa_firepower
-  gather_facts: false # Fact gathering is disabled to optimize performance for simple CLI tasks.
+  gather_facts: false
+  # Standardize on network_cli for predictable behavior across Cisco platforms.
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Execute 'show version' to retrieve license and hardware details
-      # Using FQCN for consistent cross-platform network command execution.
+    - name: "CLI: Retrieve version and license status"
+      # Using FQCN (Fully Qualified Collection Name) for modern maintainability.
+      # This task is inherently idempotent as it only performs read operations.
       ansible.netcommon.cli_command:
         command: show version
-      register: version_result
-      # Error Handling: Ensure the task fails if the command returns no output or is undefined.
-      failed_when: 
-        - version_result.stdout is not defined
-        - version_result.stdout | length == 0
+      register: r_version
+      # Error Handling: Catch CLI-level failures or unexpected empty/invalid responses.
+      failed_when:
+        - r_version.stdout is not defined
+        - r_version.stdout | length == 0
+        - "'Invalid' in r_version.stdout"
+        - "'Error' in r_version.stdout"
 
-    - name: Verify the integrity of the retrieved license information
-      # Observability: Using assertions to ensure the output contains expected system markers.
+    - name: "Observe: Validate device identity and output integrity"
+      # Observability: Asserting that the device is indeed a Cisco appliance.
+      # This prevents the playbook from succeeding if the output is malformed or incorrect.
       ansible.builtin.assert:
         that:
-          - "'Hardware' in version_result.stdout"
-          - "'Serial Number' in version_result.stdout or 'S/N' in version_result.stdout"
-        fail_msg: "Validation failed: 'show version' output on {{ inventory_hostname }} is missing expected fields."
-        success_msg: "Successfully validated license and version data for {{ inventory_hostname }}."
+          - "'Cisco' in r_version.stdout"
+        fail_msg: "Data Integrity Error: Received output does not contain expected 'Cisco' identifier."
+        success_msg: "Data Integrity Verified: Valid Cisco version output received."
+        quiet: true
 
-    - name: Display the formatted license and version information
-      # Providing clear visibility into the results for audit and verification purposes.
+    - name: "Display: Technical summary of the retrieved information"
+      # Formatted debugging output for human operator visibility.
       ansible.builtin.debug:
         msg: |
-          ======================================================================
-          LICENSE AND VERSION SUMMARY FOR: {{ inventory_hostname }}
-          ======================================================================
-          {{ version_result.stdout }}
+          ======================= LICENSE =======================
+          Node: {{ inventory_hostname }}
+          Status: SUCCESS
+          -------------------------------------------------------
+          {{ r_version.stdout }}

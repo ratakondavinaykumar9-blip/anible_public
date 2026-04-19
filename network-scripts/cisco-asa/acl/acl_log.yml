@@ -1,46 +1,36 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# ==============================================================================
-# Playbook: ASA/Firepower ACL Log Retrieval
-# Description: Safely retrieves and validates ACL-related syslog entries from 
-#              Cisco ASA/FTD buffers.
-# Standards: Idempotency (Read-only), Observability (Assert), FQCN Usage.
-# ==============================================================================
+# NetLearner Architect - ASA/Firepower ACL Log Retrieval
+# This playbook retrieves security ACL logs for forensic analysis and monitoring.
 - name: Get ACL Logs
   hosts: asa_firepower
-  gather_facts: false  # Fact collection is unnecessary for direct CLI commands
+  gather_facts: false
 
   tasks:
-    - name: Retrieve ACL-specific syslog entries from buffer
-      # FQCN: Using ansible.netcommon for broad compatibility across network OS
+    - name: "Retrieve ACL-specific entries from the logging buffer"
+      # Use Fully Qualified Collection Name (FQCN) for network operations
       ansible.netcommon.cli_command:
-        command: show logging | include ACL
-      register: acl_log
-      # Error Handling: Fail if command is rejected or execution fails
+        command: "show logging | include ACL"
+      register: acl_log_raw
+      # Idempotency: 'show' commands are read-only and inherently safe for repeated execution
+      # Error Handling: Fail on execution/connection errors, but allow empty log buffers
       failed_when:
-        - acl_log.failed | default(false)
-        - "'Invalid input' in acl_log.stdout"
+        - acl_log_raw.failed | default(false)
+        - "'Invalid' in acl_log_raw.stderr"
 
-    - name: Verify command execution integrity
-      # Observability: Ensure the result structure is valid before processing
+    - name: "Verify log retrieval integrity"
+      # Observability: Assert that the task returned valid data structures
       ansible.builtin.assert:
         that:
-          - acl_log.stdout is defined
-        fail_msg: "The command 'show logging' failed to return a valid response."
+          - acl_log_raw is defined
+          - acl_log_raw.stdout is defined
+        fail_msg: "Critical: Data retrieval failed for {{ inventory_hostname }}. Check VTY/SSH status."
         quiet: true
 
-    - name: Inform user if log buffer is empty
-      # Documentation/Feedback: Clarify why no output might be displayed
-      ansible.builtin.debug:
-        msg: "No ACL matches found in the buffer. Ensure 'log' keyword is present on ACEs."
-      when: 
-        - acl_log.stdout | length == 0
-
-    - name: Display Formatted ACL Logs
-      # Observability: Structured output for human analysis
+    - name: "Display retrieved ACL security events"
+      # Observability: Provide formatted feedback with fallback for empty buffers
       ansible.builtin.debug:
         msg: |
-          ======================= ACL LOGS: {{ inventory_hostname }} =======================
-          {{ acl_log.stdout | default('BUFFER EMPTY OR NO MATCHES') }}
-          ================================================================================
-      when: 
-        - acl_log.stdout | length > 0
+          ======================= ACL LOGS [ {{ inventory_hostname }} ] =======================
+          {{ acl_log_raw.stdout if (acl_log_raw.stdout | trim | length > 0) else '--- NO ACL LOGS DETECTED IN LOCAL BUFFER ---' }}
+```

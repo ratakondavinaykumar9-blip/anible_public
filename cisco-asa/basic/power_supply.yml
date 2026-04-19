@@ -1,33 +1,51 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Power Supply Status Audit
-# Purpose: This playbook performs a health check on the power supply units of ASA/Firepower devices.
-# Idempotency: The 'show power' command is read-only and safe to run repeatedly without altering system state.
-- name: ASA/Firepower Power Supply Status Audit
+# Cisco ASA / Firepower Power Supply Health Audit
+# Retrieves and validates the status of physical power supplies.
+# Refined for idempotency, observability, and robust error handling.
+#
+# Standards Adherence:
+# 1. Idempotency: Read-only CLI command is inherently safe for repeated execution.
+# 2. Observability: Uses 'register' and 'assert' for programmatic verification.
+# 3. Documentation: Explains "why" for critical logic via comments.
+# 4. Error Handling: Uses 'failed_when' to catch invalid input or command failures.
+# 5. Best Practices: Uses Fully Qualified Collection Names (FQCN).
+# 
+# Author: NetLearner Architect
+# Refined: 2026-04-12
+---
+- name: Audit Power Supply Status
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve Power Supply Status
-      # Best Practice: Use Fully Qualified Collection Name (FQCN)
-      # Documentation: Executes the platform-specific command to check hardware power status.
+    - name: Retrieve power supply status via CLI
+      # Use FQCN (ansible.netcommon) to ensure portability and avoid namespace collisions.
       ansible.netcommon.cli_command:
         command: show power
       register: power_output
-      # Error Handling: Fail explicitly if the command returns no data or encounters an execution error.
-      failed_when: 
-        - power_output.failed or power_output.stdout | length == 0
+      # Error Handling: Prevent silent failures if the command is unrecognized by the device.
+      failed_when:
+        - power_output.failed or "Invalid input" in power_output.stdout
 
-    - name: Validate Power Supply Information
-      # Observability: Assert ensures the output contains expected hardware keywords before proceeding.
+    - name: Validate power supply operational health
+      # Observability: Programmatic assertion to confirm meaningful hardware data was returned.
+      # This prevents the playbook from succeeding if the device returns an empty response.
       ansible.builtin.assert:
         that:
-          - "'Power' in power_output.stdout"
-        fail_msg: "Power supply details were not found in the command output. Verify device compatibility."
-        success_msg: "Power supply status successfully retrieved and verified."
+          - "'Power Supply' in power_output.stdout"
+          - "'Status' in power_output.stdout"
+        fail_msg: "Power supply metrics missing from output. Verify hardware support on {{ inventory_hostname }}."
+        success_msg: "Power supply diagnostics successfully validated."
 
-    - name: Display Power Supply Report
-      # Documentation: Provides human-readable visibility into the raw hardware status for audit logs.
+    - name: Display formatted power supply diagnostics
+      # Documentation: Provides a human-readable summary for audit logs and manual review.
       ansible.builtin.debug:
         msg: |
-          ======================= POWER SUPPLY STATUS =======================
+          ========================= POWER STATUS =========================
+          DEVICE: {{ inventory_hostname }}
+          TIMESTAMP: {{ lookup('pipe', 'date +%Y-%m-%d_%H:%M:%S') }}
+          ----------------------------------------------------------------
           {{ power_output.stdout }}
+          ================================================================
+```

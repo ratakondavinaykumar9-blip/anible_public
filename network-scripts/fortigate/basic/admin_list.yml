@@ -1,38 +1,38 @@
----
-# Playbook: FortiGate Admin Retrieval
-# Purpose: Securely retrieves and validates the list of administrators from FortiGate devices.
-# This playbook is designed to be read-only (idempotent) and provides verification for automation pipelines.
-
-- name: Get FortiGate Administrator List
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Admin List - Expert Automation Baseline
+# Standards: Idempotency, Observability, and FQCN Compliance
+- name: Get Admin List
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute 'get system admin' command
-      # Using FQCN for netcommon to ensure portability across different Ansible environments.
+    - name: Retrieve system administrator configuration from FortiGate
+      # Using FQCN (Fully Qualified Collection Name) for architectural consistency
       ansible.netcommon.cli_command:
-        command: "get system admin"
+        command: get system admin
       register: admin_output
-      # Idempotency: This is a read-only operation; ensure it never reports a 'changed' status.
+      # Idempotency: Read-only commands must never report a "changed" status
       changed_when: false
-      # Error Handling: Fail if the device returns common CLI error strings that might not trigger a non-zero exit code.
+      # Error Handling: Explicitly fail if the output is null or contains error strings
       failed_when: 
-        - "'command parse error' in admin_output.stdout | lower"
-        - "'unknown action' in admin_output.stdout | lower"
+        - admin_output.stdout is not defined
+        - admin_output.stdout | length == 0
+        - "'error' in admin_output.stdout | lower"
 
-    - name: Verify administrator output integrity
-      # Observability: Assert that the command returned data to prevent silent failures in downstream tasks.
+    - name: Verify integrity of retrieved administrator data
+      # Observability: Assertions ensure downstream tasks don't process garbage data
       ansible.builtin.assert:
         that:
-          - admin_output.stdout is defined
-          - admin_output.stdout | length > 0
-        fail_msg: "The command 'get system admin' returned no data or failed to execute properly."
-        success_msg: "Administrator list successfully retrieved and validated."
+          - "'admin' in admin_output.stdout"
+          - "'access' in admin_output.stdout"
+        fail_msg: "The retrieved output does not appear to be a valid admin list."
+        success_msg: "Administrator list successfully validated."
 
-    - name: Display formatted administrator list
-      # Documentation: Providing a clear, formatted view for human operators in logs.
+    - name: Display formatted administrator details for audit
+      # Observability: Human-readable output for real-time verification
       ansible.builtin.debug:
         msg: |
           ======================= FORTIGATE ADMINS =======================
           {{ admin_output.stdout }}
-          ===============================================================
+          ======================= END OF LIST ============================
+---

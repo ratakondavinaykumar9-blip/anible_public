@@ -1,42 +1,37 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: Audit and Verify FortiGate DNS Filter Profiles
+# NetLearner Architect Standardized Playbook
+# Objective: Retrieve and validate FortiGate DNS Filter Profiles
+# Note: This retrieval operation is read-only and inherently idempotent.
+
+- name: FortiGate DNS Filter Profile Audit
   hosts: fortigate
   gather_facts: false
-  # Connection should be established via network_cli for FortiOS CLI interactions
-  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve current DNS filter profile configuration
-      # Using FQCN for modularity and following Ansible best practices.
-      # This task is idempotent as it only retrieves (GET) the current state without modification.
+    - name: Retrieve DNS filter profile configuration
+      # Best Practice: Use FQCN for cross-platform network CLI compatibility
       ansible.netcommon.cli_command:
         command: get firewall dnsfilter-profile
-      register: dns_profile_raw
-      # Error Handling: We verify the return code and check for common FortiOS CLI error strings.
-      # This prevents the playbook from continuing if the command is unrecognized or the feature is disabled.
+      register: dns_result
+      # Error Handling: Fail if the output indicates a syntax error or missing entry
       failed_when: 
-        - dns_profile_raw.rc != 0
-        - "'unknown' in dns_profile_raw.stdout or 'error' in dns_profile_raw.stdout"
+        - dns_result.failed or "Unknown action" in dns_result.stdout or "Command fail" in dns_result.stdout
 
-    - name: Validate observability of DNS filter data
-      # Observability: Using assertions to ensure the registered variable contains valid data.
-      # This ensures that we aren't processing empty strings in downstream automation.
+    - name: Validate DNS profile data integrity
+      # Observability: Assert that the output contains expected configuration keys
       ansible.builtin.assert:
         that:
-          - dns_profile_raw.stdout is defined
-          - dns_profile_raw.stdout | length > 0
-        fail_msg: "The DNS Filter Profile could not be retrieved or the output is unexpectedly empty."
-        success_msg: "DNS Filter Profile successfully captured and verified."
+          - dns_result.stdout is defined
+          - dns_result.stdout | length > 0
+          - "'dnsfilter-profile' in dns_result.stdout"
+        fail_msg: "DNS Filter profile retrieval failed or returned unexpected data."
+        success_msg: "DNS Filter profile successfully retrieved and validated."
 
-    - name: Display formatted DNS Filter Profile for auditing
-      # Documentation: Providing a structured view of the output for audit logs and troubleshooting.
+    - name: Display DNS Filter Profile Details
+      # Documentation: Provide a clear view of the operational state for audit logs
       ansible.builtin.debug:
         msg: |
-          ==================================================================
-          FORTIGATE DNS FILTER PROFILE REPORT
-          ==================================================================
-          Target Host: {{ inventory_hostname }}
-          Capture Time: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
-          ------------------------------------------------------------------
-          {{ dns_profile_raw.stdout }}
-          ==================================================================
+          ======================= DNS FILTER PROFILE =======================
+          {{ dns_result.stdout }}
+```

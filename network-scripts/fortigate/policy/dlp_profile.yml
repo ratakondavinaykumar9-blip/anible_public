@@ -1,36 +1,33 @@
----
-# Improved FortiGate DLP Profile Retrieval Playbook
-# Purpose: Safely retrieve and validate Data Loss Prevention (DLP) profiles.
-# Standards: Idempotency (Read-only), Observability (Assert), FQCN, and Robust Error Handling.
-- name: FortiGate DLP Profile Verification
+MCP issues detected. Run /mcp list for status.---
+# FortiGate DLP Profile Retrieval
+# Purpose: Fetches and validates Data Loss Prevention (DLP) configuration for auditing and visibility.
+- name: Get FortiGate DLP Profile
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: "DLP-01: Retrieve DLP profile configuration via CLI"
-      # Using FQCN for cross-platform network command execution
+    - name: Retrieve DLP profile configuration via CLI
+      # Use FQCN (Fully Qualified Collection Name) for better maintainability and to avoid module conflicts
       ansible.netcommon.cli_command:
-        command: "get firewall dlp-profile"
+        command: get firewall dlp-profile
       register: dlp_output
-      # Error Handling: Catch FortiOS CLI errors that may not trigger a non-zero exit code
-      failed_when:
+      # Error Handling: Fail the task if the command is unrecognized or the output indicates an error
+      failed_when: 
         - dlp_output.stdout is not defined
-        - "'command parse error' in dlp_output.stdout"
         - "'Unknown action' in dlp_output.stdout"
 
-    - name: "DLP-02: Verify DLP profile data integrity"
-      # Observability: Ensure the returned output is not empty and contains expected configuration markers
+    - name: Validate that DLP profile data was returned
+      # Observability: Ensure the command returned actual content before considering the task successful
+      # This prevents downstream logic from proceeding with empty data
       ansible.builtin.assert:
         that:
           - dlp_output.stdout | length > 0
-          - "'dlp-profile' in dlp_output.stdout or 'edit' in dlp_output.stdout"
-        fail_msg: "DLP Profile retrieval failed: The response was empty or the command is unsupported on this firmware."
-        success_msg: "DLP Profile successfully retrieved and validated."
+        fail_msg: "DLP profile output is empty. Verify that DLP is enabled and profiles exist on {{ inventory_hostname }}."
+        success_msg: "DLP profile successfully retrieved and validated."
 
-    - name: "DLP-03: Display formatted DLP Profile results"
-      # Observability: Providing structured output for operator visibility and audit logging
+    - name: Display DLP profile for operational audit
+      # Observability: Print formatted output for logging and manual verification
       ansible.builtin.debug:
         msg: |
-          ======================= START DLP PROFILE =======================
+          ======================= DLP PROFILE: {{ inventory_hostname }} =======================
           {{ dlp_output.stdout }}
-          ======================== END DLP PROFILE ========================

@@ -1,34 +1,39 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: FortiGate IPv6 Sessions
-# Purpose: Securely retrieves and validates active IPv6 sessions from FortiGate firewalls.
-# Idempotency: This is a read-only monitoring task and is safe for repeated execution (no state changes).
+# FortiGate IPv6 Session Monitoring
+# Purpose: Diagnostic playbook to retrieve and validate the IPv6 session table.
+# Standards: Idempotency (Read-only), Observability (Assertions), FQCN Usage.
+
 - name: Get IPv6 Sessions
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve IPv6 session list from device
-      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+    - name: Retrieve IPv6 session list from FortiGate
+      # FQCN: Using the network common collection for standardized CLI execution.
+      # Idempotency: changed_when: false ensures the task reports 'ok' as it is a read-only GET operation.
       ansible.netcommon.cli_command:
         command: get system session6 list
       register: sess
-      # Error Handling: Fail if the command is unrecognized or the execution environment reports a failure
+      changed_when: false
+      # Error Handling: failed_when ensures we catch vendor-specific CLI errors like "Unknown action".
       failed_when: 
-        - sess.failed or "Unknown action" in sess.stdout or "Command fail" in sess.stdout
-      ignore_errors: false
+        - sess.failed or "Unknown action" in sess.stdout
+      # check_mode: false allows this diagnostic task to run even during dry-runs (--check).
+      check_mode: false
 
-    - name: Verify session retrieval success
-      # Observability: Assert that the command returned a valid, defined response
+    - name: Validate session data capture
+      # Observability: Assert that the stdout register is defined and populated to ensure visibility.
       ansible.builtin.assert:
         that:
           - sess.stdout is defined
-          - sess.stdout | length >= 0
-        fail_msg: "Data retrieval failed or returned empty for {{ inventory_hostname }}"
-        success_msg: "IPv6 sessions successfully captured from {{ inventory_hostname }}"
+        fail_msg: "The command 'get system session6 list' failed to return valid data from {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display session details
-      # Documentation: Provides formatted output for visibility and troubleshooting
+    - name: Display formatted IPv6 session information
+      # Provides a clear operational view of the current IPv6 session state.
       ansible.builtin.debug:
         msg: |
           ======================= IPv6 SESSIONS: {{ inventory_hostname }} =======================
-          {{ sess.stdout }}
+          {{ sess.stdout if sess.stdout != "" else "No active IPv6 sessions detected." }}
+```

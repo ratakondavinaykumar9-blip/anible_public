@@ -1,0 +1,140 @@
+MCP issues detected. Run /mcp list for status.```yaml
+---
+# ==============================================================================
+# Playbook: ACL Hit Count Analysis (Cisco ASA/Firepower)
+# ==============================================================================
+# Author: NetLearner (OpenClaw)
+# Version: 1.2.0
+# Last Updated: 2026-04-12
+# Description: Analyze ACL hit counts for optimization and security auditing.
+#              Identifies unused rules, high-traffic rules, and optimization
+#              opportunities for ACL performance.
+#
+# Platforms: Cisco ASA 5500-X, Firepower 2100/4100/9300, FTD in ASA mode
+# Requirements: 
+#   - ansible.netcommon collection
+#   - Custom filter plugin: parse_acl_hits (filter_plugins/acl_filters.py)
+#
+# Variables:
+#   acl_name: Specific ACL to analyze (default: all ACLs)
+#   min_hits: Minimum hit count threshold for reporting (default: 1)
+#   zero_hit_only: Show only zero-hit rules (default: false)
+#   output_format: 'text' or 'json' (default: text)
+# ==============================================================================
+
+- name: Analyze ACL Hit Counts
+  hosts: asa_firepower
+  gather_facts: false
+  connection: ansible.netcommon.network_cli
+
+  vars:
+    # Target specific ACL or analyze all configured access-groups
+    acl_name: "all"
+    # Minimum hit threshold for standard reporting
+    min_hits: 1
+    # Boolean to filter specifically for security cleanup (unused rules)
+    zero_hit_only: false
+    # Output presentation format
+    output_format: "text"
+    # Threshold for rules that should be prioritized in order
+    hit_threshold_high: 10000
+    # Threshold for low traffic classification
+    hit_threshold_low: 10
+
+  tasks:
+    - name: Retrieve and Analyze ACL Statistics
+      block:
+        - name: Fetch raw ACL statistics from device
+          # Idempotency: Marked as no-change (read-only command)
+          ansible.netcommon.cli_command:
+            command: "show access-list {{ acl_name if acl_name != 'all' else '' }} | include hitcnt|access-list"
+          register: acl_raw_output
+          changed_when: false
+          # Error Handling: Fail if device returns CLI errors or invalid ACL notice
+          failed_when:
+            - acl_raw_output.failed | default(false)
+            - "'Invalid' in acl_raw_output.stdout or 'Error' in acl_raw_output.stdout"
+
+        - name: Verify data retrieval success
+          # Observability: Assert we have actual data before attempting custom parsing
+          ansible.builtin.assert:
+            that:
+              - acl_raw_output.stdout is defined
+              - acl_raw_output.stdout | length > 0
+            fail_msg: "Data retrieval failed for {{ inventory_hostname }}. Verify ACL configuration."
+            success_msg: "ACL hit data retrieved successfully."
+
+        - name: Parse CLI output into structured facts
+          # Logic: Converts raw text into a list of dictionaries for filtering
+          ansible.builtin.set_fact:
+            acl_hits: "{{ acl_raw_output.stdout | parse_acl_hits }}"
+          when: acl_raw_output.stdout is defined
+
+        - name: Filter for zero-hit candidates (Audit Mode)
+          # Security: Isolate rules with 0 hits for cleanup candidates
+          ansible.builtin.set_fact:
+            zero_hit_acls: "{{ acl_hits | selectattr('hits', '==', 0) | list }}"
+          when: 
+            - acl_hits is defined
+            - zero_hit_only | bool
+
+        - name: Filter for high-traffic rules (Optimization Mode)
+          # Performance: Identify rules that should potentially move to the top of the ACL
+          ansible.builtin.set_fact:
+            high_traffic_acls: "{{ acl_hits | selectattr('hits', '>=', hit_threshold_high) | list }}"
+          when: acl_hits is defined
+
+      rescue:
+        - name: Log retrieval failure and attempt fallback
+          # Error Handling: Provide feedback for troubleshooting
+          ansible.builtin.debug:
+            msg: |
+              WARNING: Standard ACL retrieval failed on {{ inventory_hostname }}.
+              Error: {{ ansible_failed_result.msg | default('Unknown') }}
+              Attempting fallback to 'show running-config' inspection...
+
+        - name: Fallback to running-config check
+          # Resiliency: Some environments restrict 'show access-list' directly
+          ansible.netcommon.cli_command:
+            command: "show running-config access-list | include access-list|hitcnt"
+          register: acl_alt_output
+          changed_when: false
+          ignore_errors: true
+
+        - name: Ensure facts are initialized on total failure
+          # Consistency: Prevent downstream tasks from failing on undefined variables
+          ansible.builtin.set_fact:
+            acl_hits: []
+            zero_hit_acls: []
+            high_traffic_acls: []
+          when: acl_alt_output.failed | default(true)
+
+    - name: Generate Analysis Report
+      # Observability: Structured reporting for operational review
+      ansible.builtin.debug:
+        msg: |
+          ==============================================================================
+          ACL Hit Analysis: {{ inventory_hostname }}
+          ==============================================================================
+          Total Rules Scanned:    {{ acl_hits | default([]) | length }}
+          Zero-Hit Rule Count:    {{ zero_hit_acls | default([]) | length }}
+          High-Traffic Rules:     {{ high_traffic_acls | default([]) | length }}
+          
+          {% if zero_hit_only | bool %}
+          --- AUDIT: UNUSED RULES (CANDIDATES FOR REMOVAL) ---
+          {% for acl in zero_hit_acls %}
+          - {{ acl.name }}: hits=0 | Line: {{ acl.line | default('N/A') }}
+          {% endfor %}
+          {% elif acl_hits | length > 0 %}
+          --- PERFORMANCE: TOP HIT RULES ---
+          {% for acl in acl_hits | sort(attribute='hits', reverse=true) %}
+          - Hits: {{ '%-12s' | format(acl.hits) }} | ACL: {{ acl.name }}
+          {% endfor %}
+          {% else %}
+          STATUS: NO ACL DATA AVAILABLE FOR REPORTING
+          {% endif %}
+          ==============================================================================
+
+  # NOTE: This playbook requires the 'parse_acl_hits' filter to be defined 
+  # in 'filter_plugins/acl_filters.py' within your project structure.
+```

@@ -1,39 +1,35 @@
----
-# FortiGate Interface Status Retrieval
-# Purpose: Gathers hardware-level NIC information for diagnostic purposes.
-# Idempotency: Safe to run multiple times as it is a read-only operation.
-# Standards: FQCN usage, Observability, and Error Handling.
-
-- name: Get FortiGate Interface Status
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Staging - FortiGate Interface Status Verification
+# This playbook retrieves and validates the hardware status of NICs on FortiGate devices.
+# Standards: Idempotency (read-only), Observability (assert), Documentation (comments), FQCN usage.
+- name: Get Interface Status
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: Facts gathering is disabled as it is not required for diagnostic commands.
 
   tasks:
-    - name: Retrieve hardware NIC information via CLI
-      # FQCN: Using ansible.netcommon for standardized network CLI communication
+    - name: Retrieve hardware NIC information
+      # FQCN: Using the ansible.netcommon collection for reliable network CLI interaction.
       ansible.netcommon.cli_command:
-        command: diagnose hardware deviceinfo nic
-      register: status_result
-      # Error Handling: Identify failure if the command is unrecognized or output is null
+        command: "diagnose hardware deviceinfo nic"
+      register: nics_status
+      # Idempotency: Marking as 'changed: false' because this diagnostic command does not modify device state.
+      changed_when: false
+      # Error Handling: Fail if the module reports a failure or if the device returns a "Command fail" string.
       failed_when: 
-        - status_result.failed or status_result.stdout | length == 0
-        - "'Command fail' in status_result.stdout"
+        - nics_status.failed or "Command fail" in nics_status.stdout
 
-    - name: Validate status retrieval success
-      # Observability: Explicitly assert that data was captured correctly
+    - name: Assert interface data integrity
+      # Observability: Verify that we actually received data to prevent silent failures in automation pipelines.
       ansible.builtin.assert:
         that:
-          - status_result.stdout is defined
-          - status_result.stdout != ""
-        fail_msg: "Failed to retrieve NIC information from {{ inventory_hostname }}."
-        success_msg: "NIC hardware information successfully retrieved."
+          - "nics_status.stdout is defined"
+          - "nics_status.stdout | length > 0"
+        fail_msg: "The FortiGate device returned an empty or invalid response for NIC diagnostics."
+        success_msg: "NIC status data successfully captured and validated."
 
-    - name: Display Interface Status Report
-      # Documentation: Provide a formatted view of the captured output
+    - name: Display formatted interface status
+      # Documentation: Providing a clear, structured output block for human operators and logging systems.
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACE STATUS =======================
-          HOST: {{ inventory_hostname }}
-          ----------------------------------------------------------------
-          {{ status_result.stdout }}
-          ================================================================
+          ======================= FORTIGATE NIC STATUS =======================
+          {{ nics_status.stdout }}

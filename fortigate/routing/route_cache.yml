@@ -1,35 +1,43 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Route Cache Retrieval Playbook
-# This playbook collects the routing table cache from FortiGate devices for operational visibility.
-# Standard compliance: Idempotency (read-only), Observability (assertions), and FQCN usage.
-
-- name: Get Route Cache from FortiGate
+# FortiGate Route Cache Inspection - NetLearner Standards
+# Purpose: Retrieves the routing table cache for path analysis and NP6/NP7 offload verification.
+# Idempotency: Read-only operation; safe for repeated execution across staging/production.
+# Author: NetLearner Architect (Refined from Arjun's original)
+---
+- name: FortiGate Route Cache
   hosts: fortigate
   gather_facts: false
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Fetch the routing table cache via CLI
-      # Using Fully Qualified Collection Name (FQCN) for reliability.
-      # This task is inherently idempotent as it performs a read-only state inspection.
+    - name: Retrieve routing table cache via CLI
+      # FQCN used to ensure compatibility with ansible-core standards.
+      # Command retrieves operational data; does not modify device state.
       ansible.netcommon.cli_command:
         command: get router info routing-table cache
       register: cache_result
-      # Error Handling: Ensure we fail if the device returns an error message despite a successful transport connection.
-      failed_when: 
-        - cache_result.failed or "Command fail" in cache_result.stdout or "Unknown action" in cache_result.stdout
+      # Error Handling: Catch firmware-specific command failures or empty results.
+      failed_when:
+        - cache_result.failed
+        - "'Command fail' in cache_result.stdout"
+        - "'Unknown action' in cache_result.stdout"
 
-    - name: Validate that the route cache data was retrieved
-      # Observability: Verify that the command returned non-empty output to ensure meaningful results.
+    - name: Validate route cache data integrity
+      # Observability: Ensure the buffer contains expected routing headers or non-zero length.
       ansible.builtin.assert:
         that:
-          - cache_result.stdout is defined
           - cache_result.stdout | length > 0
-        fail_msg: "Route cache data is missing or empty. Verify routing protocols are active on the target."
-        success_msg: "Route cache data successfully captured."
+          - "'dest' in cache_result.stdout | lower or 'route' in cache_result.stdout | lower"
+        fail_msg: "Route cache retrieval failed or returned invalid data. Verify FortiOS version."
+        success_msg: "Successfully validated route cache data from {{ inventory_hostname }}."
 
-    - name: Display the retrieved Route Cache
-      # Providing a formatted view for operators and audit logs.
+    - name: Display Formatted Route Cache
+      # Observability: Provide clean, actionable output for the NetLearner Staging environment.
       ansible.builtin.debug:
         msg: |
-          ======================= ROUTE CACHE =======================
+          ======================= ROUTE CACHE: {{ inventory_hostname }} =======================
+          Status: Operational
+          -----------------------------------------------------------
           {{ cache_result.stdout }}
+```

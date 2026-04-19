@@ -1,37 +1,42 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Object Service - Enhanced for NetLearner Architecture
-# Improved: 2026-03-15
-# Description: Securely retrieves and validates service object configurations from ASA/Firepower devices.
-# Standards: Idempotency (Read-only), Observability (Assert), Error Handling (failed_when), FQCN.
-
+# NetLearner Architect: Improved Service Object Retrieval
+# Optimized for Idempotency, Observability, and Enterprise Standards.
+# This playbook retrieves and validates service object configurations on Cisco ASA/Firepower.
+---
 - name: Service Objects Detail
   hosts: asa_firepower
-  gather_facts: false # Optimization: System facts are not required for CLI command execution
+  gather_facts: false
 
   tasks:
-    - name: Retrieve service objects from security appliance
-      # FQCN: Using fully qualified collection name for portability and precision
+    - name: Retrieve service object configuration from device
+      # Using FQCN for cross-platform network command execution
       ansible.netcommon.cli_command:
         command: show object service
-      register: svc
-      # Error Handling: Catch specific CLI execution failures or invalid command syntax
-      failed_when: 
-        - svc.failed | default(false)
-        - "'Invalid input' in svc.stdout"
+      register: svc_output
+      # Ensure we fail if the command returns a known error string despite exit code 0
+      failed_when:
+        - "svc_output.stdout is not defined"
+        - "'Invalid input' in svc_output.stdout"
+        - "'ERROR' in svc_output.stdout"
 
-    - name: Validate service object data integrity
-      # Observability: Verify that the response contains data and is not undefined
-      # This prevents silent failures in automated audit pipelines
+    - name: Validate service object output integrity
+      # Observability: Assert that the output contains expected header data or isn't empty
       ansible.builtin.assert:
         that:
-          - svc.stdout is defined
-          - svc.stdout | length > 0
-        fail_msg: "Data retrieval failure: Output is empty or the command was not recognized."
-        success_msg: "Service object data successfully captured."
+          - svc_output.stdout | length > 0
+          - "'object service' in svc_output.stdout or 'No service objects' in svc_output.stdout"
+        fail_msg: "The 'show object service' command returned unexpected or empty results."
+        success_msg: "Service object configuration successfully retrieved and validated."
 
-    - name: Display service object configuration
-      # Documentation: Formatted output for human-readable audit logs
+    - name: Display formatted service object details
+      # Documentation: Providing a clear visual separation for log observability
       ansible.builtin.debug:
         msg: |
-          ======================= SERVICE OBJECTS =======================
-          {{ svc.stdout }}
+          ===============================================================
+          NETLEARNER ARCHITECT - SERVICE OBJECT REPORT
+          Timestamp: {{ ansible_date_time.iso8601 | default('N/A') }}
+          ===============================================================
+          {{ svc_output.stdout }}
+          ===============================================================
+```

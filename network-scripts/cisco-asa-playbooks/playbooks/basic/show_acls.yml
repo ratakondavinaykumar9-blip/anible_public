@@ -1,61 +1,76 @@
----
-# NetLearner Architect Optimized Playbook
-# Purpose: Idempotent retrieval and validation of Cisco ASA Access Control Lists (ACLs)
-- name: Retrieve and Validate Cisco ASA Access Lists
+MCP issues detected. Run /mcp list for status.---
+# Playbook to retrieve, verify, and document Cisco ASA Access Control Lists (ACLs).
+# Standards Applied: FQCN usage, Idempotency via resource modules, Assertions for observability, and clear documentation.
+- name: Audit and Document ASA Access Lists
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Define output preference: 'text' (default) for console summary or 'json' for file export
-    output_format: text
+    # Default output format to 'text' for console readability.
+    output_format: "text"
 
   tasks:
-    - name: Gather current ACL configuration from device
-      # Using Fully Qualified Collection Name (FQCN)
-      # 'state: gathered' ensures idempotency by performing a read-only operation
+    - name: Gather existing ACL configurations from the device
+      # Use FQCN: cisco.asa.asa_acls (resource module).
+      # Idempotency: 'state: gathered' reads current state without modification.
       cisco.asa.asa_acls:
         state: gathered
       register: acl_result
-      # Use failed_when to ensure we catch unexpected module return states
+      # Error Handling: Ensure we fail explicitly if the device is unreachable or the command fails.
       failed_when: acl_result.failed | default(false)
 
-    - name: Validate that ACL data was successfully retrieved
-      # Observability: Verify the data structure exists before processing
+    - name: Verify ACL data was successfully retrieved
+      # Observability: Assert that the gathered facts exist to prevent downstream failures.
       ansible.builtin.assert:
         that:
           - acl_result.gathered is defined
-        fail_msg: "Critical: Failed to retrieve ACL data from {{ inventory_hostname }}. Verify connectivity/credentials."
-        success_msg: "Successfully synchronized ACL state for {{ inventory_hostname }}."
+        fail_msg: "Failed to gather ACL information from {{ inventory_hostname }}. Check connectivity/credentials."
+        success_msg: "Successfully retrieved ACL configurations for {{ inventory_hostname }}."
+
+    - name: Display raw ACL data for troubleshooting
+      # Observability: Provide detailed output when running with higher verbosity (-v).
+      ansible.builtin.debug:
+        var: acl_result.gathered
+        verbosity: 1
 
     - name: Export ACL configuration to local JSON file
-      # Idempotency: ansible.builtin.copy only updates the destination if content has changed
+      # Documentation: Persist state for external audit or versioning.
+      # Idempotency: 'copy' only updates the file if the content differs.
       ansible.builtin.copy:
         content: "{{ acl_result.gathered | to_nice_json }}"
         dest: "/tmp/asa_acls_{{ inventory_hostname }}.json"
-        mode: '0640'
-      when: output_format | default('text') == 'json'
-      register: json_export
+        mode: '0644'
+      when: output_format == 'json'
 
-    - name: Verify JSON export persistence
-      # Observability: Ensure the backup file was successfully written
-      ansible.builtin.assert:
-        that:
-          - not json_export.failed
-        when: output_format | default('text') == 'json'
-
-    - name: Display Access List Summary Report
-      # Documentation: Summary provide clear visibility into device state
+    - name: Generate human-readable ACL summary
+      # Observability: Custom report to quickly verify ACL counts and names.
       ansible.builtin.debug:
         msg: |
-          ============================================================
-          ACCESS CONTROL LIST AUDIT: {{ inventory_hostname }}
-          ============================================================
+          ==================================================
+          Access List Summary: {{ inventory_hostname }}
+          Timestamp: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          ==================================================
           {% if acl_result.gathered %}
           {% for acl in acl_result.gathered %}
-          - ACL NAME: {{ acl.name }}
-            ENTRIES: {{ acl.acl_entries | default([]) | length }}
+          ACL: {{ acl.name }}
+          Type: {{ acl.acl_type | default('standard/extended') }}
+          Entries: {{ acl.acl_entries | default([]) | length }}
+          --------------------------------------------------
           {% endfor %}
           {% else %}
-          STATUS: No Access Control Lists configured on this device.
+          RESULT: No ACLs configured on this device.
           {% endif %}
-          ============================================================
-      when: output_format | default('text') == 'text'
+      when: output_format == 'text'
+
+    - name: Final Verification of Output File
+      # Observability: Confirm the JSON file was actually created if requested.
+      ansible.builtin.stat:
+        path: "/tmp/asa_acls_{{ inventory_hostname }}.json"
+      register: file_stat
+      when: output_format == 'json'
+
+    - name: Assert JSON file existence
+      ansible.builtin.assert:
+        that:
+          - file_stat.stat.exists
+        fail_msg: "JSON output file was not created on the control node."
+      when: output_format == 'json'

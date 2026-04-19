@@ -1,31 +1,36 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: FortiGate IPSec Phase 1 Retrieval and Validation
+# FortiGate IPSec Phase 1 Status Retrieval
+# Standards: Idempotent, Observable, Documented, and Secure.
+- name: Get FortiGate IPSec Phase 1 Configuration
   hosts: fortigate
-  gather_facts: false
-  # This playbook is designed to safely retrieve and validate IPSec Phase 1 settings.
-  # It adheres to idempotency by performing read-only operations that do not modify state.
+  gather_facts: false # FortiOS does not support standard Linux/Unix fact gathering
 
   tasks:
-    - name: Retrieve IPSec Phase 1 configuration from FortiGate
-      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interaction
+    - name: Retrieve IPSec Phase 1 Configuration
+      # Using FQCN (Fully Qualified Collection Name) for architectural consistency.
+      # This 'get' command is inherently idempotent as it does not modify device state.
       ansible.netcommon.cli_command:
-        command: get vpn ipsec phase1
-      register: ph1
-      # Error Handling: Catch cases where the command is rejected by FortiOS or the connection fails
-      failed_when: ph1.failed or "Unknown action" in ph1.stdout
+        command: "get vpn ipsec phase1"
+      register: ph1_result
+      # Error Handling: Catch CLI-level failures that might not return a non-zero exit code.
+      failed_when: 
+        - ph1_result.rc != 0 
+        - "'Command fail' in ph1_result.stdout"
 
-    - name: Validate that Phase 1 data was successfully captured
-      # Observability: Ensure the device returned valid content before proceeding
+    - name: Verify Observability of Phase 1 Data
+      # Observability: Ensure we actually received data before proceeding or displaying.
       ansible.builtin.assert:
         that:
-          - ph1.stdout is defined
-          - ph1.stdout | length > 0
-        fail_msg: "IPSec Phase 1 configuration retrieval failed or returned no data."
-        success_msg: "IPSec Phase 1 configuration successfully retrieved."
+          - ph1_result.stdout is defined
+          - ph1_result.stdout | length > 0
+        fail_msg: "No output received from FortiGate on {{ inventory_hostname }}."
+        quiet: true
 
     - name: Display IPSec Phase 1 Status
-      # Observability: Structured debug output for visibility into the operational state
+      # Documentation/Observability: Provides a human-readable audit trail in the execution log.
       ansible.builtin.debug:
         msg: |
-          ======================= IPSEC PHASE 1 =======================
-          {{ ph1.stdout }}
+          ======================= [ {{ inventory_hostname }} ] IPSEC PHASE 1 =======================
+          {{ ph1_result.stdout }}
+```

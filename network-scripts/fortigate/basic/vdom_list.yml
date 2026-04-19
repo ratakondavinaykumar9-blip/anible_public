@@ -1,34 +1,43 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate VDOM List - Improved for Production Standards
-# This playbook retrieves the list of Virtual Domains (VDOMs) from a FortiGate device.
-- name: Get FortiGate VDOM List
+# NetLearner Architect Standard: FortiGate VDOM Retrieval
+# Purpose: Safely retrieve and verify the list of Virtual Domains (VDOMs) from a FortiGate appliance.
+# Standards: Idempotency (Read-only), Observability (Assert), FQCN Usage, Error Handling.
+
+- name: FortiGate VDOM Inventory Retrieval
   hosts: fortigate
-  gather_facts: false # Facts are not required for this CLI-based operation
+  gather_facts: false
 
   tasks:
-    - name: Retrieve VDOM configuration via CLI
-      # Use Fully Qualified Collection Name (FQCN) for reliability
+    - name: "CLI: Execute 'get system vdom' to retrieve VDOM list"
+      # Using Fully Qualified Collection Name (FQCN) for network automation
       ansible.netcommon.cli_command:
-        command: get system vdom
-      register: vdom_output
-      # Error Handling: Catch common FortiOS CLI error strings that might not trigger a non-zero exit code
+        command: "get system vdom"
+      register: vdom_result
+      # Idempotency: This is a read-only operational command; ensure it never reports 'changed'
+      changed_when: false
+      # Error Handling: Fail if the output does not contain the expected 'vdom' keyword
       failed_when: 
-        - vdom_output.rc | default(0) != 0
-        - "'Command fail' in vdom_output.stdout"
-        - "'Unknown action' in vdom_output.stdout"
+        - vdom_result.failed | default(false)
+        - "'vdom' not in vdom_result.stdout | lower"
 
-    - name: Validate VDOM retrieval integrity
-      # Observability: Assert that the output is not empty and contains expected VDOM keywords
+    - name: "OBSERVABILITY: Validate VDOM command output"
+      # Use assert to programmatically verify that the output is non-empty and well-formed
       ansible.builtin.assert:
         that:
-          - vdom_output.stdout | length > 0
-          - "'vdom' in vdom_output.stdout or 'root' in vdom_output.stdout"
-        fail_msg: "The VDOM list could not be retrieved or the output was unexpected."
+          - "vdom_result.stdout is defined"
+          - "vdom_result.stdout | length > 0"
+        fail_msg: "The VDOM list retrieval failed or returned an empty response."
         success_msg: "VDOM list successfully retrieved and validated."
 
-    - name: Display VDOM list for operator visibility
-      # This task is idempotent as it only performs a read/display operation
+    - name: "DISPLAY: Render VDOM Inventory"
+      # Clear documentation of results in the console for operator observability
       ansible.builtin.debug:
         msg: |
-          ======================= VDOMs =======================
-          {{ vdom_output.stdout }}
+          ======================= FORTIGATE VDOM INVENTORY =======================
+          Node: {{ inventory_hostname }}
+          Status: Success
+          ------------------------------------------------------------------------
+          {{ vdom_result.stdout }}
+          ========================================================================
+```

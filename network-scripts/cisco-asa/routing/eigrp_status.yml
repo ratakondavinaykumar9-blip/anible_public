@@ -1,31 +1,40 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: EIGRP Status Verification
+- name: EIGRP Neighbor Status Diagnostics
   hosts: asa_firepower
   gather_facts: false
-  # This playbook performs a read-only operation, making it inherently idempotent.
-  # It retrieves and verifies the status of EIGRP neighbors on Cisco ASA/FTD devices.
+  # Why: This playbook performs non-intrusive diagnostic checks on EIGRP peering status.
+  # It is idempotent by nature (read-only) and safe for high-frequency execution in production.
 
   tasks:
-    - name: Retrieve EIGRP neighbor status from the device
-      # Using FQCN for network command execution to ensure long-term compatibility
+    - name: Fetch EIGRP neighbor table from device
+      # Why: Retrieves the current state of EIGRP adjacencies to provide operational observability.
+      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction.
       ansible.netcommon.cli_command:
         command: show eigrp neighbors
-      register: eigrp_status
-      # Error Handling: Ensure the task fails only on actual communication or execution errors.
-      failed_when: eigrp_status.failed
+      register: eigrp_neighbors
+      check_mode: false # Why: Ensures diagnostic information is gathered even during dry-runs.
+      # Error Handling: Catch cases where the command is unsupported or execution fails.
+      failed_when:
+        - "eigrp_neighbors.failed"
+        - "'Invalid input' in eigrp_neighbors.stdout"
 
-    - name: Verify that the EIGRP status was successfully registered
-      # Observability: Assert that the output is defined to ensure the command returned data
+    - name: Validate EIGRP operational state
+      # Why: Automated verification that the EIGRP process is active and responding.
+      # Observability: Uses 'assert' to provide a clear pass/fail signal for automation pipelines.
       ansible.builtin.assert:
         that:
-          - "eigrp_status.stdout is defined"
-        fail_msg: "EIGRP status retrieval failed; stdout is undefined."
+          - "eigrp_neighbors.stdout is defined"
+          - "'EIGRP-IPv4 Neighbors' in eigrp_neighbors.stdout"
+        fail_msg: "EIGRP neighbor table is missing or process is inactive on {{ inventory_hostname }}."
+        success_msg: "EIGRP neighbor table successfully retrieved and validated."
         quiet: true
 
-    - name: Display formatted EIGRP neighbor information
-      # Documentation: Provide clear, human-readable visibility into the routing protocol state
+    - name: Display EIGRP neighbor table summary
+      # Why: Provides formatted, human-readable output for manual troubleshooting sessions.
       ansible.builtin.debug:
-        msg: |
-          ======================= EIGRP NEIGHBORS =======================
-          {{ eigrp_status.stdout | default('No EIGRP neighbors found or output empty.') }}
-          ===============================================================
+        msg:
+          - "======================= EIGRP NEIGHBORS ======================="
+          - "Device: {{ inventory_hostname }}"
+          - "{{ eigrp_neighbors.stdout }}"
+```

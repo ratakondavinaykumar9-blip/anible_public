@@ -1,40 +1,35 @@
----
-# ==============================================================================
-# Playbook: Show Port Channel Information
-# Description: Retrieves and validates Port Channel status from ASA/Firepower devices.
-# Standards: Idempotency, Observability, FQCN, and Error Handling.
-# ==============================================================================
-- name: Get Port Channel Information
+MCP issues detected. Run /mcp list for status.---
+# Playbook to retrieve and validate Cisco ASA/Firepower Port-Channel status.
+# This is part of the NetLearner Staging infrastructure validation suite.
+- name: Cisco ASA/Firepower Port-Channel Operational Audit
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Performance optimization: ASA facts are often not required for CLI audits.
 
   tasks:
-    - name: Retrieve port-channel status from device
-      # Using FQCN (Fully Qualified Collection Name) for network command execution.
-      # This task is inherently idempotent as it performs a read-only operation.
+    - name: Retrieve Port-Channel operational state from device
+      # Using FQCN (Fully Qualified Collection Name) for architectural consistency.
+      # Read-only 'show' commands are inherently idempotent and safe for repeated runs.
       ansible.netcommon.cli_command:
         command: show port-channel
-      register: portch_result
-      # Error Handling: Explicitly fail if the device returns common error strings.
+      register: portch_output
+      # Error Handling: Fail explicitly if the command is unrecognized or the device returns an error.
       failed_when: 
-        - "'Invalid input' in portch_result.stdout"
-        - "'ERROR' in portch_result.stdout"
+        - portch_output.stdout is not defined
+        - "'Invalid input' in portch_output.stdout"
+        - "'% Invalid' in portch_output.stdout"
 
-    - name: Validate observability of the command output
-      # Observability: Assert that the command returned data to ensure the session was valid.
+    - name: Validate Port-Channel output integrity
+      # Observability: Assert that the command returned actionable data before proceeding.
       ansible.builtin.assert:
         that:
-          - portch_result.stdout is defined
-          - portch_result.stdout | length > 0
-        fail_msg: "Port-channel information could not be retrieved or is empty."
-        success_msg: "Successfully retrieved port-channel status from {{ inventory_hostname }}."
+          - portch_output.stdout | length > 0
+        fail_msg: "Device returned an empty response for Port-Channel status."
+        success_msg: "Port-Channel operational data successfully captured."
 
-    - name: Display Formatted Port Channel Status
-      # Documentation: Providing a structured view of the retrieved operational data.
+    - name: Display Port-Channel operational status
       ansible.builtin.debug:
         msg: |
-          ======================================================================
-          DEVICE: {{ inventory_hostname }}
-          PORT CHANNEL STATUS:
-          ======================================================================
-          {{ portch_result.stdout }}
+          ======================= PORT CHANNEL DATA =======================
+          {{ portch_output.stdout }}
+      # Best practice: Conditional execution to minimize console noise in automation logs.
+      when: portch_output.stdout | length > 0

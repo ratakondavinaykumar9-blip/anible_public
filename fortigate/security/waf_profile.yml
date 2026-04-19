@@ -1,38 +1,42 @@
+MCP issues detected. Run /mcp list for status.---
+# FortiGate WAF Profile Retrieval
+# Auto-improved: 2026-04-12
+# Architect: NetLearner Architect
+#
+# PURPOSE: Retrieves Web Application Firewall (WAF) profiles from FortiGate devices.
+# STANDARDS: Idempotency (read-only), Observability (assertions), 
+# Documentation (in-line logic), and FQCN usage.
 ---
-# Waf Profile
-# Improved: 2026-03-15
-# Author: NetLearner Architect
-# Purpose: Securely retrieve and validate FortiGate WAF profile configuration.
----
-- name: Get FortiGate WAF Profile
+- name: Get WAF Profile
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # facts not required for CLI-based configuration retrieval
 
   tasks:
-    - name: Retrieve WAF profile details via CLI
-      # Why: CLI command is used for direct read-only access to operational status.
-      # Idempotency: 'changed_when: false' ensures this task is safe for repeated runs without affecting state.
-      # Best Practice: Using Fully Qualified Collection Name (FQCN).
+    - name: Retrieve WAF profile via CLI command
+      # FQCN: Using ansible.netcommon.cli_command for consistent network interaction
       ansible.netcommon.cli_command:
         command: get firewall waf-profile
       register: waf_output
+      # IDEMPOTENCY: Retrieval operations must not report a 'changed' state
       changed_when: false
-      failed_when: 
-        - waf_output.rc != 0
-        - "'command parse error' in waf_output.stdout | lower"
+      # ERROR HANDLING: Ensure the command executed successfully and returned valid output
+      failed_when: >
+        waf_output.failed or 
+        "command parse error" in (waf_output.stdout | lower) or
+        "unknown action" in (waf_output.stdout | lower)
 
     - name: Validate WAF profile data integrity
-      # Why: Ensures that the command returned valid data and identifies connectivity or permission issues.
-      # Observability: Provides an explicit checkpoint for success.
+      # OBSERVABILITY: Assert that expected configuration signatures exist in the output
       ansible.builtin.assert:
         that:
           - waf_output.stdout is defined
           - waf_output.stdout | length > 0
-        fail_msg: "WAF profile retrieval failed: Output is empty or undefined."
-        success_msg: "WAF profile data successfully captured and verified."
+          - "'waf-profile' in waf_output.stdout"
+        fail_msg: "Data Integrity Error: WAF profile output is missing or malformed."
+        success_msg: "Data Integrity Verified: WAF profile retrieved successfully."
 
-    - name: Display WAF profile configuration
-      # Why: Provides human-readable visibility for auditing and troubleshooting during playbook execution.
+    - name: Display formatted WAF profile
+      # OBSERVABILITY: Present the configuration for auditability and operator visibility
       ansible.builtin.debug:
         msg: |
           ======================= WAF PROFILE =======================

@@ -1,39 +1,52 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NAT Fragmentation Audit and Validation
-# This playbook audits Cisco ASA/Firepower devices for NAT fragmentation configuration.
-# Identifying these settings is critical for ensuring consistent traffic flow for fragmented packets.
-- name: NAT Fragmentation
+# NAT Fragmentation Audit and Verification Playbook
+# This playbook retrieves and validates NAT fragmentation settings on Cisco ASA/Firepower devices.
+# It adheres to NetLearner Architect standards for idempotency, observability, and robust error handling.
+- name: Audit NAT Fragmentation Configuration
   hosts: asa_firepower
   gather_facts: false
+  connection: ansible.netcommon.network_cli
 
   tasks:
     - name: Retrieve NAT fragmentation configuration
-      # Best Practices: Using FQCN (Fully Qualified Collection Name) for the netcommon collection.
-      # Idempotency: This task is read-only, ensuring it is safe to run repeatedly without side effects.
+      # Use FQCN for the command module. 
+      # This task is read-only (idempotent by nature).
       ansible.netcommon.cli_command:
         command: show running-config nat | include fragment
-      register: frag_output
-      # Error Handling: Ensures the playbook fails on connection issues or command rejection, 
-      # but allows execution to continue if the 'include' filter simply finds no matches.
+      register: nat_frag_output
+      # Ensure the task doesn't fail if the command is valid but returns an empty string (no fragments configured).
       failed_when: 
-        - frag_output.failed
-        - "'Invalid input' in frag_output.stdout"
+        - nat_frag_output.failed
+        - "'Invalid input' in nat_frag_output.stderr"
+      # Documentation: Audit tasks should run even in check mode to provide visibility.
+      check_mode: false
 
-    - name: Validate data retrieval success
-      # Observability: Assert that the command was executed and a response was captured in the register.
+    - name: Verify command execution success
+      # Observability: Assert that the command was successfully sent and parsed by the device.
       ansible.builtin.assert:
         that:
-          - frag_output.stdout is defined
-        fail_msg: "Failed to retrieve NAT configuration from {{ inventory_hostname }}. Verify credentials and reachability."
-        quiet: true
+          - nat_frag_output.stdout is defined
+        fail_msg: "Failed to retrieve NAT fragmentation config from {{ inventory_hostname }}."
+        success_msg: "NAT fragmentation config successfully retrieved from {{ inventory_hostname }}."
 
-    - name: Display NAT fragmentation report
-      # Documentation: Providing a clear, human-readable summary of the current device state.
+    - name: Display NAT fragmentation status
+      # Documentation: Provide formatted output for human-readable audit logs.
       ansible.builtin.debug:
-        msg: |
-          ======================= NAT FRAGMENTATION REPORT =======================
-          Device: {{ inventory_hostname }}
-          Status: {{ 'Configuration Found' if frag_output.stdout != '' else 'No Specific Configuration' }}
-          
-          Raw Output:
-          {{ frag_output.stdout if frag_output.stdout != '' else 'No NAT rules with the "fragment" keyword were detected.' }}
+        msg: 
+          - "============================================================"
+          - "DEVICE: {{ inventory_hostname }}"
+          - "NAT FRAGMENTATION CONFIGURATION:"
+          - "{{ nat_frag_output.stdout | default('No fragmentation settings found in running-config', true) }}"
+          - "============================================================"
+
+    - name: Validate configuration presence
+      # Error Handling: Use a conditional check to flag devices missing specific fragmentation policies if required.
+      # This is an example of 'failed_when' logic tailored for audit compliance.
+      ansible.builtin.set_fact:
+        frag_configured: "{{ nat_frag_output.stdout | length > 0 }}"
+
+    - name: Report configuration status
+      ansible.builtin.debug:
+        msg: "Optimization Note: NAT fragmentation is {{ 'ACTIVE' if frag_configured else 'NOT CONFIGURED' }} on this node."
+```

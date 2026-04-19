@@ -1,38 +1,40 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate DNAT Policies Retrieval
-# This playbook retrieves DNAT configuration from FortiGate devices using standard CLI commands.
-# Adheres to standards for Idempotency, Observability, Documentation, Error Handling, and FQCN usage.
+# FortiGate DNAT Policy Audit
+# This playbook retrieves and validates Destination NAT (DNAT) policies from FortiGate devices.
+# It adheres to NetLearner engineering standards for observability, idempotency, and error handling.
 
-- name: Get DNAT Policies
+- name: Audit FortiGate DNAT Policies
   hosts: fortigate
-  gather_facts: false
-  # Connection should be set to network_cli for FortiOS CLI interactions
-  vars:
-    ansible_network_os: fortinet.fortios.fortios
+  gather_facts: false # Facts are disabled to ensure rapid execution on network endpoints.
 
   tasks:
-    - name: Retrieve DNAT configuration from device
-      # This operation is inherently idempotent as it is read-only.
-      # FQCN: ansible.netcommon.cli_command
+    - name: Retrieve DNAT configuration from FortiOS CLI
+      # Using FQCN for consistency and cross-collection compatibility.
+      # This command captures the global DNAT table for security auditing.
       ansible.netcommon.cli_command:
         command: get firewall dnats
       register: dnat_result
-      # Error Handling: Identify failure if the command is unrecognized or returns an error string
-      failed_when:
+      # Error Handling: Fail if the CLI returns an application-level error (e.g., 'Unknown action') 
+      # even if the underlying SSH transport was successful.
+      failed_when: 
         - dnat_result.failed or "Unknown action" in dnat_result.stdout or "Command fail" in dnat_result.stdout
 
-    - name: Validate retrieval success and data presence
-      # Observability: Verify the output is defined and contains data
+    - name: Validate DNAT capture integrity
+      # Observability: Verify that data was actually returned to avoid false-positive success on empty buffers.
       ansible.builtin.assert:
         that:
           - dnat_result.stdout is defined
           - dnat_result.stdout | length > 0
-        fail_msg: "DNAT configuration retrieval failed or returned empty output."
-        success_msg: "DNAT configuration successfully captured."
+        fail_msg: "CRITICAL: DNAT retrieval returned no data. Check device configuration or connectivity."
+        success_msg: "SUCCESS: DNAT policies captured and verified."
 
-    - name: Display retrieved DNAT policies
-      # Provides visual confirmation of the registered output
+    - name: Display DNAT policies for audit logging
+      # Idempotency: Read-only audits and debug tasks are inherently safe for repeated execution 
+      # as they do not modify the persistent state of the FortiGate device.
       ansible.builtin.debug:
         msg: |
-          ======================= DNAT OUTPUT =======================
+          ======================= DNAT AUDIT: {{ inventory_hostname }} =======================
           {{ dnat_result.stdout }}
+          ====================================================================================
+```

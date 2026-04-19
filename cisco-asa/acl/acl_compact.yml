@@ -1,40 +1,41 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Retrieve and Validate Compiled ACL Configuration
-# This playbook fetches the compiled ACL state from Cisco ASA/Firepower devices.
-# Standards: Idempotency (Read-only), Observability (Assert), Documentation, FQCN.
+# ACL Analysis and Verification Playbook
+# This playbook retrieves and verifies the compiled ACL configuration from ASA/Firepower devices.
+# It is designed to be idempotent and provides robust observability for security auditing.
+# Standards: NetLearner Architect v2.0
 
-- name: Cisco ASA - ACL Compilation Report
+- name: Retrieve and Verify Compiled ACL Configuration
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Performance: facts are not required for read-only command execution
 
   tasks:
-    - name: Execute 'show compile-cfg' to fetch compiled ACL data
-      # Using FQCN for cross-platform CLI interaction
+    - name: Retrieve Compiled ACL configuration from device
+      # Using FQCN (Fully Qualified Collection Name) for architectural consistency.
+      # The 'show compile-cfg' command retrieves the optimized ACL state on Cisco ASA.
       ansible.netcommon.cli_command:
         command: show compile-cfg
       register: compiled_output
-      # Error Handling: Identify if the command is unrecognized or execution failed
+      # Error Handling: Fail explicitly if the command is unrecognized or returns an error string.
       failed_when: 
-        - compiled_output.failed 
-        - '"Invalid input" in compiled_output.stdout'
-      # Idempotency: Explicitly marking as unchanged since this is a read-only operation
-      changed_when: false
+        - compiled_output.failed or "Invalid input" in compiled_output.stdout or "Incomplete command" in compiled_output.stdout
 
-    - name: Verify successful data retrieval
-      # Observability: Ensuring the output is populated and valid
+    - name: Verify ACL configuration retrieval success
+      # Observability: Assert that the command returned non-empty data to ensure the report is valid.
+      # This prevents downstream analyzers from processing null or incomplete datasets.
       ansible.builtin.assert:
         that:
+          - "compiled_output.stdout is defined"
           - "compiled_output.stdout | length > 0"
-          - "'compile-cfg' in compiled_output.stdout or compiled_output.stdout_lines | length > 0"
-        fail_msg: "The 'show compile-cfg' command returned no data or was rejected by the device."
-        success_msg: "Compiled ACL configuration successfully captured."
+        fail_msg: "CRITICAL: Failed to retrieve ACL configuration from {{ inventory_hostname }} or output was empty."
+        success_msg: "SUCCESS: Compiled ACL configuration retrieved successfully from {{ inventory_hostname }}."
 
-    - name: Display Compiled ACL Details
-      # Documentation/Observability: Outputting formatted results for audit logs
+    - name: Display Compiled ACL details for architectural review
+      # Documentation: Provides a formatted view of the ACL state for manual or automated inspection.
       ansible.builtin.debug:
         msg: |
           ======================= COMPILED ACL REPORT =======================
-          Host: {{ inventory_hostname }}
-          Status: Success
+          Device: {{ inventory_hostname }}
           -------------------------------------------------------------------
           {{ compiled_output.stdout }}
+```

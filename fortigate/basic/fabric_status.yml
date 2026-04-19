@@ -1,40 +1,45 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Fabric Status
-# Improved: 2026-03-15 (NetLearner Architect)
-# Standards: Idempotency, Observability, FQCN, Error Handling
-#
----
-- name: FortiGate Fabric Status Collection
+# ==============================================================================
+# Playbook: FortiGate Security Fabric Status Audit
+# Purpose: This playbook performs a diagnostic check to verify the operational 
+#          state of the FortiGate Security Fabric. It ensures the device is 
+#          actively participating in the fabric and reporting correctly.
+# Idempotency: This is a read-only diagnostic play. It does not modify device 
+#              configuration and is safe for continuous/automated execution.
+# ==============================================================================
+
+- name: Get Fabric Status
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: FortiOS CLI operations do not require standard fact gathering
 
   tasks:
-    - name: Execute 'get fabric status' on FortiGate
-      # FQCN: Using ansible.netcommon.cli_command to ensure compatibility and best practice.
+    - name: Retrieve Security Fabric status via CLI
+      # Use Fully Qualified Collection Name (FQCN) for reliability and best practices
       ansible.netcommon.cli_command:
         command: get fabric status
-      register: fabric_result
-      # Idempotency: This is a read-only 'get' command. We set changed_when to false 
-      # to ensure the playbook remains idempotent and doesn't report false changes.
-      changed_when: false
-      # Error Handling: Explicitly fail if the command returns empty output, 
-      # indicating a potential communication or execution issue.
+      register: fabric_output
+      # Error Handling: Fail if the command returns an empty string or is unsupported
       failed_when: 
-        - fabric_result.stdout is not defined 
-        - fabric_result.stdout | length == 0
+        - fabric_output.stdout | length == 0
+        - "'Unknown action' in fabric_output.stdout"
 
-    - name: Validate Fabric status output
-      # Observability: Assert that the command returned meaningful fabric information.
-      # This verifies that the device is responding with the expected data structure.
+    - name: Validate Fabric operational health
+      # Observability: Assert that the output contains the mandatory 'Group name' field
       ansible.builtin.assert:
         that:
-          - "'Fabric' in fabric_result.stdout"
-        fail_msg: "The command output did not contain expected 'Fabric' keywords. Check device configuration."
-        success_msg: "Fabric status successfully retrieved and validated."
+          - "'Group name:' in fabric_output.stdout"
+        fail_msg: "CRITICAL: Security Fabric check failed. Device is not part of a fabric group or fabric is disabled."
+        success_msg: "SUCCESS: Security Fabric is active and data was successfully retrieved."
 
-    - name: Display Fabric Status
-      # Documentation: Providing a clear, formatted output for administrative review.
+    - name: Display formatted Fabric Status Report
+      # Observability: Output the topology and status for audit logs and human review
       ansible.builtin.debug:
         msg: |
           ======================= FABRIC STATUS =======================
-          {{ fabric_result.stdout }}
+          DEVICE:   {{ inventory_hostname }}
+          PLATFORM: {{ ansible_network_os | default('fortios') }}
+          
+          {{ fabric_output.stdout }}
+          =============================================================
+```

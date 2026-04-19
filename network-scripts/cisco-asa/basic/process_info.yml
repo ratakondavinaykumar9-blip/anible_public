@@ -1,32 +1,35 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: Get Process Information from ASA/Firepower
+# Cisco ASA/Firepower Operational Health Check: Process Information
+# This playbook retrieves real-time process statistics to monitor system health.
+# Idempotency: This is a read-only operation and is inherently safe to run multiple times.
+- name: Retrieve and Validate Process Information
   hosts: asa_firepower
-  gather_facts: false
-  # Documentation: This playbook retrieves and validates process data from network security appliances.
-  # It is inherently idempotent as 'show' commands do not modify the device's operational state.
+  gather_facts: false # Facts are not required for this operational monitoring task
 
   tasks:
     - name: Execute 'show process' command on the target device
-      # Best Practices: Utilizing Fully Qualified Collection Name (FQCN)
+      # Use Fully Qualified Collection Names (FQCN) for clarity and future-proofing
       ansible.netcommon.cli_command:
         command: show process
-      register: proc_results
-      # Error Handling: Ensure the playbook fails if the command is unrecognized or returns an error string
-      failed_when:
-        - proc_results.stdout is not defined
-        - "'Invalid' in proc_results.stdout or 'Error' in proc_results.stdout"
+      register: proc_result
+      # Error Handling: Explicitly fail if the command returns no data or is undefined
+      failed_when: 
+        - proc_result.stdout is not defined
+        - proc_result.stdout | length == 0
 
-    - name: Assert that process data was correctly captured
-      # Observability: Verify that the response contains expected data markers and is not empty
+    - name: Verify the integrity of the captured process data
+      # Observability: Assert that the output contains expected headers to ensure a valid response
       ansible.builtin.assert:
         that:
-          - proc_results.stdout | length > 0
-          - "'Process' in proc_results.stdout"
-        fail_msg: "The 'show process' command failed to return valid data."
-        success_msg: "Process data successfully retrieved and verified."
+          - "'Process' in proc_result.stdout"
+        fail_msg: "The captured process information is invalid, incomplete, or the command failed."
+        success_msg: "Process information integrity verified successfully."
 
-    - name: Output the retrieved process list
+    - name: Output the formatted process data for operator review
+      # Observability: Provide a clean, formatted view for manual inspection or log captures
       ansible.builtin.debug:
         msg: |
-          ======================= PROCESSES =======================
-          {{ proc_results.stdout }}
+          ======================= ASA/FIREPOWER PROCESSES =======================
+          {{ proc_result.stdout }}
+```

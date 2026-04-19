@@ -1,52 +1,54 @@
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Standard: Clear IPSec Tunnel
+# Purpose: Administratively reset crypto sessions or SAs on Cisco ASA/Firepower
+# Standards compliance: Idempotent (safe re-run), Observable (Assert), FQCN
+# Author: NetLearner Architect (AI)
 ---
-# Clear IPSec Tunnel
-# Optimized for: Idempotency, Observability, and Error Handling
-# Standards: FQCN, Register/Assert verification, and internal documentation
 - name: Clear IPSec Tunnel
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Specify the remote peer IP to clear a single tunnel. 
-    # If left empty, all IPSec Security Associations (SAs) will be cleared.
     tunnel_peer: ""
 
   tasks:
-    - name: Clear specific crypto session for peer
-      # Targeted clear to minimize impact on unrelated tunnels.
-      # Using FQCN: ansible.netcommon.cli_command
+    - name: "VERIFY | Ensure required variables are present"
+      ansible.builtin.assert:
+        that:
+          - tunnel_peer is defined
+        fail_msg: "Variable 'tunnel_peer' must be defined. Use empty string for a global clear."
+
+    - name: "CLEAR | Remove crypto sessions for specific peer"
+      # Executes only if tunnel_peer is specified. Idempotent as clearing a missing session is a no-op.
       ansible.netcommon.cli_command:
         command: "clear crypto session local {{ tunnel_peer }}"
       register: clear_peer_result
       when: tunnel_peer | length > 0
-      # Idempotency: Do not fail if the session is already gone or not found.
-      failed_when:
-        - clear_peer_result.failed
-        - "'not found' not in clear_peer_result.stdout"
-        - "'No session' not in clear_peer_result.stdout"
+      # Cisco ASA returns empty string on success. Filter for CLI syntax or execution errors.
+      failed_when: 
+        - clear_peer_result.stdout | length > 0
+        - "'Invalid' in clear_peer_result.stdout or 'Error' in clear_peer_result.stdout"
 
-    - name: Clear all crypto IPSec SAs
-      # Global clear used as a fallback when no specific peer is provided.
+    - name: "CLEAR | Remove all crypto Security Associations (Global)"
+      # Executes only if tunnel_peer is empty. Safe to run multiple times.
       ansible.netcommon.cli_command:
         command: "clear crypto ipsec sa"
-      register: clear_all_result
+      register: clear_global_result
       when: tunnel_peer | length == 0
-      failed_when: clear_all_result.failed
+      failed_when:
+        - clear_global_result.stdout | length > 0
+        - "'Invalid' in clear_global_result.stdout or 'Error' in clear_global_result.stdout"
 
-    - name: Verify clear operation success
-      # Observability: Ensure the command was processed successfully by the device.
+    - name: "OBSERVE | Validate successful execution of clear commands"
+      # Verification step to ensure the device processed the command without error.
       ansible.builtin.assert:
         that:
-          - (tunnel_peer | length > 0 and clear_peer_result is defined and not clear_peer_result.failed) or
-            (tunnel_peer | length == 0 and clear_all_result is defined and not clear_all_result.failed)
-        fail_msg: "IPSec Tunnel clear operation failed on {{ inventory_hostname }}"
-        success_msg: "IPSec Tunnel clear operation completed on {{ inventory_hostname }}"
+          - clear_peer_result is skipped or (clear_peer_result.failed == false)
+          - clear_global_result is skipped or (clear_global_result.failed == false)
         quiet: true
 
-    - name: Display execution result
-      # Documentation/Logging: Provide clear feedback on which action was taken.
+    - name: "DEBUG | Final execution summary"
       ansible.builtin.debug:
-        msg: >
-          {{ 
-            'Successfully cleared session for peer: ' + tunnel_peer if tunnel_peer | length > 0 
-            else 'Successfully cleared all IPSec SAs.' 
-          }}
+        msg: 
+          - "Tunnel Peer: {{ tunnel_peer if tunnel_peer | length > 0 else 'ALL (Global)' }}"
+          - "Status: Command accepted by the device."
+          - "Output: {{ clear_peer_result.stdout | default(clear_global_result.stdout | default('Success (No output)')) }}"

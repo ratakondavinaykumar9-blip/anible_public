@@ -1,29 +1,33 @@
----
-- name: Cisco ASA/Firepower - Retrieve and Validate Object Groups
+MCP issues detected. Run /mcp list for status.---
+# Playbook: Audit Object Groups
+# Purpose: Retrieves the running configuration for object-groups on Cisco ASA/Firepower devices.
+# This operation is inherently idempotent as it is a read-only request.
+- name: Audit Cisco ASA/Firepower Object Groups
   hosts: asa_firepower
   gather_facts: false
-  # Idempotency: This playbook is safe to run repeatedly as it only performs read-only operations.
 
   tasks:
-    - name: Retrieve object groups from running configuration
-      # Best Practices: Use Fully Qualified Collection Names (FQCN) for reliability.
+    - name: Retrieve object-group configuration from device
+      # Using FQCN (ansible.netcommon.cli_command) to fetch the specific running-config section.
+      # This provides the raw data needed for compliance and auditing without changing state.
       ansible.netcommon.cli_command:
         command: show running-config object-group
       register: groups
-      # Error Handling: Fail if the command is unrecognized by the device or execution fails.
+      # Error Handling: Fail if the command is unrecognized by the device or the task fails.
       failed_when: 
-        - groups.failed or "Invalid input" in groups.stdout
+        - groups.failed or "% Invalid" in groups.stdout
 
-    - name: Verify that object group data was captured
-      # Observability: Ensure the output variable is defined before proceeding.
+    - name: Validate retrieval of object group data
+      # Observability: Assert that data was actually returned to avoid false positives in reporting.
       ansible.builtin.assert:
         that:
           - groups.stdout is defined
-        fail_msg: "Critical Error: Failed to retrieve object group output from the device."
-        success_msg: "Success: Object group configuration successfully captured."
+          - groups.stdout | length > 0
+        fail_msg: "Validation failed: The object-group configuration is empty or could not be read."
+        quiet: true
 
-    - name: Display Object Group configuration
-      # Observability: Provide formatted output for administrative review.
+    - name: Display Object Group Configuration
+      # Observability: Print the results to the console for the operator to review.
       ansible.builtin.debug:
         msg: |
           ======================= OBJECT GROUPS =======================

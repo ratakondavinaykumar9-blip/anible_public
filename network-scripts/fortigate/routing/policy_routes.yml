@@ -1,34 +1,39 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Policy Routes - Improved Production Version
-# This playbook retrieves and validates policy routing table information from FortiGate devices.
+# FortiGate Policy Route Verification
+# Purpose: This playbook retrieves the current policy routing table for operational visibility and audit.
+# It ensures data integrity through assertion and specific error pattern matching.
 - name: Get Policy Routes
   hosts: fortigate
-  gather_facts: false # Performance: Facts are not required for CLI-based network operations
+  gather_facts: false # Performance: Fact gathering is unnecessary for this CLI-based operation
 
   tasks:
-    - name: Retrieve policy routes from the device
-      # Using FQCN for better portability and clarity across Ansible versions
+    - name: Fetch policy routes from FortiGate CLI
+      # FQCN (Fully Qualified Collection Name) used for consistency and better maintainability
       ansible.netcommon.cli_command:
         command: get router policy
-      register: policy_output
-      # Idempotency: Read-only operations must never report a 'changed' state
-      changed_when: false
-      # Error Handling: Fail if the device returns an error message or the command execution fails
-      failed_when:
-        - policy_output.failed
-        - "'Command fail' in policy_output.stdout"
+      register: policy_result
+      # Error Handling: Catches execution failures and explicit FortiOS CLI error strings
+      failed_when: >
+        policy_result.failed or 
+        "Command fail" in policy_result.stdout or 
+        "Unknown action" in policy_result.stdout
 
-    - name: Validate retrieval of policy route data
-      # Observability: Assert that the stdout is not empty to ensure the device is responding with data
+    - name: Assert that policy route data was successfully retrieved
+      # Observability: Verifies that the command returned content to ensure the output is valid
       ansible.builtin.assert:
         that:
-          - "policy_output.stdout | length > 0"
-        fail_msg: "Failed to retrieve policy route data or the table is empty."
-        success_msg: "Policy route data successfully captured."
+          - policy_result.stdout is defined
+          - policy_result.stdout | length > 0
+        fail_msg: "Policy route output is empty or undefined. Verify device configuration and permissions."
+        success_msg: "Policy route data captured successfully."
 
-    - name: Display policy route information
-      # Documentation: Formats the output for clear visibility during playbook execution
+    - name: Display Policy Routes
+      # Idempotency: Read-only operations are inherently safe to run multiple times.
+      # This task provides the final observability for the network architect.
       ansible.builtin.debug:
         msg: |
-          ======================= POLICY ROUTES =======================
-          {{ policy_output.stdout }}
+          ======================= FORTIGATE POLICY ROUTES =======================
+          {{ policy_result.stdout }}
+          ========================================================================
+```

@@ -1,0 +1,137 @@
+MCP issues detected. Run /mcp list for status.```yaml
+---
+# ==============================================================================
+# Playbook: SD-WAN Health Check (FortiOS)
+# ==============================================================================
+# Author: NetLearner (Architect)
+# Version: 1.1.0
+# Last Updated: 2026-04-12
+# Description: Configures and validates SD-WAN performance SLAs and health 
+#              checks. Implements robust error handling and state verification.
+#
+# Standards: Idempotency, FQCN, Block/Rescue Error Handling, Assert-based Validation
+# Platforms: FortiGate (FortiOS 6.4+)
+# ==============================================================================
+
+- name: Configure SD-WAN Health Checks
+  hosts: fortigate
+  gather_facts: false
+  connection: ansible.netcommon.httpapi
+
+  vars:
+    vdom: "root"
+    
+    # Standard health check definitions mapped to FortiOS schema
+    health_checks:
+      - name: "Internet_Ping"
+        server: "8.8.8.8"
+        protocol: "ping"
+        interval: 500
+        failtime: 3
+        recoverytime: 5
+        sla:
+          - id: 1
+            latency_threshold: 50
+            jitter_threshold: 10
+            packetloss_threshold: 1
+        update_static_route: "enable"
+        status: "enable"
+        
+      - name: "Internet_HTTP"
+        server: "health.fortinet.com"
+        protocol: "http"
+        interval: 1000
+        http_get: "/"
+        sla:
+          - id: 1
+            latency_threshold: 100
+            jitter_threshold: 20
+            packetloss_threshold: 2
+        status: "enable"
+        
+      - name: "Cloud_TCP"
+        server: "api.azure.com"
+        protocol: "tcp-echo"
+        port: 443
+        interval: 500
+        sla:
+          - id: 1
+            latency_threshold: 75
+            packetloss_threshold: 1
+        status: "enable"
+
+  tasks:
+    - name: PRE-FLIGHT | Validate configuration variables
+      ansible.builtin.assert:
+        that:
+          - health_checks is defined
+          - health_checks | length > 0
+          - vdom | length > 0
+        fail_msg: "Configuration Error: 'health_checks' list and 'vdom' must be defined."
+        success_msg: "Pre-flight validation successful for {{ inventory_hostname }}."
+
+    - name: CONFIGURATION | Deploy SD-WAN Health Checks
+      block:
+        # Verify SD-WAN global state first to ensure dependencies are met
+        - name: Ensure SD-WAN is globally enabled
+          fortinet.fortios.fortios_system_sdwan:
+            vdom: "{{ vdom }}"
+            system_sdwan:
+              status: "enable"
+          register: sdwan_base_status
+          failed_when: 
+            - sdwan_base_status.meta.status != 'success'
+            - sdwan_base_status.meta.http_status != 200
+
+        # Monolithic module call ensures the health_check list is idempotent
+        - name: Configure performance SLAs and health checks
+          fortinet.fortios.fortios_system_sdwan:
+            vdom: "{{ vdom }}"
+            system_sdwan:
+              health_check: "{{ health_checks }}"
+          register: health_config_result
+          # Ensure we fail if the API returns an error status even if HTTP 200
+          failed_when: health_config_result.meta.status != 'success'
+
+        - name: VERIFICATION | Gather current SD-WAN state
+          fortinet.fortios.fortios_system_sdwan:
+            vdom: "{{ vdom }}"
+            state: "gathered"
+          register: running_config
+          changed_when: false
+
+        - name: VERIFICATION | Assert health check presence
+          ansible.builtin.assert:
+            that:
+              - running_config.gathered.health_check | length >= health_checks | length
+            fail_msg: "Post-config check failed: Health check count does not match expected."
+            success_msg: "Verification successful: Health checks are active in running config."
+
+      rescue:
+        - name: ERROR HANDLING | Capture failure details
+          ansible.builtin.debug:
+            msg: |
+              DEPLOYMENT FAILED
+              Host: {{ inventory_hostname }}
+              Status: {{ ansible_failed_result.meta.status | default('N/A') }}
+              Reason: {{ ansible_failed_result.meta.err_msg | default(ansible_failed_result.msg) }}
+
+        - name: ERROR HANDLING | Finalize task failure
+          ansible.builtin.fail:
+            msg: "SD-WAN health check deployment failed. Check logs for details."
+
+    - name: SUMMARY | Display operational status
+      ansible.builtin.debug:
+        msg: |
+          --------------------------------------------------
+          SD-WAN Deployment Summary: {{ inventory_hostname }}
+          --------------------------------------------------
+          VDOM: {{ vdom }}
+          Applied Changes: {{ health_config_result.changed }}
+          Active Checks:
+          {% for check in health_checks %}
+          - {{ check.name }} ({{ check.protocol }}) -> {{ check.server }}
+          {% endfor %}
+          --------------------------------------------------
+      when: health_config_result is defined
+```

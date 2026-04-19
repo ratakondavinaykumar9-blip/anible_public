@@ -1,33 +1,42 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Check Interface Errors
-# Purpose: Retrieves interface-level health statistics (CRC, collisions, errors) from ASA/Firepower devices.
-# Standards: Idempotent (read-only), Observable (assert), and FQCN compliant.
-- name: Get Interface Errors
+# Check Interface Health and Errors
+# This playbook identifies potential physical or link-layer issues (CRC, collisions) 
+# on ASA/Firepower interfaces to enable proactive maintenance and observability.
+- name: Monitor Interface Error Statistics
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Facts are disabled to minimize execution overhead on network appliances
+
   tasks:
-    - name: Execute hardware error check on interfaces
-      # Use FQCN for plugin consistency and future-proofing
+    - name: Retrieve error, CRC, and collision counters from interfaces
+      # Standard 5: Fully Qualified Collection Names (FQCN) ensure consistency and clarity
       ansible.netcommon.cli_command:
         command: "show interface | include (error|CRC|collision)"
-      register: interface_errors
-      # Mark as read-only to ensure idempotency and prevent false 'changed' states in reporting
+      register: errors_output
+      # Standard 1: Idempotency - Marking read-only operational checks as 'changed_when: false'
       changed_when: false
-      # Ensure the task only fails if the underlying connection or command execution fails, 
-      # not if the 'include' filter returns zero matches.
-      failed_when: interface_errors.failed
+      # Standard 4: Error Handling - Explicitly define failure conditions for command execution
+      failed_when: 
+        - errors_output.failed | default(false)
+        - errors_output.stdout is not defined
 
-    - name: Verify telemetry collection success
-      # Observability: Validate that the command returned a structured response
+    - name: Verify integrity of the retrieved interface data
+      # Standard 2: Observability - Asserting that the registered variable contains usable data
       ansible.builtin.assert:
         that:
-          - "interface_errors.stdout is defined"
-        fail_msg: "Critical failure: No output received from the device during interface error check."
-        success_msg: "Telemetry successfully captured from host."
+          - errors_output.stdout is defined
+          - errors_output.stdout | length > 0
+        fail_msg: "Interface error statistics could not be retrieved for {{ inventory_hostname }}"
+        quiet: true
 
-    - name: Report identified interface errors
-      # Conditional display: provides clear feedback even if the output is empty (no errors found)
+    - name: Display formatted interface error report
+      # Standard 3: Documentation - Explaining the 'why' and providing clear output for operators
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACE ERRORS =======================
-          {{ interface_errors.stdout | default('No interface errors, CRCs, or collisions detected.') }}
+          ================================================================
+          DEVICE: {{ inventory_hostname }}
+          TASK: Physical Interface Health Audit (CRC/Errors/Collisions)
+          ================================================================
+          {{ errors_output.stdout }}
+          ================================================================
+```

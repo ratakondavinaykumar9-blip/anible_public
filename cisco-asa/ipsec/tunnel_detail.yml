@@ -1,51 +1,78 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Detailed IPSec Tunnel Information
-# Standards Applied: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Tunnel Detail
+# Improved: 2026-04-12
+# Architect: NetLearner (Senior Network Automation Expert)
+# Purpose: Deep IPSec diagnostic gathering for Cisco ASA/Firepower platforms.
+#
 - name: Get Detailed IPSec Tunnel Info
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Variable to filter by a specific peer IP; defaults to empty for all tunnels
+    # Optional: Peer IP address to filter session and SA details. If empty, all tunnels are retrieved.
     tunnel_peer: ""
 
   tasks:
-    - name: Retrieve VPN session database details
-      # Fetches active LAN-to-LAN tunnel statistics and operational state
-      # Using FQCN for the generic CLI command module
+    - name: Get VPN session database details
+      # Why: Captures high-level session state for L2L tunnels. Essential for verifying if a tunnel is active.
       ansible.netcommon.cli_command:
         command: "{{ 'show vpn-sessiondb l2l filter-ipaddress=' + tunnel_peer if tunnel_peer else 'show vpn-sessiondb l2l' }}"
       register: tunnel_detail
-      # Ignore errors to prevent playbook termination if no tunnels are active
-      ignore_errors: true
+      # Error Handling: Ensure task continues even if no sessions are found (common in diagnostic runs).
+      failed_when: false
+      # Idempotency: Explicitly mark as read-only to prevent false 'changed' reporting.
+      changed_when: false
 
-    - name: Validate tunnel detail command execution
-      # Observability: Assert that the command was attempted and result was captured
+    - name: Verify tunnel detail response
+      # Observability: Confirm that the command execution returned a valid data structure.
       ansible.builtin.assert:
         that:
-          - tunnel_detail is defined
-        fail_msg: "Data collection failed for tunnel_detail on {{ inventory_hostname }}"
+          - tunnel_detail.stdout is defined
+        fail_msg: "Failed to communicate with {{ inventory_hostname }} for session diagnostics."
 
-    - name: Retrieve Crypto IPsec Security Association details
-      # Captures Phase 2 information including encryption/hashing and traffic selectors
+    - name: Get crypto IPsec SA details
+      # Why: Retrieves Phase 2 encryption metrics and traffic selectors to verify data-plane health.
       ansible.netcommon.cli_command:
         command: "{{ 'show crypto ipsec sa peer ' + tunnel_peer if tunnel_peer else 'show crypto ipsec sa' }}"
       register: crypto_sa
-      ignore_errors: true
+      failed_when: false
+      changed_when: false
 
-    - name: Retrieve IKEv1 (ISAKMP) details
-      # Gathers Phase 1 information for legacy IKEv1 tunnels
+    - name: Get IKEv1 Phase 1 details
+      # Why: Diagnostic gathering for legacy Phase 1 (ISAKMP) negotiations.
       ansible.netcommon.cli_command:
         command: show crypto isakmp sa detail
       register: ikev1_detail
-      ignore_errors: true
+      failed_when: false
+      changed_when: false
 
-    - name: Retrieve IKEv2 details
-      # Gathers Phase 1 information for modern IKEv2 tunnels
+    - name: Get IKEv2 Phase 1 details
+      # Why: Diagnostic gathering for modern IKEv2 Phase 1 negotiations.
       ansible.netcommon.cli_command:
         command: show crypto ikev2 sa detail
       register: ikev2_detail
-      ignore_errors: true
+      failed_when: false
+      changed_when: false
 
-    - name: Display Consolidated IPSec Report
-      # Aggregates all collected data into a single structured output for the operator
+    - name: Display consolidated VPN diagnostic report
+      # Observability: Aggregates all registered outputs into a single, human-readable report.
       ansible.builtin.debug:
+        msg: |
+          ==============================================================================
+          VPN TUNNEL DIAGNOSTICS: {{ inventory_hostname }}
+          FILTER PEER: {{ tunnel_peer | default('NOT SPECIFIED', true) }}
+          ==============================================================================
+
+          [VPN SESSION DATABASE]
+          {{ tunnel_detail.stdout | default('No data retrieved.') }}
+
+          [IPSEC SA DETAILS]
+          {{ crypto_sa.stdout | default('No data retrieved.') }}
+
+          [IKEV1 (ISAKMP) DETAILS]
+          {{ ikev1_detail.stdout | default('No data retrieved.') }}
+
+          [IKEV2 DETAILS]
+          {{ ikev2_detail.stdout | default('No data retrieved.') }}
+          ==============================================================================
+```

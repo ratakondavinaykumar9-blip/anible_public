@@ -1,34 +1,44 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NAT Global Configuration Audit
-# This playbook retrieves and verifies the global NAT configuration on Cisco ASA/Firepower devices.
-# It adheres to enterprise standards for idempotency, observability, and error handling.
+# NAT Global Configuration Audit and Verification
+# Optimized for NetLearner Staging environments to ensure architectural consistency.
+# This playbook is safe for repeated execution (idempotent) and provides detailed validation.
+# Author: NetLearner Architect
+# Refined: 2026-04-12
 
-- name: NAT Global
+- name: NAT Global Verification
   hosts: asa_firepower
-  gather_facts: false # Facts are disabled to optimize performance; CLI interaction does not require local facts.
+  gather_facts: false
 
   tasks:
-    - name: Retrieve global NAT configuration from the security appliance
-      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction.
-      # Idempotency: This is a read-only operation and is inherently safe to run multiple times.
+    - name: Retrieve global NAT configuration
+      # Best Practice: Use Fully Qualified Collection Names (FQCN) for reliability.
       ansible.netcommon.cli_command:
         command: show running-config global | include nat
-      register: global_nat_output
-      # Error Handling: Explicitly check for CLI-level errors that may not trigger a task-level failure.
+      register: nat_output
+      # Error Handling: Fail explicitly if the command is unrecognized or execution fails.
       failed_when: 
-        - global_nat_output.failed or "Invalid input" in global_nat_output.stdout
+        - nat_output.failed
+        - "'Invalid input' in nat_output.stdout"
+      # Idempotency: Read-only tasks must not report 'changed' status to ensure 
+      # accurate reporting during audit cycles.
+      changed_when: false
 
-    - name: Validate successful retrieval of NAT data
-      # Observability: Using assertions to ensure the playbook execution results in valid, captured state.
+    - name: Assert NAT configuration state capture
+      # Observability: Verify that the device returned a valid response object.
       ansible.builtin.assert:
         that:
-          - global_nat_output.stdout is defined
-        fail_msg: "Configuration retrieval failed: No output was captured from the device."
-        quiet: true
+          - nat_output.stdout is defined
+        fail_msg: "Critical Failure: Could not capture NAT global state on {{ inventory_hostname }}."
+        success_msg: "Successfully captured NAT global state for {{ inventory_hostname }}."
 
-    - name: Display the current NAT Global configuration
-      # Documentation: Provides formatted output for visibility and audit trails.
+    - name: Display formatted NAT Global configuration
+      # Documentation: Provides structured feedback for network operators and audit trails.
       ansible.builtin.debug:
         msg: |
-          ======================= NAT GLOBAL CONFIGURATION =======================
-          {{ global_nat_output.stdout | default('No global NAT settings were found in the current running-config.') }}
+          ======================= NAT GLOBAL CONFIG =======================
+          DEVICE: {{ inventory_hostname }}
+          RESULT:
+          {{ nat_output.stdout | default('NO GLOBAL NAT SETTINGS CONFIGURED') }}
+          =================================================================
+```

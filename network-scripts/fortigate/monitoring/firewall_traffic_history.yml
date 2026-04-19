@@ -1,35 +1,37 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Get FortiGate Traffic History
-# Purpose: Retrieves and displays traffic history from FortiGate devices.
-# Standards: Idempotency (Read-only), Observability (Assert), FQCN, Error Handling.
-- name: Get FortiGate Traffic History
+# FortiGate Traffic History Retrieval
+# This playbook retrieves and validates traffic history from FortiGate devices.
+# Standards: Idempotency (read-only), Observability (assert), FQCN usage.
+- name: Get Traffic History
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: facts not required for CLI command execution
 
   tasks:
-    - name: Execute traffic-history retrieval via CLI
-      # Using FQCN for the network common CLI module to ensure broad compatibility
+    - name: Execute FortiGate traffic history command
+      # Using FQCN for consistent cross-platform network management
       ansible.netcommon.cli_command:
         command: get firewall traffic-history
-      register: history_result
-      # Error Handling: Fail explicitly if the command is unrecognized or returns an error string
+      register: traffic_history_output
+      # Error Handling: Identify failure based on return code or common error keywords in output
       failed_when:
-        - history_result.failed
-        - "'command parse error' in history_result.stdout.lower() or 'unknown command' in history_result.stdout.lower()"
+        - traffic_history_output.rc != 0
+        - "'error' in traffic_history_output.stdout | lower"
+        - "'command parse error' in traffic_history_output.stdout | lower"
 
-    - name: Verify traffic history output integrity
-      # Observability: Assert that the command returned data to prevent silent failures
+    - name: Validate traffic history data integrity
+      # Observability: Ensure the result is non-empty and valid before processing
       ansible.builtin.assert:
         that:
-          - history_result.stdout is defined
-          - history_result.stdout | length > 0
-        fail_msg: "Traffic history retrieval failed or returned empty content."
-        success_msg: "Traffic history data successfully captured."
+          - traffic_history_output.stdout | length > 0
+          - traffic_history_output.stdout is defined
+        fail_msg: "Traffic history retrieval failed or returned empty data from {{ inventory_hostname }}."
+        success_msg: "Traffic history data successfully validated for {{ inventory_hostname }}."
 
-    - name: Output traffic history for administrative review
-      # Documentation: Providing clear visual separation for logged output
+    - name: Display traffic history results
+      # Observability: Provide formatted output for administrative review
       ansible.builtin.debug:
         msg: |
-          ======================= TRAFFIC HISTORY START =======================
-          {{ history_result.stdout }}
-          ======================= TRAFFIC HISTORY END =========================
+          ======================= TRAFFIC HISTORY ({{ inventory_hostname }}) =======================
+          {{ traffic_history_output.stdout }}
+```

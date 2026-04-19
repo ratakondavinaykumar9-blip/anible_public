@@ -1,72 +1,79 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# IPSec Tunnel Status Overview
-# This playbook retrieves the current status of IPSec VPN tunnels on Cisco ASA/Firepower devices.
-# Standards: Idempotent (Read-only), Observed (Asserts), Documented, Error Handled, FQCN.
-
+# NetLearner Architect: Advanced VPN Observability Playbook
+# Standards: Idempotency, FQCN, Assertive Validation, and Error Handling
+# Focus: Comprehensive Site-to-Site (L2L) Tunnel Health Monitoring
+---
 - name: Get IPSec Tunnel Status
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Get L2L VPN sessions
-      # Why: To identify active Site-to-Site sessions and overall connection counts.
-      ansible.netcommon.cli_command:
-        command: show vpn-sessiondb l2l
-      register: l2l_result
-      changed_when: false
+    - name: Retrieve active L2L VPN session database
+      # Why: Establishes the baseline of currently established Site-to-Site tunnels.
+      # Note: 'show vpn-sessiondb' is a safe, read-only operation (Idempotent).
+      cisco.asa.asa_command:
+        commands:
+          - show vpn-sessiondb l2l
+      register: l2l_output
       failed_when: 
-        - l2l_result.stdout == ""
-        - "'Invalid' in l2l_result.stdout"
+        - l2l_output.failed
+        - "'Invalid input' in l2l_output.stdout[0]"
 
-    - name: Verify L2L session command success
-      # Why: Ensure the control plane responded correctly before providing output.
+    - name: Verify L2L session retrieval success
+      # Why: Ensures the device responded with valid session data before proceeding.
       ansible.builtin.assert:
         that:
-          - "l2l_result.stdout is defined"
-        fail_msg: "Critical: Command 'show vpn-sessiondb l2l' failed on {{ inventory_hostname }}"
-        quiet: true
+          - l2l_output.stdout is defined
+          - l2l_output.stdout | length > 0
+        fail_msg: "Failed to retrieve L2L VPN session database from {{ inventory_hostname }}"
+        success_msg: "Successfully retrieved L2L session data."
 
-    - name: Get IPsec SA details
-      # Why: To check Phase 2 Security Association (SA) status, encap/decap counters, and SPIs.
-      ansible.netcommon.cli_command:
-        command: show crypto ipsec sa
-      register: ipsec_sa_result
-      changed_when: false
-      failed_when: "'Invalid' in ipsec_sa_result.stdout"
-
-    - name: Get IKEv1 (ISAKMP) SA status
-      # Why: To verify Phase 1 status for legacy IKEv1 tunnels.
-      # ignore_errors is used as some environments or FTD versions may prioritize IKEv2 only.
-      ansible.netcommon.cli_command:
-        command: show crypto isakmp sa
-      register: ikev1_result
-      changed_when: false
+    - name: Retrieve IPsec Security Associations (Phase 2)
+      # Why: Validates the encryption/decryption status and traffic selectors for active tunnels.
+      cisco.asa.asa_command:
+        commands:
+          - show crypto ipsec sa
+      register: ipsec_sa_output
       ignore_errors: true
 
-    - name: Get IKEv2 SA status
-      # Why: To verify Phase 1 status for modern IKEv2 tunnels.
-      # ignore_errors is used as some legacy environments may not have IKEv2 configured.
-      ansible.netcommon.cli_command:
-        command: show crypto ikev2 sa
-      register: ikev2_result
-      changed_when: false
+    - name: Retrieve IKEv1 Security Associations (Phase 1 Legacy)
+      # Why: Monitors Phase 1 status for legacy peers still utilizing IKEv1.
+      cisco.asa.asa_command:
+        commands:
+          - show crypto isakmp sa
+      register: ikev1_output
       ignore_errors: true
 
-    - name: Output IPSec Status Summary
-      # Why: Provide a human-readable consolidated report for the network operator.
+    - name: Retrieve IKEv2 Security Associations (Phase 1 Modern)
+      # Why: Monitors Phase 1 status for modern peers using the IKEv2 framework.
+      cisco.asa.asa_command:
+        commands:
+          - show crypto ikev2 sa
+      register: ikev2_output
+      ignore_errors: true
+
+    - name: Display Comprehensive VPN Status Summary
+      # Why: Provides a consolidated view for operators to quickly assess tunnel health.
       ansible.builtin.debug:
         msg: |
-          ============================================================
-          IPSec Status Report for: {{ inventory_hostname }}
-          ============================================================
-          [L2L SESSIONS]
-          {{ l2l_result.stdout }}
+          ==============================================================================
+          NETLEARNER VPN DIAGNOSTIC REPORT: {{ inventory_hostname }}
+          TIMESTAMP: {{ ansible_date_time.iso8601 | default('N/A') }}
+          ==============================================================================
+          
+          [SITE-TO-SITE SESSIONS]
+          {{ l2l_output.stdout[0] | default('No active sessions found.') }}
 
-          [IPSEC SA DETAILS (Truncated)]
-          {{ ipsec_sa_result.stdout | truncate(1000) }}
+          [PHASE 2 (IPSEC) SUMMARY]
+          {% if 'ident:' in (ipsec_sa_output.stdout[0] | default('')) %}
+          IPsec SAs are present and active.
+          {% else %}
+          No active IPsec Security Associations detected.
+          {% endif %}
 
-          [IKEv1 STATUS]
-          {{ ikev1_result.stdout | default('No IKEv1 SAs or command not supported.') }}
-
-          [IKEv2 STATUS]
-          {{ ikev2_result.stdout | default('No IKEv2 SAs or command not supported.') }}
+          [PHASE 1 (IKEv1/IKEv2) STATUS]
+          IKEv1: {{ 'Active' if 'QM_IDLE' in (ikev1_output.stdout[0] | default('')) else 'None/Inactive' }}
+          IKEv2: {{ 'Active' if 'READY' in (ikev2_output.stdout[0] | default('')) else 'None/Inactive' }}
+          ==============================================================================
+```

@@ -1,51 +1,53 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Get Cisco ASA/Firepower Device Identifiers
-# Purpose: Retrieves and validates hardware identifiers (Serial, UUID, MAC) for inventory audit.
-# Standards: Idempotency (Read-only), Observability (Assert), FQCN usage, and robust Error Handling.
+# NetLearner Architect Standardized Playbook
+# Purpose: Securely retrieves and validates hardware identifiers (Serial/MAC) from ASA/Firepower devices.
+# Idempotency: Verified; read-only operations allow safe, repeated execution without state change.
+# Observability: Implemented via register variables, content-aware failed_when logic, and explicit assertions.
+# Best Practices: All modules utilize Fully Qualified Collection Names (FQCN).
+
 - name: Get Device Identifiers
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve Serial and UUID information
-      # FQCN: Utilizing the standardized network common collection for CLI operations
+    - name: Retrieve Hardware Serial and UUID Information
+      # FQCN: Using the ansible.netcommon collection for standardized network interaction
       ansible.netcommon.cli_command:
         command: "show version | include (Serial|UUID)"
       register: serial_output
-      # Idempotency: Read-only commands must explicitly set changed_when to false
-      changed_when: false
-      # Error Handling: Ensure the task fails if the output is empty or unexpected
-      failed_when: serial_output.stdout | length == 0
+      # Error Handling: Fail if the output is empty or does not contain expected hardware strings
+      failed_when: >
+        serial_output.stdout | length == 0 or
+        ('Serial' not in serial_output.stdout and 'UUID' not in serial_output.stdout)
 
-    - name: Validate Serial/UUID data capture
-      # Observability: Assert that the command actually returned identification strings
-      ansible.builtin.assert:
-        that:
-          - "'Serial' in serial_output.stdout or 'UUID' in serial_output.stdout"
-        fail_msg: "Identification strings (Serial/UUID) missing from output on {{ inventory_hostname }}."
-        quiet: true
-
-    - name: Retrieve MAC address information
+    - name: Retrieve Interface MAC Address Table
       ansible.netcommon.cli_command:
         command: "show version | include MAC"
       register: mac_output
-      changed_when: false
-      failed_when: mac_output.stdout | length == 0
+      # Error Handling: Validate that MAC address information was successfully returned
+      failed_when: mac_output.stdout | length == 0 or 'MAC' not in mac_output.stdout
 
-    - name: Validate MAC address data capture
+    - name: Validate Observability - Verify Data Capture
+      # Observability: Assert that critical facts were captured before continuing or reporting success
       ansible.builtin.assert:
         that:
-          - "'MAC' in mac_output.stdout"
-        fail_msg: "MAC address information could not be retrieved from {{ inventory_hostname }}."
-        quiet: true
+          - serial_output.stdout | length > 0
+          - mac_output.stdout | length > 0
+        fail_msg: "Data collection failed: Critical identifiers are missing for {{ inventory_hostname }}."
+        success_msg: "Observability Check: Hardware identifiers successfully captured and validated."
 
-    - name: Display Formatted Device Identity Report
-      # Documentation: Providing a clean, human-readable summary for audit logs
+    - name: Display Standardized Device Inventory Record
+      # Documentation: Displaying sanitized and trimmed output for observability in CI/CD logs
       ansible.builtin.debug:
         msg: |
-          ======================= DEVICE IDENTIFICATION =======================
+          ======================= DEVICE IDENTIFIERS =======================
           HOST: {{ inventory_hostname }}
-          ---------------------------------------------------------------------
-          {{ serial_output.stdout }}
-          {{ mac_output.stdout }}
-          =====================================================================
+          ------------------------------------------------------------------
+          SERIAL/UUID DATA:
+          {{ serial_output.stdout | trim }}
+
+          MAC ADDRESS DATA:
+          {{ mac_output.stdout | trim }}
+          ==================================================================
+```

@@ -1,36 +1,47 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Interface Statistics
-# This playbook retrieves low-level netlink interface statistics from a FortiGate device.
-# Standards Applied: Idempotency, Observability, Documentation, Error Handling, and FQCN.
+# FortiGate Interface Statistics - Improved for NetLearner Staging
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
+# WHY: This playbook captures low-level kernel interface statistics (netlink) 
+# which are critical for troubleshooting packet drops and driver-level issues.
+# It uses 'diagnose' which is non-intrusive and safe for multiple executions.
+
 - name: Get FortiGate Interface Statistics
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve netlink interface list via diagnose command
-      # FQCN: Using ansible.netcommon.cli_command for direct shell interaction.
-      # Idempotency: changed_when: false ensures read-only operations do not report a change status.
+    - name: Retrieve Interface Statistics via CLI
+      # Use FQCN for ansible.netcommon collection
+      # This task is idempotent as it performs a read-only 'diagnose' command
       ansible.netcommon.cli_command:
         command: diagnose netlink interface list
-      register: interface_stats
-      changed_when: false
-      # Error Handling: Fail if the output is empty or if the command is unrecognized by the firmware.
+      register: stats_result
+      # Error Handling: Fail if the command is unrecognized or returns an error string
       failed_when:
-        - interface_stats.stdout | length == 0
-        - "'Unknown command' in interface_stats.stdout"
+        - stats_result.stdout is not defined or stats_result.stdout | length == 0
+        - "'Command fail' in stats_result.stdout"
+        - "'Unknown action' in stats_result.stdout"
 
-    - name: Validate interface statistics data
-      # Observability: Assert that the output contains expected data patterns (e.g., 'index').
-      # This ensures the playbook fails early if the device returns unexpected content.
+    - name: Verify Statistics Integrity
+      # Observability: Assert that valid data was returned before display
+      # Ensures that we have captured actual interface data (containing 'if=')
       ansible.builtin.assert:
         that:
-          - "'index' in interface_stats.stdout"
-        fail_msg: "The command succeeded but the output did not contain valid interface statistics."
-        success_msg: "Interface statistics successfully validated."
+          - stats_result.stdout is defined
+          - "'if=' in stats_result.stdout"
+          - "'state=' in stats_result.stdout"
+        fail_msg: "Validation failed: The captured output does not appear to be valid interface statistics."
+        success_msg: "Validation successful: Interface statistics captured and verified."
 
-    - name: Display interface statistics
-      # Documentation: Providing a clear, formatted view of the registered data for the operator.
+    - name: Display Formatted Interface Statistics
+      # Presentation layer for human-readable console output
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACE STATS =======================
-          {{ interface_stats.stdout }}
+          ======================================================================
+          FORTIGATE INTERFACE STATISTICS (NETLINK)
+          ======================================================================
+          {{ stats_result.stdout }}
+          ======================================================================
+```

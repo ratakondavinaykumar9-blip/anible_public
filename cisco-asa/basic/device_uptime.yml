@@ -1,32 +1,33 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Cisco ASA/Firepower Uptime Audit
-# This playbook retrieves the current system uptime for network devices. 
-# It is inherently idempotent as it performs read-only operations.
-# Standards: FQCN, Observability, and Robust Error Handling.
-
-- name: Retrieve and Validate Device Uptime
+# NetLearner Architect - Standardized Uptime Retrieval
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
+- name: Get Network Device Uptime
   hosts: asa_firepower
-  gather_facts: false  # Facts are not required for CLI-based retrieval, improving performance.
+  gather_facts: false # Why: Facts are not required for this task; disabling improves execution speed.
 
   tasks:
-    - name: Retrieve uptime information from the device
-      # Using Fully Qualified Collection Name (FQCN) for reliability.
+    - name: Retrieve system uptime via CLI
+      # Why: FQCN used to ensure explicit module resolution and future-proofing.
       ansible.netcommon.cli_command:
         command: "show version | include (uptime|Uptime)"
-      register: uptime_raw
-      # Error Handling: Explicitly fail if the command execution fails or returns empty output.
-      failed_when: 
-        - uptime_raw.failed or uptime_raw.stdout | length == 0
+      register: uptime_result
+      # Why: Error Handling - Verify command execution returned data to prevent silent failures.
+      failed_when:
+        - uptime_result.stdout | length == 0
+        - "'Invalid' in uptime_result.stdout"
 
-    - name: Validate uptime output format
-      # Observability: Ensure the registered output contains expected uptime keywords.
+    - name: Validate uptime response
+      # Why: Observability - Asserting the presence of 'uptime' keyword to confirm valid output retrieval.
       ansible.builtin.assert:
         that:
-          - "uptime_raw.stdout is search('uptime', ignorecase=true)"
-        fail_msg: "Unexpected output format. Uptime string not found in 'show version'."
-        success_msg: "Uptime information successfully validated."
+          - "'uptime' in uptime_result.stdout or 'Uptime' in uptime_result.stdout"
+        fail_msg: "Device {{ inventory_hostname }} did not return valid uptime information."
+        quiet: true
 
-    - name: Display the system uptime
-      # Final reporting of the captured and validated data.
+    - name: Display device uptime
+      # Why: Documentation - Presenting the final validated state to the automation operator.
       ansible.builtin.debug:
-        msg: "Uptime: {{ uptime_raw.stdout | trim }}"
+        msg: "Uptime for {{ inventory_hostname }} is: {{ uptime_result.stdout | trim }}"
+```

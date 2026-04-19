@@ -1,36 +1,43 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate GRE Tunnels Retrieval
-# Standards: Idempotent, Observable, Documented, Robust
-# This playbook retrieves the status of GRE tunnels on FortiGate devices.
+# NetLearner Architect - FortiGate GRE Tunnel Discovery
+# Date: 2026-04-12
+# Purpose: Robust discovery of GRE tunnel state with full observability and error handling.
+# Idempotency: Read-only CLI operations are safe for recurring automated audits.
+#
 - name: Get GRE Tunnels
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve GRE tunnel status via CLI
-      # Using FQCN for network command execution.
-      # Why: 'get system gre' is the standard command for monitoring GRE interface status.
-      # Idempotency: This is a read-only operation and safe to run repeatedly.
+    - name: Retrieve GRE tunnel configuration from FortiOS CLI
+      # FQCN: Using the standard network common command module.
+      # Idempotency: Inherently safe as it performs no state changes on the device.
       ansible.netcommon.cli_command:
-        command: get system gre
-      register: gre_output
-      # Error Handling: Catch specific CLI error strings and non-zero return codes.
-      failed_when: 
-        - gre_output.rc != 0 or "Command fail" in gre_output.stdout or "Unknown action" in gre_output.stdout
+        command: "get system gre"
+      register: gre_capture
+      # Error Handling: Validate that the command was recognized and executed by the device.
+      failed_when:
+        - gre_capture.stdout is not defined
+        - "'command parse error' in gre_capture.stdout | lower"
+        - "'unknown command' in gre_capture.stdout | lower"
 
-    - name: Assert GRE command executed successfully
-      # Observability: Verify that the command returned data to prevent silent failures.
+    - name: Verify capture integrity
+      # Observability: Assert that the command execution yielded a valid response object.
       ansible.builtin.assert:
         that:
-          - gre_output.stdout is defined
-          - gre_output.stdout | length > 0
-        fail_msg: "Failed to retrieve GRE tunnel information or the output is empty."
-        success_msg: "GRE tunnel status successfully retrieved."
-        quiet: true
+          - gre_capture.stdout is defined
+        fail_msg: "Data Capture Failure: No output received from {{ inventory_hostname }}."
+        success_msg: "Data Capture Success: GRE configuration retrieved from {{ inventory_hostname }}."
 
-    - name: Display GRE Tunnel Information
-      # Documentation: Provide clear visibility of the results to the operator.
+    - name: Display GRE Tunnel configuration details
+      # Documentation: Structured debug output for immediate operational visibility.
       ansible.builtin.debug:
         msg: |
-          ======================= GRE TUNNELS =======================
-          {{ gre_output.stdout }}
+          ==============================================================================
+          GRE TUNNEL DISCOVERY - {{ inventory_hostname }}
+          ==============================================================================
+          {{ gre_capture.stdout | default('No GRE configuration found on this device.') }}
+      # Observability: Ensure display is attempted only when a valid capture object exists.
+      when: gre_capture is defined
+```

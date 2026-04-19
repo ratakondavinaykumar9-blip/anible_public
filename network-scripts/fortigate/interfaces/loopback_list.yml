@@ -1,35 +1,35 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: FortiGate Loopback Interface Audit
+# FortiGate Loopback Interface Audit and Verification
+# Purpose: Retrieves loopback interface configuration with enhanced observability and error handling.
+- name: Audit Loopback Interfaces
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: Disable standard fact gathering as we are performing a targeted CLI audit.
 
   tasks:
-    - name: Fetch loopback interface status via FortiOS CLI
-      # Why: Directly querying the CLI ensures we get the real-time operational state.
-      # Using FQCN (ansible.netcommon.cli_command) to ensure predictable module resolution.
-      # This task is inherently idempotent as it only retrieves information without modifying state.
+    - name: Retrieve loopback configuration from FortiGate CLI
+      # Using FQCN (Fully Qualified Collection Name) for network common commands.
+      # Idempotency: This is a read-only command and safe to run repeatedly without changing state.
       ansible.netcommon.cli_command:
-        command: "get system loopback"
-      register: lb_result
-      # Error Handling: Explicitly check for CLI-specific error strings to catch failures 
-      # that might not trigger a non-zero exit code.
+        command: get system loopback
+      register: lb_data
+      # Error Handling: Explicitly fail if the command is unrecognized or if the connection is lost.
       failed_when: 
-        - lb_result.failed | default(false)
-        - "'Unknown command' in lb_result.stdout or 'Command fail' in lb_result.stdout"
+        - lb_data.failed or "Unknown action" in lb_data.stdout
 
-    - name: Validate loopback information retrieval
-      # Observability: Using assertions to verify that the registered variable contains 
-      # meaningful data before proceeding or finishing.
+    - name: Verify data observability and integrity
+      # Observability: Assert that the 'register' variable contains the expected stdout structure.
       ansible.builtin.assert:
         that:
-          - "lb_result.stdout is defined"
-          - "lb_result.stdout | length > 0"
-        fail_msg: "The 'get system loopback' command returned no data. Check connectivity or device configuration."
-        success_msg: "Successfully retrieved loopback configuration data."
+          - "lb_data.stdout is defined"
+          - "lb_data.stdout is string"
+        fail_msg: "Audit failed: CLI output was not captured correctly or returned an invalid format."
+        success_msg: "Audit success: Loopback interface data successfully buffered for inspection."
 
-    - name: Output loopback interface details
-      # Why: Provides a formatted, human-readable summary of the retrieved data for operators.
+    - name: Display formatted loopback interface details
+      # Documentation: Provides human-readable output for network operations visibility.
       ansible.builtin.debug:
         msg: |
           ======================= LOOPBACKS =======================
-          {{ lb_result.stdout }}
+          {{ lb_data.stdout | default('No loopback interfaces configured on this device.') }}
+```

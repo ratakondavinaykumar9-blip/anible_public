@@ -1,37 +1,42 @@
----
-# Cisco ASA Queue Statistics Retrieval
-# This playbook gathers operational queue information from ASA/Firepower firewalls.
-# Adheres to NetLearner standards for idempotency, observability, and error handling.
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Staging: Queue Information Gathering
+# This playbook retrieves interface queue statistics from Cisco ASA/Firepower devices.
+# Visibility into queue depths is critical for identifying congestion and packet drops.
 
-- name: Get Queue Info
+- name: Retrieve and Validate Queue Information
   hosts: asa_firepower
-  gather_facts: no
+  gather_facts: false
+  # Using network_cli connection for optimized performance with network modules.
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve interface queue statistics
-      # FQCN: Using ansible.netcommon.cli_command for standardized CLI interaction
+    - name: Execute 'show queue' command
+      # Why: Monitoring hardware/software queue depth is essential for diagnostic telemetry.
+      # This task is inherently idempotent as it only retrieves state without modification.
       ansible.netcommon.cli_command:
         command: show queue
-      register: queue_data
-      # Idempotency: Mark as unchanged since 'show' is a read-only operational command
-      changed_when: false
-      # Error Handling: Catch common Cisco CLI error patterns to prevent false positives
+      register: queue_output
+      # Error Handling: Ensure the task fails if the output contains typical error indicators.
       failed_when:
-        - '"Invalid input" in queue_data.stdout'
-        - '"% Error" in queue_data.stdout'
+        - queue_output.stdout is not defined
+        - "'Invalid input' in queue_output.stdout"
+        - "'% Permission denied' in queue_output.stdout"
 
-    - name: Verify queue data capture success
-      # Observability: Explicitly assert that the output contains data
+    - name: Assert queue data integrity
+      # Observability: Verify that the command returned meaningful data before proceeding.
       ansible.builtin.assert:
         that:
-          - "queue_data.stdout is defined"
-          - "queue_data.stdout | length > 0"
-        fail_msg: "The 'show queue' command returned empty or invalid output. Check device connectivity."
-        quiet: true
+          - "queue_output.stdout | length > 0"
+          - "'Interface' in queue_output.stdout"
+        fail_msg: "Data Integrity Failure: The 'show queue' command returned empty or invalid results."
+        success_msg: "Data Integrity Verified: Queue statistics successfully retrieved."
 
-    - name: Display Formatted Queue Information
-      # Documentation: Providing a clean, human-readable view of the operational state
+    - name: Display formatted queue statistics
+      # Observability: Provide a clear, human-readable summary of the current queue state.
       ansible.builtin.debug:
         msg: |
-          ======================= QUEUE INFO: {{ inventory_hostname }} =======================
-          {{ queue_data.stdout }}
+          ======================= QUEUE TELEMETRY =======================
+          Hostname: {{ inventory_hostname }}
+          Execution Time: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
+          
+          {{ queue_output.stdout }}

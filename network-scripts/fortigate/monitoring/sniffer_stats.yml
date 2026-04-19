@@ -1,43 +1,54 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Packet Sniffer - Enhanced Operational Playbook
-# Standards: Idempotency (read-only), Observability, FQCN, and Error Handling
-- name: FortiGate Packet Sniffer
+# NetLearner Standardized FortiGate Packet Sniffer
+# Purpose: Execute a packet capture on FortiGate firewalls for real-time traffic analysis.
+# Standards: Idempotent (Read-only), Observable (Assertions), Documented (Why-based comments).
+
+- name: FortiGate Packet Sniffer Diagnostics
   hosts: fortigate
   gather_facts: false
   vars:
-    # Centralized variables for easier maintenance and overrides
+    # Traffic filter using tcpdump-like syntax (e.g., 'host 10.0.0.1 and port 443')
     sniffer_filter: "host 192.168.1.1"
+    # Total packets to capture before the command automatically terminates
     sniffer_count: 100
-    sniffer_interface: "any"
-    sniffer_verbose: 4 # Level 4: Interface name, IP header, and timestamps
+    # Verbosity level: 4 (show interface names + headers) is standard for NetLearner troubleshooting
+    sniffer_level: 4
 
   tasks:
-    - name: Execute diagnostic packet sniffer on FortiGate
-      # Use Fully Qualified Collection Name (FQCN) for best practice
-      ansible.netcommon.cli_command:
-        command: "diagnose sniffer packet {{ sniffer_interface }} '{{ sniffer_filter }}' {{ sniffer_verbose }} {{ sniffer_count }} l"
-      register: sniffer_output
-      # Setting changed_when to false ensures the playbook is idempotent (read-only operation)
-      changed_when: false
-      # Error Handling: Catch FortiOS-specific CLI parsing errors
-      failed_when:
-        - sniffer_output.stdout is search("command parse error")
-        - sniffer_output.stdout is search("Unknown action")
-
-    - name: Verify capture execution success
-      # Observability: Assert that output was captured and the task didn't fail silently
+    - name: Validate sniffer parameters for observability
+      # Why: Prevents execution with invalid variables to ensure predictable behavior and fast failure.
       ansible.builtin.assert:
         that:
-          - "sniffer_output.stdout is defined"
-          - "sniffer_output.failed == false"
-        fail_msg: "Packet sniffer command failed or was rejected by the FortiGate CLI."
-        success_msg: "Packet sniffer executed and captured data successfully."
+          - sniffer_count | int > 0
+          - sniffer_filter is defined
+        fail_msg: "Validation Error: sniffer_count must be positive and sniffer_filter must be provided."
 
-    - name: Display formatted sniffer results
-      # Clean documentation and visualization of the diagnostic data
+    - name: Execute packet capture on FortiGate
+      # Why: Performs the diagnostic. This is read-only and does not persist changes, ensuring idempotency.
+      # Note: check_mode is disabled to allow diagnostics to run during validation cycles.
+      ansible.netcommon.cli_command:
+        command: "diagnose sniffer packet any '{{ sniffer_filter }}' {{ sniffer_level }} {{ sniffer_count }}"
+      register: sniffer_raw
+      # Why: FortiOS CLI often returns success (exit 0) even if the sniffer logic fails (e.g., syntax error).
+      failed_when:
+        - sniffer_raw.stdout is not defined or sniffer_raw.stdout | length == 0
+        - "'Command fail' in sniffer_raw.stdout"
+      check_mode: false
+
+    - name: Verify data capture success
+      # Why: Asserts that the sniffer actually caught packets to provide immediate feedback on filter accuracy.
+      ansible.builtin.assert:
+        that:
+          - "'out' in sniffer_raw.stdout or 'in' in sniffer_raw.stdout"
+        fail_msg: "Zero packets captured. Verify that traffic matching '{{ sniffer_filter }}' is active on the firewall."
+
+    - name: Display diagnostic output
+      # Why: Presents the captured packet data in the console for the network engineer.
       ansible.builtin.debug:
         msg: |
-          ======================= SNIFFER OUTPUT ({{ sniffer_interface }}) =======================
-          {{ sniffer_output.stdout }}
-      # Only output if data was actually returned to keep the log clean
-      when: sniffer_output.stdout | length > 0
+          ======================= SNIFFER OUTPUT =======================
+          COMMAND: diagnose sniffer packet any '{{ sniffer_filter }}' {{ sniffer_level }} {{ sniffer_count }}
+          --------------------------------------------------------------
+          {{ sniffer_raw.stdout }}
+```

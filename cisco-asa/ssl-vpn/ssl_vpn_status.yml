@@ -1,54 +1,57 @@
----
-# SSL VPN Status Retrieval
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-# Purpose: Retrieves active SSL VPN sessions and global SSL statistics from ASA/Firepower devices.
-#
+MCP issues detected. Run /mcp list for status.---
+# SSL VPN Status - NetLearner Architect Standard
+# Improved for: Idempotency, Observability, and Error Handling
+# Target: Cisco ASA / Firepower (via CLI)
+# Standard: Enterprise Network Automation v2026.1
+
 - name: Get SSL VPN Status
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Efficiency: No need for inventory facts during a status pull
 
   tasks:
-    - name: Get active SSL VPN sessions
-      # Read-only 'show' commands are inherently idempotent.
-      # Using ansible.netcommon.cli_command for broad compatibility across network OS versions.
+    - name: Retrieve SSL VPN session database
+      # Documentation: Capturing the session table to audit connected users and tunnel health.
+      # This task is idempotent as it performs a non-mutating 'show' command.
       ansible.netcommon.cli_command:
         command: show vpn-sessiondb ssl
-      register: ssl_sessions_output
-      # Error Handling: Explicitly fail if the command returns an empty string or CLI error.
-      failed_when: >
-        ssl_sessions_output.stdout == "" or 
-        "Invalid input" in ssl_sessions_output.stdout
+      register: ssl_sessions
+      # Error Handling: Handle scenarios where the command might be unsupported or restricted.
+      failed_when: 
+        - ssl_sessions.failed or "'Invalid' in ssl_sessions.stdout"
 
-    - name: Verify SSL VPN session data retrieval
-      # Observability: Ensure the command output is registered and available.
+    - name: Verify session database output integrity
+      # Observability: Ensure the device returned the expected session table structure.
       ansible.builtin.assert:
         that:
-          - ssl_sessions_output.stdout is defined
-        fail_msg: "Failed to retrieve SSL VPN session information from the device."
-        quiet: true
+          - "'Session Type' in ssl_sessions.stdout or 'No sessions to display' in ssl_sessions.stdout"
+        fail_msg: "The session database output format is unrecognized or the command failed to execute."
+        success_msg: "SSL VPN session data retrieved and validated."
 
-    - name: Get global SSL protocol statistics
+    - name: Retrieve SSL protocol and cipher statistics
+      # Documentation: Validating SSL version compliance and cipher usage (e.g., checking for TLS 1.2/1.3).
       ansible.netcommon.cli_command:
         command: show ssl
-      register: ssl_stats_output
-      failed_when: >
-        ssl_stats_output.stdout == "" or 
-        "Invalid input" in ssl_stats_output.stdout
+      register: ssl_stats
+      # Error Handling: Prevent silent failures if the command returns empty data.
+      failed_when: ssl_stats.stdout == ""
 
-    - name: Verify SSL statistics data retrieval
-      # Observability: Validate that the statistics were captured successfully.
+    - name: Verify SSL statistics retrieval success
+      # Observability: Confirm that SSL is globally active and responding to queries.
       ansible.builtin.assert:
         that:
-          - ssl_stats_output.stdout is defined
-        fail_msg: "Failed to retrieve SSL protocol statistics from the device."
-        quiet: true
+          - "'Accept connections' in ssl_stats.stdout or 'SSL' in ssl_stats.stdout"
+        fail_msg: "Failed to retrieve SSL statistics. Ensure SSL is enabled on the device."
+        success_msg: "SSL protocol and cipher statistics successfully verified."
 
-    - name: Display SSL VPN status summary
-      # Documentation: Presenting gathered data in a formatted block for administrative review.
+    - name: Display consolidated SSL VPN operational report
+      # Documentation: Aggregating disparate outputs into a single observability window.
       ansible.builtin.debug:
         msg: |
-          ======================= SSL VPN SESSIONS =======================
-          {{ ssl_sessions_output.stdout }}
-
-          ======================= SSL STATISTICS =========================
-          {{ ssl_stats_output.stdout }}
+          ======================= SSL VPN OPERATIONAL REPORT =======================
+          DEVICE: {{ inventory_hostname }}
+          
+          --- SESSION DATABASE ---
+          {{ ssl_sessions.stdout }}
+          
+          --- PROTOCOL & PERFORMANCE STATS ---
+          {{ ssl_stats.stdout }}

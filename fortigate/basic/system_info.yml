@@ -1,41 +1,41 @@
----
-# NetLearner Standardized Playbook: FortiGate System Information
-# Purpose: Retrieves and validates core system metadata from FortiGate devices.
-# Standards: Idempotency, Observability, Error Handling, and FQCN.
-
-- name: Retrieve FortiGate System Metadata
+MCP issues detected. Run /mcp list for status.---
+# FortiGate System Information
+# Improved: 2026-04-12 (NetLearner Architect)
+# Standards: Idempotency, Observability, FQCN, Error Handling
+#
+- name: Get System Info
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute 'get system info' command
-      # Using FQCN for the network common CLI module.
-      # This operation is inherently idempotent as it is a read-only state retrieval.
+    - name: Retrieve system status via CLI
+      # Use Fully Qualified Collection Name (FQCN) for network-common CLI interaction
       ansible.netcommon.cli_command:
-        command: get system info
-      register: fortigate_info
-      # Error Handling: Fail if the output is missing or contains specific failure strings.
+        command: get system status
+      register: info
+      # Idempotency: Read-only commands must not report a 'changed' status
+      changed_when: false
+      # Error Handling: Explicitly fail if the command is unrecognized or returns empty data
       failed_when:
-        - fortigate_info.stdout is not defined
-        - "'Command fail' in fortigate_info.stdout"
-        - "'Unknown action' in fortigate_info.stdout"
+        - info.stdout is not defined
+        - "info.stdout | length == 0"
+        - "'unknown command' in info.stdout | lower"
 
-    - name: Validate System Information Integrity
-      # Observability: Assert that the response contains expected operational markers (e.g., Hostname).
+    - name: Validate telemetry data
+      # Observability: Ensure critical system fields are present before proceeding
       ansible.builtin.assert:
         that:
-          - "fortigate_info.stdout | length > 0"
-          - "'Hostname' in fortigate_info.stdout"
-        fail_msg: "The system info response was empty or malformed."
-        success_msg: "System metadata successfully validated for {{ inventory_hostname }}."
+          - "'Version' in info.stdout"
+          - "'Serial-Number' in info.stdout"
+          - "'Hostname' in info.stdout"
+        fail_msg: "System status retrieval failed or returned incomplete data for {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display Structured System Information
-      # Observability: Formatted output for logging and manual audit trails.
+    - name: Display formatted system info
+      # Observability: Provide structured visibility for manual audit logs
       ansible.builtin.debug:
         msg: |
-          ===========================================================
-          DEVICE: {{ inventory_hostname }}
-          STATUS: SUCCESS
           ======================= SYSTEM INFO =======================
-          {{ fortigate_info.stdout }}
-          ===========================================================
+          Device: {{ inventory_hostname }}
+          Output:
+          {{ info.stdout }}

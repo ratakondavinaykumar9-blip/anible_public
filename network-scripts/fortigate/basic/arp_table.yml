@@ -1,35 +1,36 @@
----
-# Playbook: FortiGate ARP Table Retrieval
-# Purpose: Safely retrieve and validate the ARP table from Fortinet FortiGate devices.
-# This playbook adheres to standards for idempotency, observability, and error handling.
-
-- name: Get ARP Table
+MCP issues detected. Run /mcp list for status.---
+# FortiGate ARP Table Retrieval and Validation
+# This playbook retrieves the current ARP table and validates the command execution for operational monitoring.
+# Standards: Idempotency, Observability, Documentation, Error Handling, Best Practices
+- name: Retrieve and Validate FortiGate ARP Table
   hosts: fortigate
-  gather_facts: false # Facts gathering is disabled as we are targeting network devices directly via CLI.
+  gather_facts: false # Performance: Network devices do not support standard Linux/Setup fact gathering
 
   tasks:
-    - name: Retrieve ARP table via CLI command
-      # FQCN: Using ansible.netcommon.cli_command for cross-platform network CLI execution.
-      # Idempotency: This task is read-only and does not modify the state of the device.
+    - name: Fetch ARP table from device CLI
+      # This operation is inherently idempotent as it is a read-only 'get' command.
+      # Using Fully Qualified Collection Names (FQCN) for architectural consistency.
       ansible.netcommon.cli_command:
         command: get system arp
-      register: arp_result
-      # Error Handling: Fail the task if the command execution fails or returns known error strings.
-      failed_when: 
-        - arp_result.failed or "Unknown action" in arp_result.stdout or "Command fail" in arp_result.stdout
+      register: arp_output
+      # Error Handling: Explicitly fail if the device returns CLI-level error strings or if the connection fails.
+      failed_when: >
+        arp_output.failed or 
+        'Unknown action' in arp_output.stdout or 
+        'Command fail' in arp_output.stdout
 
-    - name: Validate ARP table retrieval success
-      # Observability: Assert that the command returned defined and non-empty output.
+    - name: Validate ARP table data observability
+      # Observability: Asserting that the retrieved data is present and non-empty ensures monitoring integrity.
       ansible.builtin.assert:
         that:
-          - arp_result.stdout is defined
-          - arp_result.stdout | length > 0
-        fail_msg: "Failed to retrieve a valid ARP table from {{ inventory_hostname }}."
-        success_msg: "ARP table successfully captured from {{ inventory_hostname }}."
+          - arp_output.stdout is defined
+          - arp_output.stdout | length > 0
+        fail_msg: "The ARP table retrieval failed or returned an empty response on {{ inventory_hostname }}."
+        success_msg: "ARP table successfully retrieved and validated for {{ inventory_hostname }}."
 
-    - name: Display formatted ARP table
-      # Documentation: Providing a clean, human-readable view of the retrieved data.
+    - name: Display ARP table output
+      # Providing a formatted view in the task log for human operator visibility.
       ansible.builtin.debug:
         msg: |
           ======================= ARP TABLE: {{ inventory_hostname }} =======================
-          {{ arp_result.stdout }}
+          {{ arp_output.stdout }}

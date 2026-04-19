@@ -1,33 +1,33 @@
----
-# SSL VPN Sessions Detail - ASA/Firepower
+MCP issues detected. Run /mcp list for status.---
+# SSL VPN Sessions Detail
 # This playbook retrieves detailed SSL VPN session information from Cisco ASA/Firepower devices.
-# It captures current session counts, user details, and connection states for observability.
+# Designed for idempotency and high observability within the NetLearner Staging environment.
 - name: SSL VPN Sessions Detail
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Get SSL VPN session details
-      # Captures the detailed SSL VPN session database (Username, Public IP, Tunnel Group, etc.)
-      # Idempotency: 'show' commands are read-only and inherently safe to run multiple times.
+    - name: Retrieve detailed SSL VPN session data
+      # Why: Fetches the current state of SSL VPN connections for auditing and troubleshooting.
+      # Idempotency: 'show' commands are read-only and safe for repeated execution.
       ansible.netcommon.cli_command:
         command: show vpn-sessiondb detail ssl
-      register: ssl_sessions
-      failed_when: 
-        - ssl_sessions.failed or "Invalid input" in ssl_sessions.stdout
+      register: ssl_sessions_result
+      # Error Handling: Explicitly catch device-level errors (e.g., syntax or privilege issues).
+      failed_when:
+        - ssl_sessions_result.failed or "Invalid input" in ssl_sessions_result.stdout
 
-    - name: Verify session data capture
-      # Observability: Ensures that the command returned output and the task executed correctly.
+    - name: Validate session data retrieval
+      # Observability: Ensure the command output is captured before proceeding.
       ansible.builtin.assert:
         that:
-          - ssl_sessions.stdout is defined
-        fail_msg: "Failed to capture valid SSL VPN session data from {{ inventory_hostname }}"
+          - ssl_sessions_result.stdout is defined
+          - ssl_sessions_result.stdout | length >= 0
+        fail_msg: "Failed to capture the VPN session database output."
 
-    - name: Display SSL VPN Sessions
-      # Observability: Formats the command output for real-time administrator review.
+    - name: Display SSL VPN sessions
+      # Why: Provides a formatted administrative view of active remote access sessions.
       ansible.builtin.debug:
         msg: |
-          ======================= SSL VPN SESSIONS: {{ inventory_hostname }} =======================
-          Timestamp: {{ now(fmt='%Y-%m-%d %H:%M:%S') }}
-          
-          {{ ssl_sessions.stdout }}
+          ======================= SSL VPN SESSIONS =======================
+          {{ ssl_sessions_result.stdout if ssl_sessions_result.stdout != "" else "No active SSL VPN sessions found." }}

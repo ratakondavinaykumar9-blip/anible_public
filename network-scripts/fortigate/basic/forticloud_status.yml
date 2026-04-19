@@ -1,34 +1,45 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Get FortiCloud Status
-# Purpose: Retrieves and validates the FortiCloud service status from FortiGate devices.
-# This playbook is idempotent as it performs a read-only operation that does not modify device state.
-- name: Get FortiCloud Status
+# FortiGate FortiCloud Connectivity and Service Status Audit
+# Purpose: This playbook verifies the FortiCloud service status to ensure the device is correctly
+# registered and communicating with Fortinet's cloud infrastructure for updates and logging.
+- name: Audit FortiCloud Status
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute command to retrieve FortiCloud service status
-      # Use FQCN (ansible.netcommon.cli_command) for portability and best practices.
+    - name: Retrieve fmupdate service status
+      # Using ansible.netcommon.cli_command for direct CLI interaction.
+      # Read-only operations are inherently idempotent and safe for repeated execution.
       ansible.netcommon.cli_command:
         command: get fmupdate service
-      register: cloud_result
-      # Error Handling: Explicitly fail if the command returns a non-zero exit code or contains failure keywords.
-      failed_when: 
-        - "cloud_result.rc != 0"
-        - "'error' in cloud_result.stdout | lower"
+      register: cloud_status_raw
+      # Error Handling: Fail if the command returns a non-zero exit code or a parsing error string.
+      failed_when:
+        - cloud_status_raw.rc | default(0) != 0
+        - "'command parse error' in cloud_status_raw.stdout"
 
-    - name: Validate that the status output is present and contains expected data
-      # Observability: Assert ensures the retrieved data meets requirements before proceeding.
+    - name: Validate service status response integrity
+      # Observability: Assert that the command returned meaningful FortiCloud information.
       ansible.builtin.assert:
         that:
-          - "cloud_result.stdout is defined"
-          - "cloud_result.stdout | length > 0"
-        fail_msg: "The command returned an empty or invalid response for FortiCloud status."
-        success_msg: "FortiCloud status successfully retrieved and validated."
+          - "'Service' in cloud_status_raw.stdout"
+          - cloud_status_raw.stdout_lines | length > 0
+        fail_msg: "Unexpected output format or empty response from FortiGate."
+        success_msg: "FortiCloud service data successfully retrieved."
 
-    - name: Display the formatted FortiCloud status
-      # Documentation: Provide clear, human-readable output for operational visibility.
+    - name: Display formatted FortiCloud status
+      # Observability: Output the status for immediate visibility and logging during execution.
       ansible.builtin.debug:
         msg: |
-          ======================= FORTICLOUD STATUS =======================
-          {{ cloud_result.stdout }}
+          ======================= FORTICLOUD AUDIT =======================
+          {{ cloud_status_raw.stdout }}
+
+    - name: Verify FortiCloud is enabled
+      # Best Practice: Automate the verification of the desired state (Service Enabled).
+      ansible.builtin.assert:
+        that:
+          - "'Status: Enable' in cloud_status_raw.stdout"
+        fail_msg: "FortiCloud is currently DISABLED or not registered. Please check connectivity."
+        quiet: true
+```

@@ -1,37 +1,43 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NetLearner Architect Standardized Playbook
-# Purpose: Retrieves and validates FortiGate static route configuration.
-# Standards: Idempotency (read-only), Observability (assert/register), FQCN usage.
-# Author: NetLearner Architect (2026-03-15)
+# FortiGate Static Route Inspection Playbook
+# Improved for: Idempotency, Observability, and Error Handling
+# Role: NetLearner Architect (Staging)
 
 - name: Retrieve and Validate FortiGate Static Routes
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Fact gathering skipped to minimize execution time and avoid SSH overhead for local facts
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Execute command to fetch static route configuration
-      # Best Practice: Use Fully Qualified Collection Names (FQCN) for reliability
-      # Idempotency: This is a read-only operation and safe to run multiple times
+    - name: Execute CLI Command to Fetch Static Routes
+      # Why: Using direct CLI retrieval for high-fidelity operational state auditing.
+      # This task is inherently idempotent as it is a read-only operation that does not modify device state.
       ansible.netcommon.cli_command:
         command: "get router static"
-      register: static_output
-      # Error Handling: Ensure the command did not return a CLI error message
-      failed_when: 
-        - static_output.failed | default(false)
-        - "'Command fail' in static_output.stdout or 'Unknown command' in static_output.stdout"
+      register: static_routes_raw
+      # Error Handling: Verify that the response does not contain FortiOS-specific error strings or invalid command markers.
+      failed_when:
+        - static_routes_raw.stdout is not defined
+        - "'error' in static_routes_raw.stdout | lower"
+        - "'invalid' in static_routes_raw.stdout | lower"
+        - "'command not found' in static_routes_raw.stdout | lower"
 
-    - name: Verify successful route retrieval
-      # Observability: Assert that the output is not empty and contains expected data
+    - name: Assert Data Integrity of Routing Table
+      # Observability: Ensure that the output buffer is populated and contains meaningful data.
+      # Why: To prevent silent failures where a connection timeout or buffer clearing might be misinterpreted as a valid empty state.
       ansible.builtin.assert:
         that:
-          - static_output.stdout is defined
-          - static_output.stdout | length > 0
-        fail_msg: "Data retrieval failed or no static routes are configured on the device."
-        success_msg: "Static route data successfully retrieved and validated."
+          - "static_routes_raw.stdout | length > 0"
+        fail_msg: "Critical Failure: The routing table retrieval returned no data or an empty buffer."
+        success_msg: "Data Integrity Verified: Static routing table content successfully captured."
 
-    - name: Display formatted static route data
-      # Documentation: Provide clear, human-readable output for auditing
+    - name: Display Formatted Routing State
+      # Why: Provides human-readable observability for real-time monitoring and log archiving.
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE STATIC ROUTES =======================
-          {{ static_output.stdout }}
+          ======================================================================
+          FORTIGATE STATIC ROUTES - {{ inventory_hostname }}
+          ======================================================================
+          {{ static_routes_raw.stdout }}
+```

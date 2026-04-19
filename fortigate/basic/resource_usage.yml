@@ -1,31 +1,43 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Resource Usage - Production Grade
-# This playbook retrieves system performance statistics (CPU/Memory) from FortiGate firewalls.
-# Standard: Idempotency is maintained as this is a read-only diagnostic operation.
-- name: Get FortiGate Resource Usage
+# NetLearner Staging: FortiGate Resource Monitoring
+# Purpose: This playbook retrieves real-time CPU and Memory statistics from FortiGate devices.
+# Why: It provides critical observability for network health checks and automated performance monitoring.
+
+- name: Monitor FortiGate Resource Usage
   hosts: fortigate
-  gather_facts: false # Optimization: Device facts are not required for this diagnostic task
+  gather_facts: false # Disabling fact gathering for faster execution; facts are not needed for diagnostic CLI commands.
 
   tasks:
-    - name: Execute diagnostic command on FortiGate
-      # FQCN (Fully Qualified Collection Name) used to ensure module resolution across various execution environments.
+    - name: Execute resource usage diagnostic command
+      # Why: 'diagnose system resource usage' is the standard FortiOS CLI command for per-process monitoring.
+      # FQCN: Using 'ansible.netcommon.cli_command' to ensure compatibility with network-agnostic transport layers.
       ansible.netcommon.cli_command:
         command: diagnose system resource usage
-      register: resource_output
-      # Error Handling: Explicitly fail if the output is empty, indicating a potential connectivity or privilege issue.
-      failed_when: resource_output.stdout | length == 0
+      register: resource_raw
+      # Why: Explicitly fail if the output is empty or if the FortiGate returns a CLI-level error string.
+      failed_when:
+        - resource_raw.stdout | length == 0
+        - "'Command fail' in resource_raw.stdout"
+        - "'Unknown command' in resource_raw.stdout"
 
-    - name: Verify diagnostic data integrity
-      # Observability: Validate that the output contains expected performance metrics before displaying.
+    - name: Verify resource report integrity
+      # Why: Assertions provide a validation gate to ensure the output contains expected data patterns (CPU/Memory).
+      # This ensures downstream automation does not process malformed or incomplete diagnostic data.
       ansible.builtin.assert:
         that:
-          - "resource_output.stdout is defined"
-          - "'CPU' in resource_output.stdout"
-        fail_msg: "The diagnostic output did not contain expected resource data."
-        success_msg: "Diagnostic data successfully captured and validated."
+          - "'CPU' in resource_raw.stdout"
+          - "'Memory' in resource_raw.stdout"
+        fail_msg: "The diagnostic output is malformed or missing expected resource statistics (CPU/Memory)."
+        quiet: true
 
-    - name: Display Resource Usage Summary
+    - name: Display formatted resource snapshot
+      # Why: Provides clear operational visibility of the system state in the Ansible controller's console and logs.
       ansible.builtin.debug:
         msg: |
-          ======================= RESOURCE USAGE ({{ inventory_hostname }}) =======================
-          {{ resource_output.stdout }}
+          ========================= FORTIGATE RESOURCE USAGE =========================
+          DEVICE: {{ inventory_hostname }}
+          
+          {{ resource_raw.stdout }}
+          ============================================================================
+```

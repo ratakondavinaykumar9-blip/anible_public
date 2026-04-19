@@ -1,35 +1,36 @@
----
-# Playbook: FortiGate Interface List
-# Description: Retrieves and displays interface status from FortiGate devices.
-# Standards Applied: Idempotency, Observability, Documentation, Error Handling, FQCN.
-- name: Get Interface List
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Interface List Management
+# This playbook retrieves and validates the system interface status from a FortiGate device.
+- name: Get FortiGate Interface List
   hosts: fortigate
-  gather_facts: false # Optimization: Disable standard Linux fact gathering for network devices to improve performance.
+  gather_facts: false # Performance: FortiOS devices do not support standard Ansible fact gathering
 
   tasks:
-    - name: Retrieve system interface list via CLI
-      # Why: Using cli_command provides raw operational status. This is a read-only "get" operation, ensuring idempotency.
-      # FQCN: ansible.netcommon.cli_command is used for cross-platform network CLI interactions.
+    - name: Retrieve interface status via CLI
+      # Best Practice: Use Fully Qualified Collection Names (FQCN)
+      # Idempotency: Operation is read-only; 'changed_when: false' ensures the task remains neutral
       ansible.netcommon.cli_command:
         command: get system interface
       register: intf_result
-      # Error Handling: Ensure the task fails if the command is unrecognized or the connection drops.
+      changed_when: false
+      # Error Handling: Validate return code and check for common CLI execution errors
       failed_when:
-        - intf_result.failed or "command parse error" in intf_result.stdout
+        - intf_result.rc != 0
+        - "'command fail' in intf_result.stdout | lower"
 
-    - name: Verify interface data capture
-      # Observability: Validates that the output is not empty and the variable is correctly populated.
+    - name: Validate interface data integrity
+      # Observability: Ensure the output is not empty and contains expected structural keywords
       ansible.builtin.assert:
         that:
-          - "intf_result.stdout is defined"
-          - "intf_result.stdout | length > 0"
-        fail_msg: "Interface list retrieval failed or returned empty output."
-        quiet: true # Reduces verbosity in the output if the assertion passes.
+          - intf_result.stdout is defined
+          - intf_result.stdout | length > 0
+          - "'interface' in intf_result.stdout | lower or 'type' in intf_result.stdout | lower"
+        fail_msg: "Interface data retrieval failed or returned unexpected content."
+        success_msg: "Interface data successfully validated."
 
-    - name: Display Interface Results
-      # Observability: Formats the captured stdout for human readability.
-      # Idempotency: Debugging tasks do not modify the state of the managed node.
+    - name: Display formatted interface summary
+      # Observability: Provide a clear, human-readable view of the operational state
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACES =======================
+          ======================= INTERFACES [{{ inventory_hostname }}] =======================
           {{ intf_result.stdout }}

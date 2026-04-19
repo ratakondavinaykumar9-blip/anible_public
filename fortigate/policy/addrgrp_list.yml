@@ -1,39 +1,39 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NetLearner Architect - FortiGate Address Group Audit
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-# Auto-improved: 2026-03-15
-# Author: NetLearner Architect
-#
-- name: Get Address Groups from FortiGate
+# FortiGate Address Group Retrieval
+# This playbook retrieves the current address group configuration from FortiGate devices.
+# Improvements focus on idempotency, observability, and robust error handling.
+
+- name: Get FortiGate Address Groups
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve firewall address groups via CLI
-      # Idempotency: Read-only operations are inherently idempotent and safe to run multiple times.
-      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction.
+    - name: Retrieve address groups via CLI
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+      # Idempotency: This is a read-only operation and safe to run repeatedly
       ansible.netcommon.cli_command:
-        command: get firewall addrgrp
-      register: addrgrp_output
-      # Error Handling: Explicitly check for CLI parsing errors or command failures.
+        command: "get firewall addrgrp"
+      register: groups
+      # Error Handling: Ensure we fail if the device returns a CLI error string despite exit code 0
       failed_when:
-        - addrgrp_output.failed or "command parse error" in addrgrp_output.stdout | lower
-      # Documentation: Captures the raw output of the address group configuration for validation.
+        - "groups.rc != 0"
+        - "'Command fail' in groups.stdout"
+        - "'Unknown action' in groups.stdout"
 
-    - name: Verify successful retrieval of group data
-      # Observability: Using assertion to ensure the command returned actual data and not an empty string.
+    - name: Validate retrieval success
+      # Observability: Use assertions to verify that data was actually returned
       ansible.builtin.assert:
         that:
-          - addrgrp_output.stdout is defined
-          - addrgrp_output.stdout | length > 0
-        fail_msg: "The retrieval of address groups from {{ inventory_hostname }} failed or returned no data."
-        success_msg: "Successfully validated address group data retrieval."
+          - "groups.stdout is defined"
+          - "groups.stdout | length > 0"
+        fail_msg: "Address group data retrieval failed or returned empty output."
+        success_msg: "Successfully retrieved address group configuration."
 
-    - name: Display Address Group Configuration
-      # Documentation: Provides a formatted view of the retrieved data for operator visibility.
+    - name: Display address group configuration
+      # Observability: Provide formatted output for manual verification
       ansible.builtin.debug:
         msg: |
-          ==============================================================
-          ADDRESS GROUPS - {{ inventory_hostname }}
-          ==============================================================
-          {{ addrgrp_output.stdout }}
+          ======================= ADDRESS GROUPS =======================
+          {{ groups.stdout }}
+```

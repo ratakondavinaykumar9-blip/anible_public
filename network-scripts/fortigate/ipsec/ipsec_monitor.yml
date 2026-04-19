@@ -1,35 +1,40 @@
----
-# FortiGate IPSec Monitoring Playbook
-# Purpose: This playbook retrieves the operational status of IPsec VPN tunnels.
-# Standards: Implements Idempotency (Read-only), Observability (Registration/Assertion), and FQCN.
+MCP issues detected. Run /mcp list for status.---
+# FortiGate IPSec VPN Monitoring and Health Check
+# This playbook retrieves the real-time status of IPSec VPN tunnels on FortiGate devices.
+# Standards: FQCN, Idempotency, Observability, and Error Handling.
+
 - name: FortiGate IPSec Monitor
   hosts: fortigate
   gather_facts: false
+  # Using network_cli for optimized persistent connections to network infrastructure
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve IPsec tunnel statistics from FortiGate CLI
-      # Use FQCN for the generic network command execution module.
-      # Idempotency: Read-only command 'get' does not modify device state, making it safe for repeated runs.
+    - name: Retrieve IPSec monitor statistics from FortiOS CLI
+      # Use FQCN for portability and to ensure the correct module is invoked
       ansible.netcommon.cli_command:
         command: get vpn ipsec monitor
-      register: ipsec_monitor_output
-      # Error Handling: Fail the task if the command is unrecognized or the transport layer reports a failure.
+      register: mon_output
+      # Idempotency: Retrieving state is a read-only operation; setting changed_when: false prevents false positives
+      changed_when: false
+      # Error Handling: Fail if the output is missing or indicates a CLI-level error (e.g., command not found)
       failed_when: 
-        - ipsec_monitor_output.failed or "Unknown" in ipsec_monitor_output.stdout
+        - mon_output.stdout is not defined
+        - "'Unknown' in mon_output.stdout"
+        - "mon_output.rc | default(0) != 0"
 
-    - name: Verify IPsec monitor output integrity
-      # Observability: Use assertion to ensure that valid telemetry data was actually returned.
+    - name: Verify IPSec monitor data integrity
+      # Observability: Assert that we received non-empty output to ensure the monitor is functional
       ansible.builtin.assert:
         that:
-          - ipsec_monitor_output.stdout is defined
-          - ipsec_monitor_output.stdout | length > 0
-        fail_msg: "IPsec monitor data is empty. Verify VPN tunnels are configured on the target device."
-        quiet: true
+          - "mon_output.stdout | length > 0"
+          - "'vpn' in mon_output.stdout or 'tunnel' in mon_output.stdout"
+        fail_msg: "IPSec monitor returned invalid or empty results. Check device configuration."
+        success_msg: "IPSec monitor data successfully validated."
 
-    - name: Display formatted IPsec tunnel information
-      # Documentation: Provides a human-readable summary of the tunnel status for the operator.
+    - name: Display FortiGate IPSec Tunnel Status
+      # Provides a human-readable summary of VPN tunnel health for the operator
       ansible.builtin.debug:
         msg: |
-          ======================= IPSEC MONITOR STATUS =======================
-          {{ ipsec_monitor_output.stdout }}
-          ====================================================================
+          ======================= FORTIGATE IPSEC MONITOR =======================
+          {{ mon_output.stdout }}

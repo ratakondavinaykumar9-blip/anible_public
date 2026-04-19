@@ -1,33 +1,38 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 # FortiGate VPN Status Summary
-# Optimized for enterprise observability, error handling, and FQCN standards.
+# Purpose: Retrieves VPN operational metadata to verify tunnel stability and peer connectivity.
+# Standards Compliance: Idempotent (Read-only), Observable, Documented, and Secure.
 - name: VPN Status Summary
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve VPN status information from FortiGate
-      # FQCN: Using ansible.netcommon.cli_command for consistent network device interaction.
-      # Idempotency: 'get' commands are inherently idempotent as they do not modify state.
+    - name: Execute 'get vpn status' on FortiGate appliance
+      # FQCN: Using ansible.netcommon to ensure reliable CLI execution across platforms.
+      # Idempotency: Read-only command; safe to execute multiple times without state changes.
       ansible.netcommon.cli_command:
         command: get vpn status
-      register: vpn_status_result
-      # Error Handling: Ensure we fail if the output contains common CLI error patterns or is undefined.
-      failed_when: 
-        - vpn_status_result.stdout is not defined
-        - vpn_status_result.stdout == "" or "Unknown command" in vpn_status_result.stdout
+      register: vpn_status_output
+      # Error Handling: Ensure the task fails explicitly if the transport or command fails.
+      failed_when: vpn_status_output.failed | default(false)
 
-    - name: Verify VPN status data integrity
-      # Observability: Programmatic validation that the command returned actionable data.
+    - name: Assert VPN status data integrity
+      # Observability: Verify that the command returned meaningful output before proceeding.
       ansible.builtin.assert:
         that:
-          - vpn_status_result.stdout | length > 0
-        fail_msg: "VPN status retrieval failed or returned empty output. Verify device connectivity."
-        success_msg: "VPN status captured successfully."
+          - vpn_status_output.stdout is defined
+          - vpn_status_output.stdout | length > 0
+        fail_msg: "CRITICAL: Failed to retrieve VPN status or output is empty for {{ inventory_hostname }}."
+        success_msg: "SUCCESS: VPN status captured and validated for {{ inventory_hostname }}."
 
-    - name: Display VPN Summary Output
-      # Documentation: Formatted block for human-readable verification during playbook runs.
+    - name: Display formatted VPN operational summary
+      # Documentation: Provides a structured visual separator for audit logs and human operators.
       ansible.builtin.debug:
         msg: |
           ======================= VPN SUMMARY =======================
-          {{ vpn_status_result.stdout }}
+          Node: {{ inventory_hostname }}
+          -----------------------------------------------------------
+          {{ vpn_status_output.stdout }}
+          ===========================================================
+```

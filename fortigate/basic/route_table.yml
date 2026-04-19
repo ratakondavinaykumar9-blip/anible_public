@@ -1,38 +1,38 @@
----
-# FortiGate Route Table Retrieval
-# This playbook retrieves the full routing table from a FortiGate device.
-# It follows NetLearner standards for observability, error handling, and FQCN usage.
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect Improved Playbook
+# Purpose: Retrieve and validate the FortiGate routing table for observability and reachability audits.
+# Standards: Idempotent (Read-only), Observable, Documented, Error-handled, FQCN compliant.
 
-- name: Retrieve and Validate FortiGate Route Table
+- name: Retrieve FortiGate Routing Table
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Disabled to reduce execution time; device facts are not required for CLI command execution.
 
   tasks:
-    - name: Get routing table info via CLI
-      # Use FQCN for network operations to ensure cross-version compatibility.
-      # This task is inherently idempotent as it performs a read-only 'get' operation.
+    - name: Fetch routing table data via CLI
+      # Why: Direct CLI access is used to capture the full operational state of the routing table, 
+      # including dynamic routes (OSPF/BGP) and static path selection.
       ansible.netcommon.cli_command:
         command: get router info routing-table all
-      register: routes_result
-      # Basic error handling: Ensure the task fails if the command is not recognized or execution fails.
+      register: routes_output
+      # Error Handling: Ensure the task fails explicitly if the device returns an error message or empty string.
       failed_when: 
-        - routes_result.rc is defined and routes_result.rc != 0
-        - "'Command fail' in routes_result.stdout"
+        - routes_output.stdout == ""
+        - "'Command fail' in routes_output.stdout"
 
-    - name: Validate routing table response
-      # Observability: Use assertions to verify that the output is meaningful and not empty.
-      # Checking for 'routing table' ensures the device returned the expected data structure.
+    - name: Assert routing table observability
+      # Why: Verification step to ensure data integrity before any subsequent automation logic or reporting.
       ansible.builtin.assert:
         that:
-          - routes_result.stdout is defined
-          - routes_result.stdout | length > 0
-          - "'routing table' in routes_result.stdout | lower"
-        fail_msg: "The routing table retrieval returned empty or invalid data."
+          - routes_output.stdout | length > 0
+          - "'Codes:' in routes_output.stdout" # Verifies the characteristic header of a FortiGate route table.
+        fail_msg: "Routing table output is empty or malformed. Verification failed."
         success_msg: "Routing table successfully retrieved and validated."
 
     - name: Display formatted route table
-      # Use FQCN for the debug module to provide visual feedback for operators.
+      # Why: Provides immediate visibility for network engineers during troubleshooting or manual audit runs.
       ansible.builtin.debug:
-        msg: |
-          ======================= FORTIGATE ROUTE TABLE =======================
-          {{ routes_result.stdout }}
+        msg: 
+          - "======================= ROUTE TABLE ======================="
+          - "{{ routes_output.stdout }}"
+
+---

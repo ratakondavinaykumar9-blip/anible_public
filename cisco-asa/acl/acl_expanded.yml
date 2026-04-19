@@ -1,38 +1,45 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Get Expanded Access-List Configuration
-# Purpose: Retrieve the expanded view of ACLs to resolve object-groups into literal IP addresses/ports.
-# Why: Standard 'show access-list' does not resolve groups, making troubleshooting and audits difficult.
-# Idempotency: This is a read-only operation; changed_when is set to false to ensure it is safe for repeated runs.
+# NetLearner Staging: Advanced ACL Expansion & Validation
+# Purpose: Retrieves the expanded state of Cisco ASA/Firepower Access Control Lists.
+# Standards: Idempotency (Read-only), FQCN Usage, Observability, and Error Handling.
 
-- name: Get Expanded ACL
+- name: Get Expanded Access-List State
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Optional variable to filter by a specific ACL name. If empty, all expanded ACLs are retrieved.
+    # Define a specific ACL name to filter results, or leave empty to retrieve all expanded ACLs.
     acl_name: ""
 
   tasks:
-    - name: Execute show access-list expanded command
-      # Use Fully Qualified Collection Name (FQCN) for cross-platform network CLI compatibility.
+    - name: "Retrieve expanded ACL data for: {{ acl_name | default('ALL', true) }}"
+      # FQCN: Using the standard network common command module for cross-platform consistency.
       ansible.netcommon.cli_command:
-        command: "{{ 'show access-list ' + acl_name + ' expanded' if acl_name | length > 0 else 'show access-list expanded' }}"
-      register: expanded_acl_res
-      # Error Handling: Cisco ASA/Firepower CLI may return a success code even if the command fails (e.g., ACL not found).
-      # We check the stdout for common error strings to ensure the task fails appropriately.
+        command: "{{ 'show access-list ' + acl_name + ' expanded' if acl_name else 'show access-list expanded' }}"
+      register: acl_data
+      # Error Handling: Identify failure if the ASA returns syntax errors or missing object warnings.
       failed_when:
-        - expanded_acl_res.failed or "ERROR" in expanded_acl_res.stdout or "Invalid input" in expanded_acl_res.stdout
-      # Best Practice: Show commands are non-mutating and should not report 'changed' status in a report.
+        - acl_data.failed
+        - "'Invalid' in acl_data.stdout or 'not found' in acl_data.stdout"
+      # Idempotency: Explicitly mark as non-changing for audit-friendly execution.
       changed_when: false
 
-    - name: Verify ACL data was retrieved
-      # Observability: Assert that we actually captured output from the device to prevent silent failures.
+    - name: Validate ACL output observability
+      # Observability: Assert that the command returned meaningful content before proceeding.
       ansible.builtin.assert:
         that:
-          - expanded_acl_res.stdout | length > 0
-        fail_msg: "No ACL data was returned. Check if the ACL '{{ acl_name }}' exists or if the device has configured ACLs."
-        quiet: true
+          - acl_data.stdout is defined
+          - acl_data.stdout | length > 0
+        fail_msg: "Data retrieval failed or ACL '{{ acl_name }}' does not contain expanded entries."
+        success_msg: "Expanded ACL data successfully captured and validated."
 
-    - name: Display the expanded ACL entries
-      # Displaying stdout_lines provides better readability in the Ansible console than a single block of text.
+    - name: Display expanded ACL details
+      # Documentation: Providing structured output for operator visibility.
       ansible.builtin.debug:
-        msg: "{{ expanded_acl_res.stdout_lines }}"
+        msg:
+          - "Device: {{ inventory_hostname }}"
+          - "Target ACL: {{ acl_name | default('GLOBAL_EXPANDED', true) }}"
+          - "Content:"
+          - "{{ acl_data.stdout_lines }}"
+      when: acl_data.stdout is defined
+```

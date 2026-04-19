@@ -1,36 +1,38 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Traffic Shaper Configuration Audit
-# Purpose: This playbook retrieves and validates the current traffic shaper configuration.
-# Standards: Idempotency (read-only), Observability (assertions), and FQCN usage.
+# Traffic Shaper Policy Verification
+# This playbook retrieves and validates the Traffic Shaper configuration on FortiGate devices.
+# It adheres to enterprise standards for idempotency, observability, and robust error handling.
 
-- name: Get Traffic Shaper
+- name: Get Traffic Shaper Configuration
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance optimization: Facts are not required for raw CLI retrieval
 
   tasks:
-    - name: Retrieve shaper configuration via CLI
-      # Using FQCN: ansible.netcommon.cli_command for reliable command execution.
-      # Why: 'get' commands provide the operational state for audit purposes.
+    - name: Retrieve shaper status from FortiOS
+      # Using Fully Qualified Collection Name (FQCN) for cross-platform compatibility
       ansible.netcommon.cli_command:
         command: get firewall shaper
       register: shaper_result
-      # Error Handling: Ensure the command didn't fail and didn't return a CLI error.
-      failed_when: 
-        - shaper_result.failed
-        - "'command parse error' in shaper_result.stdout"
+      # Error Handling: Catch specific FortiOS CLI failures that might not return a non-zero exit code
+      failed_when:
+        - shaper_result.failed or "'command parse error' in shaper_result.stdout"
+        - "'Unknown action' in shaper_result.stdout"
 
-    - name: Validate shaper configuration response
-      # Observability: Assert that we received a non-empty response from the device.
+    - name: Verify Shaper Data Integrity
+      # Observability: Explicitly assert that the device returned data to prevent silent automation failures
       ansible.builtin.assert:
         that:
           - "shaper_result.stdout is defined"
           - "shaper_result.stdout | length > 0"
-        fail_msg: "No traffic shaper configuration was found or the command failed."
-        quiet: true
+        fail_msg: "Traffic shaper configuration could not be retrieved or the output is empty."
+        success_msg: "Traffic shaper configuration successfully captured for analysis."
 
     - name: Display Traffic Shaper Details
-      # Observability: Format the output for operator visibility.
+      # Observability: Formatted output for operator visibility during execution
       ansible.builtin.debug:
         msg: |
           ======================= TRAFFIC SHAPER =======================
           {{ shaper_result.stdout }}
+      when: shaper_result.stdout is defined
+```

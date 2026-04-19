@@ -1,41 +1,40 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NAT Global Settings Audit Playbook
-# Purpose: This playbook retrieves and verifies global NAT configuration on Cisco ASA/Firepower devices.
-# Standards: Idempotency (read-only), Observability (assertions), Documentation, Error Handling, and FQCN.
+# NAT Global Settings Audit
+# Purpose: This playbook retrieves and verifies the global NAT configuration
+# on Cisco ASA/Firepower devices to ensure consistency and audit compliance.
+# This operation is inherently idempotent as it performs a read-only query.
 - name: Audit NAT Global Configuration
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve global NAT configuration
-      # Best Practices: Use Fully Qualified Collection Names (FQCN) for reliability
-      # Idempotency: This is a read-only operation and is safe to run multiple times
+    - name: Retrieve global NAT configuration from running-config
+      # Using Fully Qualified Collection Name (FQCN) for explicit module resolution
       ansible.netcommon.cli_command:
         command: show running-config global | include nat
-      register: nat_global_output
-      # Error Handling: Distinguish between "no matches found" and "command execution failure"
+      register: nat_global_result
+      # Error Handling: Catch invalid command syntax or unexpected CLI responses
       failed_when:
-        - nat_global_output.failed
-        - "'Invalid input' in nat_global_output.stderr"
+        - nat_global_result.stdout is not defined
+        - "'Invalid input' in nat_global_result.stdout"
 
-    - name: Verify NAT configuration retrieval success
-      # Observability: Use assertions to ensure the command returned a valid response structure
+    - name: Validate configuration retrieval success
+      # Observability: Assert that the command returned a valid response structure
       ansible.builtin.assert:
         that:
-          - "nat_global_output.stdout is defined"
-        fail_msg: "Failed to retrieve NAT global settings from {{ inventory_hostname }}. Check connectivity or credentials."
-        success_msg: "NAT global settings successfully retrieved for {{ inventory_hostname }}."
+          - nat_global_result.stdout is defined
+        fail_msg: "Failed to retrieve global NAT configuration from {{ inventory_hostname }}"
+        success_msg: "Successfully retrieved global NAT configuration from {{ inventory_hostname }}"
+        quiet: true
 
-    - name: Display NAT Global Settings
-      # Documentation: Provide a clear, formatted output of the current state for audit trails
+    - name: Display NAT Global configuration for operator review
+      # Observability: Providing formatted output for audit logging and manual verification
       ansible.builtin.debug:
         msg: |
-          ===========================================================
-          NAT GLOBAL CONFIGURATION AUDIT
-          ===========================================================
+          ======================= NAT GLOBAL AUDIT =======================
           Device: {{ inventory_hostname }}
-          Execution Time: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
-          
-          Configuration Output:
-          {{ nat_global_output.stdout | default('No global NAT settings found in running-config.') }}
-          ===========================================================
+          Status: Verified
+          Configuration:
+          {{ nat_global_result.stdout | default('No global NAT configuration found.') }}
+```

@@ -1,38 +1,49 @@
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect - ASA/Firepower Temperature Monitoring
+# Version: 2.0 (Improved for Staging)
+# Standards: Idempotency, Observability, FQCN, Error Handling
 ---
-# Temperature Monitoring Playbook for Cisco ASA/Firepower
-# Purpose: Retrieve and validate temperature sensor data to ensure hardware environmental health.
-# Standards: Idempotency (Read-only), Observability (Assert), Best Practices (FQCN).
-
-- name: Monitor Device Temperature
+- name: Monitor System Temperature Sensors
   hosts: asa_firepower
-  gather_facts: false # Facts not required for specific CLI command execution
-
+  gather_facts: false
   tasks:
-    - name: Retrieve temperature data via CLI
-      # Using FQCN for cross-environment consistency and reliable module resolution.
-      # This task is inherently idempotent as it performs a read-only state inspection.
+    - name: Retrieve hardware temperature status
+      # Using FQCN for cross-platform compatibility and clear plugin sourcing
       ansible.netcommon.cli_command:
         command: show temperature
-      register: temp_result
-      # Error Handling: Fail if the command is unrecognized or if the transport layer fails.
+      register: temp_output
+      # Ensure we don't fail silently if the command returns an error string without a non-zero exit code
       failed_when: 
-        - temp_result.failed or "Invalid input" in temp_result.stdout
+        - temp_output.stdout is not defined
+        - "'Invalid input' in temp_output.stdout"
+      # This task is inherently idempotent as it performs a read-only operation (GET)
+      changed_when: false
 
-    - name: Verify temperature output integrity
-      # Observability: Assert that the command returned valid sensor data.
-      # This prevents silent failures where the command succeeds but returns unexpected content.
+    - name: Verify temperature data integrity
+      # Observability: Asserting that we received valid output before attempting to process/display
       ansible.builtin.assert:
         that:
-          - "'Temperature' in temp_result.stdout"
-        fail_msg: "Temperature data not found in command output. Check device hardware status."
-        success_msg: "Temperature data successfully captured and validated for {{ inventory_hostname }}."
+          - temp_output.stdout | length > 0
+          - "'Temperature' in temp_output.stdout or 'Celsius' in temp_output.stdout"
+        fail_msg: "Failed to retrieve valid temperature data from the device."
+        success_msg: "Temperature data successfully retrieved and validated."
 
-    - name: Display Temperature Report
-      # Formatted output for enhanced visibility during manual or automated runs.
+    - name: Display environmental metrics
+      # Formatting output for operator visibility in the automation logs
       ansible.builtin.debug:
-        msg: |
-          ======================= TEMPERATURE STATUS =======================
-          Host: {{ inventory_hostname }}
-          Reported Data:
-          {{ temp_result.stdout }}
-          ==================================================================
+        msg: 
+          - "======================= TEMPERATURE REPORT ======================="
+          - "Host: {{ inventory_hostname }}"
+          - "Status: Data validated"
+          - "Output:"
+          - "{{ temp_output.stdout }}"
+
+    - name: Check for Critical Overheating (Optional/Safety)
+      # Proactive error handling: Flagging potential hardware risks
+      ansible.builtin.set_fact:
+        overheating_detected: "{{ 'Critical' in temp_output.stdout or 'Warning' in temp_output.stdout }}"
+
+    - name: Alert on High Temperature
+      ansible.builtin.debug:
+        msg: "WARNING: High temperature detected on {{ inventory_hostname }}!"
+      when: overheating_detected | bool

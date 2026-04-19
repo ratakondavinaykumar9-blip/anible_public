@@ -1,39 +1,39 @@
----
-# FortiGate Traffic Monitoring - Enhanced Version
-# Purpose: This playbook retrieves and displays real-time interface traffic statistics from FortiGate devices.
-# Standards: Idempotent, Observable, Documented, and FQCN-compliant.
-
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Traffic Monitoring
+# Improved: 2026-04-12
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
 - name: Monitor Traffic
   hosts: fortigate
-  gather_facts: false # Fact gathering is disabled to speed up execution on network devices
+  gather_facts: false
 
   tasks:
-    - name: Retrieve interface traffic statistics via CLI
-      # Using FQCN for cross-platform network CLI execution. 
-      # This task is idempotent as it performs a read-only operation.
+    - name: Get system interface traffic statistics
+      # Best Practice: Use Fully Qualified Collection Name (FQCN)
+      # Documentation: Retrieving live interface counters from the FortiOS CLI
       ansible.netcommon.cli_command:
         command: get system interface traffic
-      register: traffic_output
-      # Error Handling: Ensure the task fails if the output is missing or contains error keywords
-      failed_when: 
-        - traffic_output.stdout is not defined or traffic_output.stdout | length == 0
-        - "'command parse error' in traffic_output.stdout"
+      register: traffic
+      # Idempotency: Read-only 'get' commands must not report as 'changed'
+      changed_when: false
+      # Error Handling: Explicitly fail if the command is rejected or returns an error
+      failed_when: >
+        traffic.stdout == "" or
+        "command parse error" in traffic.stdout or
+        "Unknown action" in traffic.stdout
 
-    - name: Verify that traffic data was successfully captured
-      # Observability: Assert that the command returned the expected structural data
+    - name: Verify traffic data integrity
+      # Observability: Assert that the output is defined and contains data
       ansible.builtin.assert:
         that:
-          - "'Interface' in traffic_output.stdout or 'traffic' in traffic_output.stdout"
-        fail_msg: "The retrieved data does not appear to be a valid traffic report."
-        success_msg: "Traffic statistics successfully captured and validated."
+          - traffic.stdout is defined
+          - traffic.stdout | length > 0
+        fail_msg: "Traffic data is empty or could not be retrieved from {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display traffic monitoring results
-      # Provides structured visibility into the captured operational state
+    - name: Display Traffic Statistics
+      # Observability: Provide a human-readable summary of the retrieved statistics
       ansible.builtin.debug:
         msg: |
-          ==================================================================
-          FORTIGATE TRAFFIC MONITORING REPORT
-          Timestamp: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
-          ==================================================================
-          {{ traffic_output.stdout }}
-          ==================================================================
+          ======================= TRAFFIC MONITORING: {{ inventory_hostname }} =======================
+          {{ traffic.stdout }}

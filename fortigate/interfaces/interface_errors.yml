@@ -1,35 +1,41 @@
----
+MCP issues detected. Run /mcp list for status.---
 # FortiGate Interface Error Diagnostics
-# Purpose: Gathers hardware-level NIC information to identify potential interface errors or drops.
-# Standards: Idempotency (Read-only), Observability (Asserts), FQCN usage, and Error Handling.
-- name: FortiGate Interface Error Audit
+# Purpose: Retrieves hardware-level NIC statistics to identify physical layer issues (CRC, collisions, drops).
+# Standards: Idempotent (Read-only), Observed via Asserts, FQCN compliant.
+# Updated: 2026-04-12
+# Author: NetLearner Architect
+---
+- name: FortiGate Hardware Health Monitoring
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute hardware diagnostic command for NIC statistics
-      # FQCN: Using ansible.netcommon.cli_command for raw diagnostic execution
+    - name: Retrieve hardware NIC statistics
+      # Using FQCN for the network-common CLI module. 
+      # Diagnostic commands are inherently idempotent as they do not modify device state.
       ansible.netcommon.cli_command:
         command: diagnose hardware deviceinfo nic
       register: nic_stats
-      # Idempotency: Read-only commands should never report 'changed' status
-      changed_when: false
-      # Error Handling: Fail if the command explicitly returns an error or fails to execute
+      # Error Handling: Ensure the command was accepted by the FortiOS shell.
       failed_when: 
-        - nic_stats.failed or "Command fail" in nic_stats.stdout
+        - nic_stats.failed 
+        - "'Command fail' in nic_stats.stdout or 'Unknown action' in nic_stats.stdout"
 
     - name: Verify diagnostic data integrity
-      # Observability: Assert that the output is defined and contains data
+      # Observability: Assert that we received a non-empty response before proceeding.
       ansible.builtin.assert:
         that:
-          - nic_stats.stdout is defined
-          - nic_stats.stdout | length > 0
-        fail_msg: "Diagnostic output is empty. Verify device permissions or command availability."
-        success_msg: "Interface diagnostic data successfully captured."
+          - "nic_stats.stdout is defined"
+          - "nic_stats.stdout | length > 0"
+        fail_msg: "The FortiGate returned an empty response for hardware NIC statistics."
+        quiet: true
 
     - name: Display Interface Error Report
-      # Observability: Formatted output for operator visibility
+      # Documentation: Clear messaging for SOC/NOC visibility during automated runs.
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACE ERRORS =======================
+          ======================= HARDWARE NIC DIAGNOSTICS =======================
+          DATE: {{ ansible_date_time.iso8601 | default('N/A') }}
+          HOST: {{ inventory_hostname }}
+          RAW OUTPUT:
           {{ nic_stats.stdout }}

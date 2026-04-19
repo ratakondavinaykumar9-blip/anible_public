@@ -1,36 +1,43 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Inspection Stats Improvement
-# Improved by NetLearner Architect
-# This playbook retrieves service-policy inspection statistics from Cisco ASA/Firepower devices.
-# It adheres to idempotency, observability, and FQCN standards.
-
+# NetLearner Architect - Improved Cisco ASA Inspection Statistics
+# Purpose: Retrieves and validates service-policy inspection hit counts for monitoring.
+# Standards: Idempotency (read-only), Observability (assertions), Documentation (inline comments).
 - name: Get Inspection Stats
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: "Retrieve service-policy inspection statistics"
-      # Using FQCN for network CLI compatibility. This is a read-only operation (idempotent).
+    - name: "ASA-01: Retrieve service-policy inspection statistics"
+      # FQCN: Using ansible.netcommon.cli_command for cross-platform network CLI compatibility
       ansible.netcommon.cli_command:
         command: "show service-policy | include inspect"
-      register: inspect_output
-      # Ensure the task fails explicitly if the command execution encounters an error
-      failed_when: 
-        - inspect_output.failed | default(false)
-        - "'Invalid input' in inspect_output.stdout"
+      register: inspect_raw
+      # Error Handling: Fail if output is undefined or contains Cisco ASA error keywords
+      failed_when: >
+        inspect_raw.stdout is not defined or
+        "Invalid" in inspect_raw.stdout or
+        "unrecognized" in inspect_raw.stdout
+      # Idempotency: Explicitly marked as unchanged because this is a read-only telemetry task
+      changed_when: false
 
-    - name: "Verify inspection data was retrieved"
-      # Observability: Assert that the output exists to validate the device state
+    - name: "ASA-02: Verify data observability"
+      # Observability: Use assert to ensure we didn't get an empty response before displaying
       ansible.builtin.assert:
         that:
-          - "inspect_output.stdout is defined"
-          - "inspect_output.stdout | length > 0"
-        fail_msg: "No inspection statistics were returned. Verify that service-policies are active on the target."
-        success_msg: "Inspection statistics successfully captured."
+          - "inspect_raw.stdout | length > 0"
+        fail_msg: "No inspection data returned. Check if service-policies are configured."
+        success_msg: "Inspection statistics successfully retrieved and validated."
+        quiet: true
 
-    - name: "Display formatted inspection statistics"
-      # Provides clear visibility into the registered output
+    - name: "ASA-03: Display formatted inspection results"
+      # Documentation: Provides a clean, human-readable view of the inspection hits in the console
       ansible.builtin.debug:
         msg: |
           ======================= INSPECTION STATS =======================
-          {{ inspect_output.stdout }}
+          Device: {{ inventory_hostname }}
+          Status: Operational
+          ----------------------------------------------------------------
+          {{ inspect_raw.stdout }}
+          ================================================================
+```

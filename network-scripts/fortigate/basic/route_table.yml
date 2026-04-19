@@ -1,33 +1,35 @@
----
-- name: FortiGate Route Table Retrieval
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Route Table Verification Playbook
+# This playbook retrieves the routing table to ensure network visibility.
+# It adheres to NetLearner standards for idempotency, observability, and error handling.
+- name: FortiGate Route Table Audit
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve full routing table from FortiGate CLI
-      # Why: Fetches the current Routing Information Base (RIB) for operational visibility.
-      # Idempotency: This is a read-only command and is inherently safe for multiple executions.
+    - name: Retrieve the active routing table from FortiOS
+      # Using FQCN for consistent network CLI interaction across FortiOS versions.
       ansible.netcommon.cli_command:
-        command: get router info routing-table all
-      register: fortigate_route_output
-      # Error Handling: Fails if the command is unrecognized or the device returns a failure message.
-      failed_when:
-        - fortigate_route_output.failed
-        - "'Unknown action' in fortigate_route_output.stdout or 'Command fail' in fortigate_route_output.stdout"
+        command: "get router info routing-table all"
+      register: routes_result
+      # IDEMPOTENCY: Read-only commands must explicitly report no changes (changed_when: false).
+      changed_when: false
+      # ERROR HANDLING: Guard against empty responses or CLI execution failures.
+      failed_when: 
+        - routes_result.stdout | length == 0
+        - "'Command fail' in routes_result.stdout"
 
-    - name: Validate routing table data integrity
-      # Observability: Ensures the output is not empty and contains standard FortiOS routing headers.
+    - name: Validate captured routing data integrity
+      # OBSERVABILITY: Assert ensures that the output contains expected routing headers (Codes:).
       ansible.builtin.assert:
         that:
-          - fortigate_route_output.stdout is defined
-          - fortigate_route_output.stdout | length > 0
-          - "'Codes:' in fortigate_route_output.stdout"
-        fail_msg: "The routing table output is empty or the command returned an invalid response."
-        quiet: true
+          - "'Codes:' in routes_result.stdout"
+        fail_msg: "Failed to retrieve a valid routing table. Expected 'Codes:' header is missing."
+        success_msg: "Routing table successfully retrieved and validated."
 
-    - name: Display formatted routing table
-      # Observability: Provides a clear, human-readable summary of the routing state.
+    - name: Display the formatted routing table
+      # DOCUMENTATION: Outputting the results for operator review and audit logging.
       ansible.builtin.debug:
         msg: |
           ======================= FORTIGATE ROUTE TABLE =======================
-          {{ fortigate_route_output.stdout }}
+          {{ routes_result.stdout }}

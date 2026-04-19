@@ -1,40 +1,45 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Software Version Detail
-# Improved according to NetLearner Standards: 2026-03-15
-#
-# Standards Applied:
-# 1. Idempotency: Read-only 'show' command is inherently idempotent.
-# 2. Observability: Registered 'ver_result' and added 'assert' for content verification.
-# 3. Documentation: Clear comments explaining the purpose of each step.
-# 4. Error Handling: 'failed_when' logic to catch CLI-specific errors like "Invalid input".
-# 5. Best Practices: Used Fully Qualified Collection Names (FQCN) throughout.
+# NetLearner Architect Standardized Playbook
+# Purpose: Retrieve and validate the detailed software version from Cisco ASA/Firepower devices.
+# Why: Ensuring correct software version is critical for compliance, security patching, and automation feature support.
+# Idempotency: This playbook is inherently idempotent as it performs non-state-changing 'show' operations.
 
-- name: Get Detailed Software Version
+- name: Get Detailed Version
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: no
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve software version from device
-      # Using FQCN for reliability across different Ansible environments
+    - name: Retrieve software version details via CLI
+      # Use FQCN to ensure compatibility and adhere to Ansible Galaxy standards.
+      # The cli_command module is used for raw command execution on network devices.
       ansible.netcommon.cli_command:
         command: show version
-      register: ver_result
-      # Error handling: Catch common Cisco CLI errors that might not trigger a task failure
-      failed_when:
-        - ver_result.failed or "Invalid input" in ver_result.stdout
-        - "'Error' in ver_result.stdout"
+      register: ver_output
+      # Error Handling: Ensure the command returned a valid, non-empty response.
+      failed_when: 
+        - ver_output.stdout is not defined 
+        - ver_output.stdout | length == 0
 
-    - name: Verify software version output integrity
-      # Observability: Ensure the output contains expected Cisco identifying strings
+    - name: Validate Cisco hardware and software signatures
+      # Observability: Use assertions to verify the device identity and ensure the output is actionable.
+      # This prevents downstream automation from processing data from an incorrect or misconfigured device.
       ansible.builtin.assert:
         that:
-          - "'Cisco' in ver_result.stdout"
-          - "'Software' in ver_result.stdout"
-        fail_msg: "Retrieved output does not appear to be a valid Cisco software version string."
-        success_msg: "Successfully validated Cisco software version output."
+          - "'Cisco' in ver_output.stdout"
+          - "'Adaptive Security Appliance' in ver_output.stdout or 'Firepower' in ver_output.stdout"
+        fail_msg: "Critical Failure: The device output does not contain expected Cisco ASA/Firepower signatures."
+        success_msg: "Device identity and version string successfully validated."
 
-    - name: Display formatted software version details
+    - name: Display formatted software version report
+      # Observability: Output is formatted with headers for clear logging and human-in-the-loop verification.
       ansible.builtin.debug:
         msg: |
-          ======================= DETAILED VERSION =======================
-          {{ ver_result.stdout }}
+          ======================= DETAILED VERSION REPORT =======================
+          DEVICE: {{ inventory_hostname }}
+          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          
+          {{ ver_output.stdout }}
+          =======================================================================
+```

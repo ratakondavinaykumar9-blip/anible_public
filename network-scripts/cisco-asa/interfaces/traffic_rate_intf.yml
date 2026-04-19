@@ -1,34 +1,39 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
+# NetLearner Architect Standardized Playbook: Interface Traffic Rate Retrieval
+# This playbook retrieves real-time traffic statistics from Cisco ASA/Firepower devices.
+# Applied Standards: Idempotency (Read-only), Observability (Assert), Documentation, Error Handling, and FQCN.
 - name: Get Interface Traffic Rates
   hosts: asa_firepower
   gather_facts: false
-  # This playbook is inherently idempotent as it performs read-only monitoring 
-  # and does not modify the device configuration state.
+  # Read-only operation: ensuring the task executes even during --check mode runs.
+  check_mode: false
 
   tasks:
-    - name: Retrieve per-interface traffic statistics from the security appliance
-      # Use Fully Qualified Collection Name (FQCN) for the command module.
-      # We register the output to enable observability and validation in subsequent steps.
+    - name: Retrieve interface traffic statistics via CLI
+      # Utilizing Fully Qualified Collection Name (FQCN) for consistent module resolution.
       ansible.netcommon.cli_command:
         command: show traffic
-      register: traffic_output
-      # Error Handling: Fail the task if the output is empty or indicates a CLI syntax error.
-      failed_when:
-        - traffic_output.stdout | length == 0
-        - "'Invalid input' in traffic_output.stdout"
+      register: traffic_result
+      # Error Handling: Catch device-specific error strings that may not trigger standard failures.
+      failed_when: >
+        traffic_result.failed or
+        "Invalid input" in traffic_result.stdout or
+        "Permission denied" in traffic_result.stdout
 
-    - name: Validate that traffic statistics were successfully captured
-      # Observability: Assert that the output contains expected keywords (e.g., 'interface').
-      # This ensures the playbook doesn't report "success" on garbled or incomplete data.
+    - name: Validate traffic output integrity
+      # Observability: Assert that the device returned a non-empty string to verify data capture.
       ansible.builtin.assert:
         that:
-          - "'interface' in traffic_output.stdout | lower"
-        fail_msg: "The 'show traffic' command did not return expected interface data."
-        success_msg: "Successfully verified the presence of interface traffic statistics."
+          - traffic_result.stdout is defined
+          - traffic_result.stdout | length > 0
+        fail_msg: "The traffic rate data for {{ inventory_hostname }} is missing or inaccessible."
+        quiet: true
 
-    - name: Display formatted traffic rates for operational visibility
-      # Outputting the data for human review.
+    - name: Display captured traffic statistics
+      # Observability: Provide formatted output for administrative review and audit logging.
       ansible.builtin.debug:
         msg: |
-          ======================= TRAFFIC RATES =======================
-          {{ traffic_output.stdout }}
+          ======================= TRAFFIC RATES: {{ inventory_hostname }} =======================
+          {{ traffic_result.stdout }}
+```

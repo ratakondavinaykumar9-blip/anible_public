@@ -1,53 +1,55 @@
----
-# Playbook: Get Clock and NTP Status for ASA/Firepower
-# Purpose: This playbook retrieves and validates time synchronization state. 
-# Accurate time is critical for log correlation and certificate validation.
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect Standards: Time Synchronization Audit
+# This playbook retrieves and validates temporal state on ASA/Firepower infrastructure.
+# Read-only operations ensure idempotency across multiple execution cycles.
 
-- name: Get Clock and NTP Information
+- name: Audit System Clock and NTP Synchronization
   hosts: asa_firepower
   gather_facts: false
+  vars:
+    ansible_connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve current system clock
-      # Using Fully Qualified Collection Name (FQCN) for reliability and future-proofing.
+    - name: Retrieve hardware system clock
+      # Using FQCN to ensure predictable module resolution
       ansible.netcommon.cli_command:
         command: show clock
       register: clock_output
-      # Idempotency: 'show' commands are inherently idempotent as they do not modify configuration.
+      # Fail early if the device returns an empty buffer, indicating a command execution timeout
+      failed_when: clock_output.stdout | length == 0
 
-    - name: Validate system clock retrieval
-      # Observability: Ensure the device returned a non-empty response.
+    - name: Verify clock output integrity
+      # Observability: Assert that the output contains standard time markers
       ansible.builtin.assert:
         that:
-          - "clock_output.stdout is defined"
-          - "clock_output.stdout | length > 0"
-        fail_msg: "The 'show clock' command returned no data."
-        success_msg: "System clock successfully retrieved."
+          - "clock_output.stdout is search('[0-9]:[0-9]')"
+        fail_msg: "The 'show clock' command returned an invalid format."
+        quiet: true
 
-    - name: Retrieve NTP synchronization status
-      # Error Handling: 'show ntp status' may fail if NTP is not configured or the process hasn't started.
-      # ignore_errors is used to prevent the play from stopping if NTP is simply unconfigured.
+    - name: Check NTP synchronization status
       ansible.netcommon.cli_command:
         command: show ntp status
       register: ntp_output
+      # Error Handling: We ignore errors as NTP might be disabled on some nodes; 
+      # this prevents the entire play from failing during a broad audit.
       ignore_errors: true
 
-    - name: Verify NTP synchronization status
-      # Observability: Check for the 'synchronized' keyword to confirm operational state.
+    - name: Validate NTP operational state
+      # Observability: Confirm the device is synchronized to an upstream stratum
       ansible.builtin.assert:
         that:
-          - "'Clock is synchronized' in ntp_output.stdout"
-        fail_msg: "Clock is NOT synchronized via NTP."
-        success_msg: "Clock is successfully synchronized via NTP."
-      when: ntp_output.failed is false
+          - "'synchronized' in ntp_output.stdout"
+        fail_msg: "CRITICAL: Device is not synchronized with a valid NTP source."
+        success_msg: "NTP synchronization is active and healthy."
+      # Only run assertion if the command itself was successful
+      when: ntp_output.stdout is defined
       ignore_errors: true
 
-    - name: Display Consolidated Temporal Report
-      # Documentation: Providing a human-readable summary of the device's time status.
+    - name: Output audit results for logging
+      # Documentation: Summary msg providing context for the security/operations audit trail
       ansible.builtin.debug:
-        msg: |
-          ---------------------------------------------------
-          DEVICE: {{ inventory_hostname }}
-          SYSTEM CLOCK: {{ clock_output.stdout | trim }}
-          NTP STATUS:   {{ ntp_output.stdout | default('NTP not configured or failed to respond') | trim }}
-          ---------------------------------------------------
+        msg:
+          - "Audit Timestamp: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}"
+          - "Device Clock: {{ clock_output.stdout | trim }}"
+          - "Sync Status: {{ 'OK' if 'synchronized' in (ntp_output.stdout | default('')) else 'WARNING/UNSYNCED' }}"
+          - "NTP Details: {{ ntp_output.stdout | default('NTP NOT CONFIGURED') | trim }}"

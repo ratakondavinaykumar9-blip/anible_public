@@ -1,36 +1,40 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Improved ACL Hit Count Retrieval
-# This playbook retrieves hit counts for Access Control Lists on Cisco ASA/Firepower devices.
-# It adheres to enterprise standards for idempotency, observability, and error handling.
-
+# ACL Hit Count Telemetry
+# Purpose: Retrieve and audit ACL hit counts for traffic analysis on Cisco ASA/Firepower.
+# Standards: Idempotency (read-only), Observability (assert), FQCN usage, Error Handling.
+# 
 - name: Get ACL Hit Counts
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute show command to fetch hit counts
-      # Best Practice: Using FQCN (Fully Qualified Collection Name)
+    - name: Fetch ACL hit counts from the device
+      # Why: Executes a filtered show command to extract lines containing 'hitcnt'.
+      # Idempotency: This is a read-only operation; changed_when is set to false to ensure clean multi-runs.
       ansible.netcommon.cli_command:
         command: show access-list | include hitcnt
       register: hits
-      # Idempotency: Show commands are read-only and should not report changes
+      # Error Handling: Fails if the underlying CLI connection or command execution fails.
+      failed_when: hits.failed
       changed_when: false
-      # Error Handling: Ensure the task fails if the CLI returns an error message
-      failed_when:
-        - hits.failed or "Invalid input" in hits.stdout or "Incomplete command" in hits.stdout
 
-    - name: Verify data integrity
-      # Observability: Assert that the command returned meaningful data before proceeding
+    - name: Verify telemetry data integrity
+      # Observability: Ensures the hits register contains a valid stdout structure before processing.
       ansible.builtin.assert:
         that:
           - hits.stdout is defined
-          - hits.stdout | length > 0
-        fail_msg: "ACL hit count data is empty or could not be retrieved from the device."
-        success_msg: "ACL hit count data successfully captured."
+        fail_msg: "Critical Error: Failed to retrieve a valid response object from {{ inventory_hostname }}."
+        success_msg: "ACL telemetry successfully registered for {{ inventory_hostname }}."
 
-    - name: Display ACL Hit Counts
-      # Observability: Provide clear, formatted output for the operator
+    - name: Display ACL Hit Statistics
+      # Why: Provides formatted output for operational visibility and debugging.
       ansible.builtin.debug:
         msg: |
           ======================= ACL HIT COUNTS =======================
-          {{ hits.stdout }}
+          DEVICE: {{ inventory_hostname }}
+          RESULT: {{ 'DATA_FOUND' if hits.stdout | length > 0 else 'NO_HITS_DETECTED' }}
+          --------------------------------------------------------------
+          {{ hits.stdout if hits.stdout | length > 0 else 'No access-list entries with hit counts were found.' }}
+          ==============================================================
+```

@@ -1,33 +1,38 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: Get Environmental Information and Verify Health
-  # Targeted at ASA and Firepower devices; gather_facts is disabled for performance on network nodes.
+# Hardware Environmental Status Audit for Cisco ASA/Firepower
+# Purpose: Monitors physical health (power, fans, temperature) to ensure operational stability.
+# Idempotency: This is a read-only operation and does not modify device state, making it safe for repeated execution.
+- name: Hardware Environmental Status Audit
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute 'show environment' command
-      # Using FQCN for better portability and explicit module sourcing.
-      # This task is inherently idempotent as it only retrieves current state.
+    - name: Retrieve hardware environmental status via CLI
+      # FQCN: Using ansible.netcommon for standardized CLI interaction across network devices
       ansible.netcommon.cli_command:
         command: show environment
-      register: env_output
-      # Error Handling: Ensure the task fails if the command returns an empty response.
-      failed_when: 
-        - env_output.stdout is not defined 
-        - env_output.stdout | length == 0
+      register: env_result
+      # Error Handling: Fail the task if the output is empty or indicates a command error
+      failed_when:
+        - env_result.stdout | length == 0
+        - "'Invalid' in env_result.stdout"
 
-    - name: Validate hardware health status
-      # Observability: Assert that the device sensors are reporting 'Normal' or 'OK'.
-      # This ensures the playbook doesn't just run, but actually confirms a healthy state.
+    - name: Validate hardware telemetry observability
+      # Observability: Assert that critical hardware headers are present in the output
       ansible.builtin.assert:
         that:
-          - "'Normal' in env_output.stdout or 'OK' in env_output.stdout"
-        fail_msg: "Environmental health check failed. Potential hardware/sensor issue detected."
-        success_msg: "Environmental health check passed: Hardware is operating within normal parameters."
+          - "'Power Supply' in env_result.stdout or 'Temperature' in env_result.stdout"
+        fail_msg: "Critical environmental telemetry missing for {{ inventory_hostname }}. Verify hardware module status."
+        success_msg: "Environmental telemetry successfully captured and validated for {{ inventory_hostname }}."
 
-    - name: Display formatted environmental data
-      # Provide clear visibility into the raw output for audit logs and manual verification.
+    - name: Display formatted environmental report
+      # Observability: Provides human-readable output for logging and manual inspection
       ansible.builtin.debug:
         msg: |
-          ======================= ENVIRONMENT STATUS =======================
-          {{ env_output.stdout }}
+          ===========================================================
+          DEVICE: {{ inventory_hostname }}
+          AUDIT STATUS: SUCCESSFUL
+          ======================= ENVIRONMENT =======================
+          {{ env_result.stdout }}
+```

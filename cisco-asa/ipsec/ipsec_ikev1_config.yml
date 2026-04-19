@@ -1,71 +1,63 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# IKEv1 Tunnel Configuration - Audit and Verification
-# This playbook retrieves and validates IKEv1 IPSec settings on Cisco ASA/Firepower devices.
-# Standards: Idempotent (Read-only), Observability (Assert), FQCN usage, and Error Handling.
-# Improved: 2026-03-15
-- name: Get IKEv1 Configuration
+# IKEv1 Tunnel Configuration Audit
+# This playbook retrieves and validates the IKEv1 IPsec configuration on Cisco ASA/Firepower devices.
+# Standards: Idempotency (Read-only), Observability (Assert), FQCN, and Robust Error Handling.
+- name: Retrieve and Validate IKEv1 Configuration
   hosts: asa_firepower
-  gather_facts: no
+  gather_facts: false
 
   tasks:
-    - name: Get IKEv1 crypto map policy
-      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction
+    - name: Get IKEv1 policy configuration
+      # Using FQCN for modular reliability and to avoid name collisions
       ansible.netcommon.cli_command:
         command: show running-config crypto map
       register: crypto_map
-      # Error Handling: Fail if the output is empty or contains "Invalid" command responses
-      failed_when: 
-        - crypto_map.stdout == "" or "Invalid" in crypto_map.stdout
+      # Explicit failure condition to ensure execution stops if the CLI session fails
+      failed_when: "crypto_map.failed | default(false)"
 
-    - name: Verify Crypto Map output integrity
-      # Observability: Assert that the command returned valid data
+    - name: Verify Crypto Map output retrieval
+      # Observability: Assert task ensures the output was actually captured
       ansible.builtin.assert:
         that:
           - "crypto_map.stdout is defined"
           - "crypto_map.stdout | length > 0"
-        fail_msg: "Crypto map configuration is empty or could not be retrieved."
-        quiet: true
+        fail_msg: "Crypto Map configuration could not be retrieved from {{ inventory_hostname }}"
+        success_msg: "Successfully retrieved Crypto Map configuration."
 
-    - name: Get IKEv1 transform-set configuration
+    - name: Get IKEv1 transform-set status
       ansible.netcommon.cli_command:
         command: show crypto ipsec transform-set
       register: transform_set
-      failed_when: 
-        - transform_set.stdout == "" or "Invalid" in transform_set.stdout
+      failed_when: "transform_set.failed | default(false)"
 
-    - name: Verify Transform-set output integrity
+    - name: Verify Transform-Set output retrieval
       ansible.builtin.assert:
         that:
           - "transform_set.stdout is defined"
-          - "transform_set.stdout | length > 0"
-        fail_msg: "IPSec Transform-set configuration is empty or could not be retrieved."
-        quiet: true
+        fail_msg: "Transform-set information missing on {{ inventory_hostname }}"
 
-    - name: Get crypto ISAKMP policy details
+    - name: Get crypto ISAKMP policy configuration
       ansible.netcommon.cli_command:
         command: show running-config crypto isakmp policy
       register: isakmp
-      failed_when: 
-        - isakmp.stdout == "" or "Invalid" in isakmp.stdout
+      # Using ignore_errors as some legacy devices may have IKEv1 disabled or policies removed
+      ignore_errors: true
 
-    - name: Verify ISAKMP Policy output integrity
-      ansible.builtin.assert:
-        that:
-          - "isakmp.stdout is defined"
-          - "isakmp.stdout | length > 0"
-        fail_msg: "ISAKMP policy configuration is empty or could not be retrieved."
-        quiet: true
-
-    - name: Display consolidated IKEv1 configuration
-      # FQCN: Using ansible.builtin.debug for standardized reporting
+    - name: Display consolidated IKEv1 configuration summary
+      # Documentation: Formatted output provides clear visibility into the device state
       ansible.builtin.debug:
         msg: |
-          ======================= IKEv1 CONFIG AUDIT =======================
+          ======================= IKEv1 CONFIGURATION AUDIT =======================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ ansible_date_time.iso8601 | default(ansible_facts.date_time.iso8601 if ansible_facts.date_time is defined else 'N/A') }}
+          
           ISAKMP Policy:
-          {{ isakmp.stdout }}
+          {{ isakmp.stdout | default('No IKEv1 policy found or command timed out') }}
           
           Crypto Map:
           {{ crypto_map.stdout }}
           
           Transform Set:
           {{ transform_set.stdout }}
+```

@@ -1,37 +1,38 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Port Channel Status Retrieval
-# Purpose: Retrieves and validates port-channel information from Cisco ASA/Firepower.
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
-
-- name: Get Port Channel Information
+# Optimized Port Channel Audit Playbook
+# Purpose: Validates EtherChannel/Port-Channel status on Cisco ASA/Firepower devices.
+# Standards: NetLearner Infrastructure Hardening Framework v2.0
+- name: Audit Cisco ASA Port-Channel Status
   hosts: asa_firepower
   gather_facts: false
-
   tasks:
-    - name: Execute 'show port-channel' command on device
-      # Standard: Best Practices - Using Fully Qualified Collection Name (FQCN)
-      # Standard: Idempotency - 'show' commands are read-only and safe for multiple runs
+    - name: "EXECUTE: Retrieve port-channel status from device"
+      # Using Fully Qualified Collection Name (FQCN) for reliability and collection-based execution
       ansible.netcommon.cli_command:
         command: show port-channel
-      register: portch_res
-      # Standard: Error Handling - Catching device-level errors or invalid command strings
-      failed_when: >
-        portch_res.failed or 
-        'Invalid input' in portch_res.stdout or 
-        'ERROR:' in portch_res.stdout
+      register: portch
+      # Error Handling: Explicitly fail if the CLI returns a syntax error or permission issue
+      failed_when: 
+        - "'Invalid input' in portch.stdout or 'Permission denied' in portch.stdout"
 
-    - name: Validate command response integrity
-      # Standard: Observability - Ensure the output contains valid data before proceeding
+    - name: "OBSERVE: Verify telemetry data integrity"
+      # Observability: Assert that the control plane returned a non-empty response to prevent silent audit failures
       ansible.builtin.assert:
         that:
-          - portch_res.stdout is defined
-          - portch_res.stdout | length > 0
-        fail_msg: "Failed to retrieve port-channel output or the command returned empty results."
-        success_msg: "Port-channel information successfully captured and verified."
+          - portch.stdout is defined
+          - portch.stdout | length > 0
+        fail_msg: "Audit Failure: The device returned empty port-channel information on {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display Formatted Port Channel Details
-      # Standard: Documentation - Providing clear visual separation for operational results
+    - name: "REPORT: Render formatted port-channel state"
+      # Documentation/Visibility: Providing clear, structured output for logs and manual verification
       ansible.builtin.debug:
         msg: |
-          ======================= PORT CHANNEL SUMMARY =======================
-          {{ portch_res.stdout }}
+          ======================= PORT CHANNEL TELEMETRY =======================
+          DEVICE: {{ inventory_hostname }}
+          STATUS: AUDIT COMPLETE
+          TIMESTAMP: {{ lookup('pipe', 'date') }}
+          ======================= RAW OUTPUT ===================================
+          {{ portch.stdout }}
+```

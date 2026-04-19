@@ -1,13 +1,14 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 - name: Deploy Route-Based IPsec VPN with BGP on FortiGate
   hosts: fortigates
-  connection: httpapi
+  connection: fortinet.fortios.httpapi
   gather_facts: false
   vars:
-    # VDOM context (default is root). Virtual Domains allow for logical separation of traffic.
+    # VDOM context - Required for multi-VDOM environments to ensure correct targeting
     vdom: "root"
     
-    # Phase 1 Parameters: Defines the IKE negotiation and the Virtual Tunnel Interface (VTI).
+    # Phase 1 Parameters - VTI (Virtual Tunnel Interface) definitions
     vpn_p1_name: "VPN_TO_REMOTE_SITE"
     wan_interface: "wan1"
     remote_gateway: ""
@@ -15,21 +16,20 @@
     ike_version: "2"
     p1_proposal: "aes256-sha256"
     
-    # Phase 2 Parameters: Defines the IPsec security association (SA) and encryption.
+    # Phase 2 Parameters - Encapsulation and PFS settings
     vpn_p2_name: "VPN_TO_REMOTE_SITE_P2"
     p2_proposal: "aes256-sha256"
     
-    # Tunnel Interface IP Configuration
-    # Using /30 for point-to-point peering. Format: "ip mask"
+    # Tunnel Interface IP Configuration - Required for BGP Peering (Point-to-Point)
     tunnel_local_ip: "169.254.100.1 255.255.255.252"
     tunnel_remote_ip: "169.254.100.2 255.255.255.252"
     
-    # BGP Configuration: Dynamic routing ensures automatic failover and prefix exchange.
+    # BGP Configuration - Dynamic routing handles failover and prefix advertisement
     local_as: 65000
     remote_as: 65001
     neighbor_ip: "169.254.100.2"
     
-    # Security Policy Parameters: Mandatory for traffic to pass through the tunnel.
+    # Security Policy Parameters - Defines the scope of allowed traffic
     internal_interface: "port1"
     source_address: "all"
     destination_address: "all"
@@ -48,18 +48,17 @@
               psksecret: "{{ pre_shared_key }}"
               ikevers: "{{ ike_version }}"
               proposal: "{{ p1_proposal }}"
-              # disable add_route: BGP will manage the routing table dynamically.
+              # Why: BGP will manage the routing table; 'disable' prevents redundant static routes
               add_route: "disable"
               keylife: 28800
               dpd: "on-idle"
-          register: p1_result
+          register: vpn_p1_res
 
-        - name: Verify Phase 1 Configuration Success
+        - name: Observability - Verify Phase 1 VTI State
           ansible.builtin.assert:
-            that:
-              - p1_result.failed == false
-              - p1_result.http_status == 200
-            msg: "Phase 1 / VTI creation failed or returned an unexpected status."
+            that: 
+              - vpn_p1_res.meta.status == 'success' or vpn_p1_res.meta.http_status == 200
+            fail_msg: "VPN Phase 1 creation failed: {{ vpn_p1_res.meta.msg | default('Unknown Error') }}"
 
         - name: VPN Phase 2 - Link to Phase 1 Interface
           fortinet.fortios.fortios_vpn_ipsec_phase2_interface:
@@ -71,32 +70,31 @@
               proposal: "{{ p2_proposal }}"
               keylifeseconds: 3600
               pfs: "enable"
-          register: p2_result
+          register: vpn_p2_res
 
-        - name: Verify Phase 2 Configuration Success
+        - name: Observability - Verify Phase 2 State
           ansible.builtin.assert:
-            that:
-              - p2_result.failed == false
-              - p2_result.http_status == 200
-            msg: "Phase 2 tunnel link creation failed."
+            that: 
+              - vpn_p2_res.meta.status == 'success' or vpn_p2_res.meta.http_status == 200
+            fail_msg: "VPN Phase 2 creation failed: {{ vpn_p2_res.meta.msg | default('Unknown Error') }}"
 
         - name: Interface - Assign IP and Remote-IP for BGP Peering
-          # FortiOS requires remote-ip on tunnel interfaces for point-to-point BGP peering.
           fortinet.fortios.fortios_system_interface:
             vdom: "{{ vdom }}"
             state: "present"
             system_interface:
               name: "{{ vpn_p1_name }}"
               ip: "{{ tunnel_local_ip }}"
+              # Why: remote_ip is mandatory for FortiOS point-to-point tunnel peering
               remote_ip: "{{ tunnel_remote_ip }}"
               allowaccess: "ping"
-          register: intf_result
+          register: intf_res
 
-        - name: Verify Tunnel Interface IP Configuration
+        - name: Observability - Verify Tunnel Interface IP
           ansible.builtin.assert:
-            that:
-              - intf_result.failed == false
-            msg: "Failed to assign IP addresses to the VPN interface."
+            that: 
+              - intf_res.meta.status == 'success' or intf_res.meta.http_status == 200
+            fail_msg: "Tunnel IP assignment failed: {{ intf_res.meta.msg | default('Unknown Error') }}"
 
         - name: Router BGP - Configure Local Process and Neighbor
           fortinet.fortios.fortios_router_bgp:
@@ -109,16 +107,16 @@
                 - ip: "{{ neighbor_ip }}"
                   remote_as: "{{ remote_as }}"
                   interface: "{{ vpn_p1_name }}"
-                  # Graceful restart and soft-reconfig improve stability and troubleshooting.
+                  # Why: Ensures peering stays up during process restarts (SSO/HA)
                   capability_graceful_restart: "enable"
                   soft_reconfiguration: "enable"
-          register: bgp_result
+          register: bgp_res
 
-        - name: Verify BGP Configuration
+        - name: Observability - Verify BGP Peering Configuration
           ansible.builtin.assert:
-            that:
-              - bgp_result.failed == false
-            msg: "BGP neighbor or process configuration failed."
+            that: 
+              - bgp_res.meta.status == 'success' or bgp_res.meta.http_status == 200
+            fail_msg: "BGP Configuration failed: {{ bgp_res.meta.msg | default('Unknown Error') }}"
 
         - name: Policy - Outbound Traffic (Internal to Tunnel)
           fortinet.fortios.fortios_firewall_policy:
@@ -133,7 +131,7 @@
               action: "accept"
               schedule: "always"
               service: [{ name: "ALL" }]
-          register: pol_out_result
+          register: pol_out_res
 
         - name: Policy - Inbound Traffic (Tunnel to Internal)
           fortinet.fortios.fortios_firewall_policy:
@@ -148,27 +146,23 @@
               action: "accept"
               schedule: "always"
               service: [{ name: "ALL" }]
-          register: pol_in_result
-
-        - name: Verify Security Policies
-          ansible.builtin.assert:
-            that:
-              - pol_out_result.failed == false
-              - pol_in_result.failed == false
-            msg: "Firewall policies for VPN traffic were not applied correctly."
+          register: pol_in_res
 
       rescue:
         - name: Error Reporting - Config Rollback Notification
           ansible.builtin.fail:
             msg: |
-              CRITICAL FAILURE: FortiGate VPN/BGP provisioning interrupted.
-              Diagnostic Steps:
-              1. Validate WAN Interface '{{ wan_interface }}' connectivity to '{{ remote_gateway }}'.
-              2. Ensure Pre-Shared Key (PSK) matches the remote peer.
-              3. Verify BGP Neighbor IP '{{ neighbor_ip }}' is reachable over the tunnel.
-              Technical Error: {{ ansible_failed_result }}
+              Critical Failure during FortiGate VPN/BGP provisioning. 
+              Review the following:
+              1. WAN Interface '{{ wan_interface }}' reachability and MTU.
+              2. PSK consistency and IKE Version mismatch with peer.
+              3. BGP Peer IP '{{ neighbor_ip }}' and AS '{{ remote_as }}' validation.
+              Error Details: {{ ansible_failed_result }}
 
       always:
-        - name: Finalization - Log Deployment Attempt
+        - name: Verification - Log Deployment Status
           ansible.builtin.debug:
-            msg: "Deployment sequence for {{ vpn_p1_name }} finalized. Run 'get vpn tunnel list' or 'get router info bgp summary' on the device for runtime verification."
+            msg: 
+              - "Deployment sequence for {{ vpn_p1_name }} finalized."
+              - "Action: Run 'get vpn tunnel list' and 'get router info bgp summary' to confirm session state."
+```

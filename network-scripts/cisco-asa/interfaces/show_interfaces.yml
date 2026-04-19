@@ -1,0 +1,153 @@
+MCP issues detected. Run /mcp list for status.```yaml
+---
+# ==============================================================================
+# Playbook: Show All Interface Status and Details
+# ==============================================================================
+# Author: Arjun (OpenClaw) / Refined by NetLearner Architect
+# Version: 1.2.0
+# Last Updated: 2026-03-03
+# Description: Retrieve comprehensive interface status from Cisco ASA/Firepower.
+#              Refined for high observability, idempotency, and error handling.
+#
+# Platforms: Cisco ASA 5500-X, Firepower 2100/4100/9300, FTD
+# Requirements: cisco.asa collection, ansible.netcommon
+# ==============================================================================
+
+- name: Get Interface Status
+  hosts: asa_firepower
+  gather_facts: false
+  connection: ansible.netcommon.network_cli
+
+  vars:
+    # Default values for behavior control
+    output_format: text
+    include_errors: true
+    check_lldp: false
+    output_dir: /tmp/interface_reports
+
+  pre_tasks:
+    # Ensure environment is ready for reporting before touching network devices
+    - name: Ensure output directory exists on controller
+      ansible.builtin.file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+
+    # Gather minimal facts for timestamps and system info used in reporting
+    - name: Gather minimal local facts
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "min"
+
+  tasks:
+    - name: Interface Data Collection Block
+      block:
+        - name: Retrieve structured interface configuration facts
+          cisco.asa.asa_interfaces:
+          register: interfaces_output
+          # Why: This is a read-only fact gathering module; marking changed_when: false ensures idempotency.
+          changed_when: false
+          failed_when:
+            - interfaces_output.failed | default(false)
+            - "'ansible_facts' not in interfaces_output"
+
+        - name: Validate interface data was retrieved
+          ansible.builtin.assert:
+            that:
+              - "interfaces_output.ansible_facts.asa_interfaces is defined"
+              - "interfaces_output.ansible_facts.asa_interfaces | length > 0"
+            fail_msg: "No interface data found for {{ inventory_hostname }}. Device may be unreachable or in an unexpected state."
+            quiet: true
+
+        - name: Get IP address assignments via CLI
+          ansible.netcommon.cli_command:
+            command: show ip address
+          register: ip_addr_output
+          changed_when: false
+
+        - name: Get detailed interface statistics for error analysis
+          ansible.netcommon.cli_command:
+            command: show interface
+          register: interface_stats
+          changed_when: false
+          when: include_errors | bool
+
+        - name: Get LLDP neighbor information if requested
+          ansible.netcommon.cli_command:
+            command: show lldp neighbors
+          register: lldp_neighbors
+          when: check_lldp | bool
+          # Why: LLDP might be disabled globally; ignoring errors prevents playbook failure for non-critical info.
+          ignore_errors: true
+          changed_when: false
+
+        - name: Calculate interface summary metrics
+          ansible.builtin.set_fact:
+            interface_count: "{{ interfaces_output.ansible_facts.asa_interfaces | length }}"
+            up_interfaces: "{{ interfaces_output.ansible_facts.asa_interfaces | selectattr('link_status', 'defined') | selectattr('link_status', 'equalto', 'up') | list | length }}"
+            down_interfaces: "{{ interfaces_output.ansible_facts.asa_interfaces | selectattr('link_status', 'defined') | selectattr('link_status', 'equalto', 'down') | list | length }}"
+          when: interfaces_output.ansible_facts.asa_interfaces is defined
+
+      rescue:
+        - name: Log collection failure details
+          ansible.builtin.debug:
+            msg: "CRITICAL ERROR: Interface collection failed for {{ inventory_hostname }}. check network connectivity or credentials."
+
+        - name: Flag host as failed for downstream logic
+          ansible.builtin.set_fact:
+            collection_error: true
+
+      always:
+        - name: Provide verbose debug output
+          ansible.builtin.debug:
+            var: interfaces_output
+            verbosity: 2
+
+        - name: Display formatted summary to console
+          ansible.builtin.debug:
+            msg: |
+              ======================================================================
+              DEVICE SUMMARY: {{ inventory_hostname }}
+              ======================================================================
+              Timestamp: {{ ansible_date_time.iso8601_basic | default('Unknown') }}
+              Total Interfaces: {{ interface_count | default('0') }}
+              Status: {{ up_interfaces | default(0) }} UP / {{ down_interfaces | default(0) }} DOWN
+              
+              {% for iface in interfaces_output.ansible_facts.asa_interfaces | default([]) %}
+              {{ iface.name | default('N/A') }}: [{{ iface.link_status | default('N/A') | upper }}]
+                - IPv4: {{ iface.ipv4.address | default('Unassigned') }}
+                - L2 Address: {{ iface.mac_address | default('N/A') }}
+              {% endfor %}
+              ======================================================================
+          when: collection_error is not defined
+
+    - name: Persistence and Reporting
+      block:
+        - name: Archive detailed JSON report to local controller
+          ansible.builtin.copy:
+            content: |
+              {
+                "report_metadata": {
+                  "host": "{{ inventory_hostname }}",
+                  "generated_at": "{{ ansible_date_time.iso8601 }}",
+                  "ansible_version": "{{ ansible_version.full }}"
+                },
+                "summary": {
+                  "total": {{ interface_count | default(0) }},
+                  "up": {{ up_interfaces | default(0) }},
+                  "down": {{ down_interfaces | default(0) }}
+                },
+                "raw_data": {{ interfaces_output | to_json }}
+              }
+            dest: "{{ output_dir }}/{{ inventory_hostname }}_interfaces.json"
+            mode: '0640'
+          delegate_to: localhost
+          # Why: Document generation is considered a change to the reporting system state.
+          changed_when: true
+          when: output_format == 'json'
+
+      when: collection_error is not defined
+```

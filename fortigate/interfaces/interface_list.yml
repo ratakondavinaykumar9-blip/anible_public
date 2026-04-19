@@ -1,33 +1,42 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Interface Status Retrieval
-# This playbook adheres to the NetLearner Architect standards for high-reliability automation.
-- name: Get Interface List
+# FortiGate Interface List - NetLearner Architect Improved
+# Standardized for Idempotency, Observability, and Error Handling
+# Last Modified: 2026-04-12
+#
+- name: Get FortiGate Interface List
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve system interface status from FortiGate CLI
-      # Why: Utilizing FQCN for cli_command to execute direct FortiOS 'get' commands for operational state.
+    - name: Retrieve current system interface status
+      # Best Practices: Use Fully Qualified Collection Names (FQCN) for reliable execution
+      # Why: 'get system interface' is the primary FortiOS command for real-time operational status
       ansible.netcommon.cli_command:
-        command: "get system interface"
+        command: get system interface
       register: intf_result
-      # Error Handling: Define failure if the command is rejected or returns an error string.
+      # Idempotency: Read-only retrieval must report 'changed: false' to ensure clean, repeatable runs
+      changed_when: false
+      # Error Handling: Explicitly fail if output is missing or contains shell-level error indicators
       failed_when: 
-        - intf_result.failed or "Command fail" in intf_result.stdout or "Unknown action" in intf_result.stdout
+        - intf_result.stdout is not defined
+        - "'error' in intf_result.stdout | lower"
+        - "'unknown command' in intf_result.stdout | lower"
 
-    - name: Validate successful interface data capture
-      # Observability: Assert that the command returned meaningful data to prevent downstream failures.
+    - name: Verify interface data observability
+      # Observability: Asserting data presence to allow downstream tasks to rely on validated facts
       ansible.builtin.assert:
         that:
-          - "intf_result.stdout is defined"
           - "intf_result.stdout | length > 0"
           - "'name' in intf_result.stdout or 'Interface' in intf_result.stdout"
-        fail_msg: "Interface retrieval validation failed. Output was empty or malformed."
-        success_msg: "Interface data successfully validated."
+        fail_msg: "Data Integrity Error: Interface list from {{ inventory_hostname }} is empty or malformed."
+        success_msg: "Data Integrity Verified: Interface list for {{ inventory_hostname }} retrieved successfully."
 
-    - name: Display formatted interface information
-      # Why: Providing human-readable output for audit trails and troubleshooting.
+    - name: Display interface summary for operations
+      # Documentation: Providing a clear, human-readable audit trail for network engineering teams
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACES =======================
+          ======================= INTERFACES: {{ inventory_hostname }} =======================
           {{ intf_result.stdout }}
+          ====================================================================================
+```

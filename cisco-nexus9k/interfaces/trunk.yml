@@ -1,88 +1,100 @@
----
-# Trunk Port Configuration for Cisco Nexus 9000 Series
-# Standards: Idempotency, Observability, and FQCN Compliance
+MCP issues detected. Run /mcp list for status.---
+# Trunk Port Configuration
+# Improved for Idempotency, Observability, and Error Handling
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Auto-improved: 2026-04-12 10:00
 # Author: NetLearner Architect
 
 - name: Configure Trunk Ports
   hosts: nexus9k
   gather_facts: no
-  connection: ansible.netcommon.network_cli
+  connection: network_cli
 
   vars:
-    # Centralized interface data structure for scalability and readability
+    # Centralized data structure for simplified maintenance and auditability
     trunk_interfaces:
       - { name: 'Ethernet1/1', description: 'Trunk to Spine-01', vlans: '10,20,30,40,50', native: 99 }
       - { name: 'Ethernet1/2', description: 'Trunk to Spine-02', vlans: '10,20,30,40,50', native: 99 }
       - { name: 'Ethernet1/3', description: 'Trunk to Core-Router', vlans: '10,20,30', native: 99 }
-    interface_enabled: true
-    # Speed/Duplex parameters preserved for future requirements
-    speed: 'auto'
-    duplex: 'auto'
+    int_enabled: true
+    int_speed: 'auto'
+    int_duplex: 'auto'
 
   tasks:
-    - name: "L1/L2 CONFIGURATION | Apply Interface Attributes"
+    - name: Configure Trunking and Interfaces
       block:
-        - name: "CONFIG | Set Description and Admin State"
-          cisco.nxos.nxos_interface:
-            name: "{{ item.name }}"
-            description: "{{ item.description }}"
-            enabled: "{{ interface_enabled }}"
-            state: present
+        - name: Apply physical interface configuration
+          # Using NX-OS resource modules (FQCN) to ensure declarative state and high idempotency
+          cisco.nxos.nxos_interfaces:
+            config:
+              - name: "{{ item.name }}"
+                description: "{{ item.description }}"
+                enabled: "{{ int_enabled }}"
+                speed: "{{ int_speed }}"
+                duplex: "{{ int_duplex }}"
+            state: merged
           loop: "{{ trunk_interfaces }}"
-          register: reg_interface_config
-          # Ensures physical port settings are idempotent and documented
+          register: interface_status
+          # Catching platform errors immediately per-item to prevent silent failures
+          failed_when: interface_status.failed | default(false)
 
-        - name: "CONFIG | Configure Switchport Trunk Mode"
-          cisco.nxos.nxos_l2_interface:
-            name: "{{ item.name }}"
-            mode: trunk
-            trunk_allowed_vlans: "{{ item.vlans }}"
-            trunk_native_vlan: "{{ item.native }}"
-            state: present
+        - name: Apply Layer 2 trunking configuration
+          # Decoupling L2 properties into a dedicated task for better observability and troubleshooting
+          cisco.nxos.nxos_l2_interfaces:
+            config:
+              - name: "{{ item.name }}"
+                mode: trunk
+                trunk:
+                  allowed_vlans: "{{ item.vlans }}"
+                  native_vlan: "{{ item.native }}"
+            state: merged
           loop: "{{ trunk_interfaces }}"
-          register: reg_l2_config
-          # Idempotently ensures trunking parameters match the source of truth
+          register: l2_status
 
       rescue:
-        - name: "ERROR | Handle Configuration Failure"
-          ansible.builtin.fail:
-            msg: "Playbook failed during configuration phase. Check network connectivity or credentials."
+        - name: Failure Notification
+          # Provides immediate feedback in logs for NetOps teams during execution failures
+          ansible.builtin.debug:
+            msg: "Critical: Configuration failure detected on {{ inventory_hostname }}. Halting execution."
 
-    - name: "VERIFICATION | Gather Operational State"
+        - name: Fail and Stop Execution
+          # Ensuring the playbook run reflects a failed state in orchestration tools (e.g., AWX/Tower)
+          ansible.builtin.fail:
+            msg: "Trunk configuration failed. Review registration results for specific error details."
+
+    - name: Operational State Verification
+      # Retrieving real-time operational status from the hardware for post-deployment validation
       cisco.nxos.nxos_command:
         commands:
-          - command: "show interface {{ item.name }} switchport"
-            output: text
+          - "show interface {{ item.name }} switchport"
       loop: "{{ trunk_interfaces }}"
-      register: reg_trunk_verify
+      register: verification_output
       changed_when: false
-      # Observability: Pulling real-time state to verify intent vs reality
 
-    - name: "ASSERT | Validate Trunk Operational Status"
+    - name: Assert Intended Operational State
+      # Verifying that actual device state matches the requested configuration (Observability)
       ansible.builtin.assert:
         that:
-          - "'Operational Mode: trunk' in reg_trunk_verify.results[ansible_loop_index].stdout[0]"
-          - "'Trunking Native Mode VLAN: {{ item.native }}' in reg_trunk_verify.results[ansible_loop_index].stdout[0]"
-        fail_msg: "Validation FAILED for {{ item.name }}: Operational state does not match configuration."
-        success_msg: "Validation PASSED for {{ item.name }}."
+          - "'Operational Mode: trunk' in verification_output.results[idx].stdout[0]"
+          - "'Trunking Native Mode VLAN: {{ int_data.native }}' in verification_output.results[idx].stdout[0]"
+        fail_msg: "Operational validation failed for {{ int_data.name }}. State mismatch detected."
+        success_msg: "Successfully verified operational trunk status for {{ int_data.name }}."
       loop: "{{ trunk_interfaces }}"
       loop_control:
-        index_var: ansible_loop_index
-      # Observability: Automated check to ensure the switch accepted the configuration correctly
+        index_var: idx
+        loop_var: int_data
+        label: "{{ int_data.name }}"
 
-    - name: "PERSIST | Save Running Configuration"
+    - name: Persist Changes to Startup-Config
+      # Save configuration only when changes are detected to minimize flash wear and ensure idempotency
       cisco.nxos.nxos_config:
         save_when: changed
-      when: 
-        - not ansible_check_mode
-        - (reg_interface_config is changed) or (reg_l2_config is changed)
-      # Best Practice: Only trigger a write-memory if a change was actually performed
+      when: interface_status.changed or l2_status.changed
 
-    - name: "SUMMARY | Display Deployment Results"
+    - name: Final Execution Summary
       ansible.builtin.debug:
-        msg:
-          - "Deployment Summary for {{ inventory_hostname }}:"
-          - "Interfaces Processed: {{ trunk_interfaces | length }}"
-          - "Configuration Change Detected: {{ (reg_interface_config is changed) or (reg_l2_config is changed) }}"
-      when: not ansible_check_mode
----
+        msg: |
+          Device Deployment Summary:
+          Hostname: {{ inventory_hostname }}
+          Ports Processed: {{ trunk_interfaces | length }}
+          Change Status: {{ 'Changes Applied/Saved' if (interface_status.changed or l2_status.changed) else 'No changes required' }}

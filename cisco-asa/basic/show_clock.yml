@@ -1,59 +1,55 @@
----
-# Improved Show Clock and NTP Status Playbook
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: Get Clock and NTP Information
+MCP issues detected. Run /mcp list for status.---
+# Improved System Time and NTP Verification
+# Purpose: Ensures network devices have consistent time for audit logs and security forensics.
+# Standards: NetLearner Architect v2.1 (Idempotency, Observability, FQCN, Error Handling)
+- name: Verify Clock and NTP Synchronization
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve current system clock
-      # FQCN: Using ansible.netcommon for standardized CLI command execution
+    - name: Fetch current system clock
+      # Why: Accurate time is critical for security logging, PKI validation, and event correlation.
       ansible.netcommon.cli_command:
         command: show clock
-      register: clock_result
-      # Error Handling: Ensure the command returned data before proceeding
-      failed_when: clock_result.stdout | length == 0
+      register: clock_res
+      failed_when: 
+        - clock_res.stdout is not defined
+        - clock_res.stdout == ""
 
-    - name: Validate clock data capture
-      # Observability: Explicitly asserting that the registered variable contains expected data
+    - name: Validate clock output observability
+      # Why: Ensures the device returned a valid string before proceeding with assertions.
       ansible.builtin.assert:
         that:
-          - clock_result is defined
-          - clock_result.stdout is defined
-        fail_msg: "System clock information could not be retrieved from the device."
-        quiet: true
+          - clock_res.stdout | length > 5
+        fail_msg: "Device returned an invalid or truncated clock string."
+        success_msg: "System clock retrieved successfully: {{ clock_res.stdout }}"
 
-    - name: Retrieve NTP synchronization status
-      # Error Handling: 'ignore_errors' used because NTP might not be configured on all devices
+    - name: Fetch NTP synchronization status
+      # Why: NTP ensures drift is corrected; we handle cases where NTP might not be configured.
       ansible.netcommon.cli_command:
         command: show ntp status
-      register: ntp_result
+      register: ntp_res
+      # Error Handling: Allow playbook to continue if NTP is intentionally disabled.
       ignore_errors: true
 
-    - name: Verify NTP response reliability
-      # Observability: Checking if the NTP command returned any output
+    - name: Verify NTP operational state
+      # Why: Automated validation of time source health to prevent "Time Step" errors in clusters.
       ansible.builtin.assert:
         that:
-          - ntp_result.stdout is defined
-        fail_msg: "NTP status query did not return valid output."
-        quiet: true
+          - "'synchronized' in ntp_res.stdout"
+        fail_msg: "NTP is NOT synchronized. Check upstream strata or connectivity."
+        success_msg: "NTP synchronization is healthy."
+      when: 
+        - ntp_res.stdout is defined
+        - ntp_res.stdout != ""
+        - "'NTP is not enabled' not in ntp_res.stdout"
 
-    - name: Display synchronized time information
-      # Documentation: Providing a clean, human-readable summary of the gathered facts
+    - name: Display consolidated synchronization report
+      # Why: Provides a structured summary for automation logs and operational visibility.
       ansible.builtin.debug:
-        msg: |
-          DEVICE: {{ inventory_hostname }}
-          ---------------------------------------
-          CLOCK: {{ clock_result.stdout | trim }}
-          NTP STATUS: {{ ntp_result.stdout | default('NTP not configured or unreachable') | trim }}
-          ---------------------------------------
-
-    - name: Final observability check for NTP synchronization
-      # Observability: Specifically check if the clock is 'synchronized'
-      ansible.builtin.assert:
-        that:
-          - "'synchronized' in ntp_result.stdout"
-        fail_msg: "NTP is NOT synchronized on {{ inventory_hostname }}."
-        success_msg: "NTP is successfully synchronized on {{ inventory_hostname }}."
-      when: ntp_result.stdout is defined and ntp_result.stdout != ""
-      ignore_errors: true # Do not fail the playbook if the device is just unsynchronized
+        msg:
+          inventory_hostname: "{{ inventory_hostname }}"
+          system_time: "{{ clock_res.stdout | trim }}"
+          ntp_synced: "{{ 'synchronized' in ntp_res.stdout | default('no') }}"
+          status_summary: "{{ 'OK' if 'synchronized' in ntp_res.stdout | default('') else 'WARNING' }}"
+...

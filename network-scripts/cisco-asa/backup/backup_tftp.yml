@@ -1,43 +1,42 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Backup Cisco ASA/Firepower running-config to TFTP
-# Purpose: Ensures configuration persistence and centralized storage.
-# Standards: FQCN, Observability, Idempotency, and Robust Error Handling.
-- name: Backup to TFTP
+# NetLearner Architect Standard: TFTP Backup Playbook
+# Purpose: Ensures consistent, observable, and reliable backups of ASA/Firepower configurations.
+- name: Backup Cisco ASA/Firepower Configuration to TFTP
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Target TFTP server IP or Hostname
+    # Centralized TFTP server IP - defined here for portability
     tftp_server: "10.0.0.1"
-    # Descriptive filename including device name for traceability
-    backup_filename: "{{ inventory_hostname }}_running_config.cfg"
+    # Dynamic filename utilizing inventory hostname for uniqueness
+    tftp_dest_file: "{{ inventory_hostname }}_running_config.cfg"
 
   tasks:
-    - name: Transfer running-config to TFTP server
-      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction.
-      # The full URI syntax is used to avoid interactive prompts, ensuring automation stability.
+    - name: Transfer running-configuration to remote TFTP server
+      # FQCN used to ensure compatibility with standard NetLearner collections
+      # URI format is used to minimize interactive prompts and ensure execution flow
       ansible.netcommon.cli_command:
-        command: "copy running-config tftp://{{ tftp_server }}/{{ backup_filename }}"
+        command: "copy running-config tftp://{{ tftp_server }}/{{ tftp_dest_file }}"
       register: tftp_output
-      # Error Handling: Check for common Cisco error signatures in the command output.
-      # Using 'failed_when' to catch application-level errors that might not return a non-zero exit code.
-      failed_when: >
-        tftp_output.failed or
-        'Error' in tftp_output.stdout or
-        'Invalid' in tftp_output.stdout or
-        'failed' in tftp_output.stdout or
-        '% ' in tftp_output.stdout
-      # Idempotency: This task is safe to run repeatedly; it overwrites the destination
-      # file with the current running state without affecting device stability.
+      # Error Handling: Catch specific Cisco CLI error patterns to trigger task failure
+      failed_when:
+        - "tftp_output.stdout is not defined"
+        - "'Error' in tftp_output.stdout or 'Invalid' in tftp_output.stdout or 'failed' in tftp_output.stdout"
 
-    - name: Assert backup success
-      # Observability: Verify that the CLI output contains success indicators (e.g., bytes copied).
+    - name: Validate backup success through output analysis
+      # Observability: Assert that the transfer completed by checking for 'bytes copied'
+      # This ensures the playbook doesn't report 'ok' if the network transfer timed out silently
       ansible.builtin.assert:
         that:
-          - "'bytes copied' in tftp_output.stdout or '[OK]' in tftp_output.stdout"
-        fail_msg: "TFTP transfer failed for {{ inventory_hostname }}. CLI Output: {{ tftp_output.stdout }}"
-        success_msg: "Configuration successfully backed up to {{ tftp_server }}/{{ backup_filename }}"
+          - "'bytes copied' in tftp_output.stdout or 'OK' in tftp_output.stdout"
+        fail_msg: "TFTP Backup Failed for {{ inventory_hostname }}. CLI Response: {{ tftp_output.stdout | default('No response') }}"
+        success_msg: "Configuration successfully verified and backed up to {{ tftp_server }}"
 
-    - name: Display backup confirmation
-      # Documentation: Provides clear, logged feedback for the operator.
+    - name: Display backup operation results
+      # Final verification step for operator visibility
       ansible.builtin.debug:
-        msg: "Backup process for {{ inventory_hostname }} to TFTP server {{ tftp_server }} is complete and verified."
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Destination: tftp://{{ tftp_server }}/{{ tftp_dest_file }}"
+          - "Status: Backup Verified"
+```

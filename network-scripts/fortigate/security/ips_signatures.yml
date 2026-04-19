@@ -1,37 +1,35 @@
----
-# Playbook: FortiGate IPS Signatures Retrieval
-# Purpose: Fetches and displays IPS signature diagnostic data from FortiGate devices.
-# Standards: Implements idempotency (read-only), observability via assertions, and FQCN usage.
+MCP issues detected. Run /mcp list for status.---
+# FortiGate IPS Signature Audit
+# Purpose: Retrieves current IPS signature status to verify security engine health and signature synchronization.
 - name: Get IPS Signatures
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: FortiOS devices do not support standard Linux fact gathering.
 
   tasks:
-    - name: Run IPS signature diagnostic command
-      # Use FQCN for the network CLI module to ensure consistency across environments
+    - name: Retrieve IPS signature status via CLI
+      # Use FQCN (ansible.netcommon) for standardized network command execution.
       ansible.netcommon.cli_command:
-        command: diagnose ips signature
+        command: diagnose ips signature list
       register: sig_output
-      # Idempotency: Diagnostic commands are read-only; mark changed_when: false to prevent false positives in reporting
+      # Idempotency: Diagnostic commands are read-only and must never trigger a 'changed' state.
       changed_when: false
-      # Error Handling: Fail explicitly if the command is unrecognized or returns no data
-      failed_when:
-        - sig_output.stdout == ""
-        - "'Unknown command' in sig_output.stdout"
-        - "'Command fail' in sig_output.stdout"
+      # Error Handling: Fail explicitly if the command is unrecognized or returns an error string.
+      failed_when: 
+        - sig_output.failed or "Command fail" in sig_output.stdout
 
-    - name: Verify signature data integrity
-      # Observability: Assert that the captured output contains data before proceeding
+    - name: Validate IPS signature data integrity
+      # Observability: Assert that the command returned non-empty content to ensure audit validity.
       ansible.builtin.assert:
         that:
           - sig_output.stdout is defined
           - sig_output.stdout | length > 0
-        fail_msg: "Observability Error: The IPS signature command returned no output or is undefined."
-        success_msg: "Observability Success: IPS signature data successfully captured."
+        fail_msg: "IPS signature data could not be retrieved or the buffer is empty."
+        success_msg: "IPS signature data successfully validated for processing."
 
-    - name: Display IPS signature details
-      # Documentation: Formatted output for operator clarity
+    - name: Display formatted IPS signature report
+      # Observability: Provide a structured view of the output for the job logs.
       ansible.builtin.debug:
         msg: |
           ======================= IPS SIGNATURES =======================
           {{ sig_output.stdout }}
+---

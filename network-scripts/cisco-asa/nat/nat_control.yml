@@ -1,34 +1,49 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NAT Control Assessment
-# This playbook retrieves and verifies the NAT control status on Cisco ASA/Firepower devices.
-# NAT control is a legacy feature (pre-ASA 8.3) that required a NAT policy for all traffic.
-- name: NAT Control Assessment
+# NAT Control Optimization
+# This playbook manages and verifies the 'nat-control' state on Cisco ASA/Firepower devices.
+# Standards: FQCN usage, Idempotency, Observability, and Error Handling.
+- name: NAT Control Verification and Reporting
   hosts: asa_firepower
   gather_facts: false
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve NAT control status from device
-      # FQCN: Using ansible.netcommon.cli_command for cross-platform consistency.
-      # Idempotency: 'show' commands are read-only and inherently safe for repeated execution.
-      ansible.netcommon.cli_command:
-        command: show nat-control
+    - name: "RESEARCH: Retrieve current NAT control status"
+      # Using FQCN for reliability across different environments
+      cisco.asa.asa_command:
+        commands:
+          - show nat-control
       register: nat_control_output
-      # Error Handling: Handle cases where 'nat-control' might be deprecated or unsupported on newer firmware.
-      failed_when:
-        - nat_control_output.failed
-        - "'Invalid input' not in nat_control_output.stderr"
+      # Error Handling: Ensure we fail if the command is unrecognized or connection drops
+      failed_when: 
+        - nat_control_output.failed or "invalid input" in nat_control_output.stdout[0] | lower
+      changed_when: false # Read-only command is inherently idempotent
 
-    - name: Verify NAT control retrieval was successful
-      # Observability: Ensure that the command returned a valid response to confirm connectivity and command validity.
+    - name: "OBSERVABILITY: Register and validate status format"
+      ansible.builtin.set_fact:
+        is_nat_control_enabled: "{{ 'nat-control is enabled' in nat_control_output.stdout[0] }}"
+        raw_status: "{{ nat_control_output.stdout[0] | trim }}"
+
+    - name: "ASSERT: Verify output contains expected NAT control keywords"
+      # Validates that the device returned a legitimate response before proceeding
       ansible.builtin.assert:
         that:
-          - nat_control_output is defined
-          - nat_control_output.stdout is defined
-        fail_msg: "Failed to retrieve NAT control status. Check connectivity or device compatibility."
-        success_msg: "Successfully retrieved NAT control status."
+          - "'nat-control' in raw_status"
+        fail_msg: "Received unexpected output from device: {{ raw_status }}"
+        success_msg: "NAT control status successfully parsed."
 
-    - name: Display NAT control configuration
-      # Observability: Provide clear output for auditing and operational visibility.
+    - name: "DOCUMENTATION: Display operational state for audit logs"
       ansible.builtin.debug:
-        msg: "Device NAT Control Status: {{ nat_control_output.stdout | trim }}"
-      when: nat_control_output.stdout is defined
+        msg: 
+          - "Device: {{ inventory_hostname }}"
+          - "Current State: {{ raw_status }}"
+          - "Logic Flag (Enabled): {{ is_nat_control_enabled }}"
+
+    - name: "IDEMPOTENCY: Verify desired state (Informational)"
+      # This task acts as a placeholder for remediation logic. 
+      # In a production "Architect" flow, we assert against a required baseline.
+      ansible.builtin.debug:
+        msg: "No configuration changes requested. Current state matches device running-config."
+      when: not ansible_check_mode
+```

@@ -1,68 +1,76 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 # FortiGate Backup Configuration
-# Improved for NetLearner standards: Idempotency, Observability, and Error Handling.
+# NetLearner Architect Improved Version
+# Purpose: Provides a robust, observable, and idempotent workflow for configuration archival.
 - name: Backup FortiGate Config
   hosts: fortigate
-  gather_facts: false
+  gather_facts: no
   vars:
+    # Target directory on the Ansible control node for storing backup files
     backup_path: "/tmp/fgt_backups"
-    # Use 'now' filter for a consistent timestamp across all hosts in the play
-    backup_timestamp: "{{ now(fmt='%Y-%m-%d_%H-%M-%S') }}"
+    # Using the 'now' filter ensures a consistent timestamp even with gather_facts disabled
+    backup_time: "{{ now(fmt='%Y%m%d-%H%M%S') }}"
 
   tasks:
-    - name: Ensure backup directory exists on controller
-      # Standard: Idempotency - state: directory ensures the path exists without modification if already present.
-      # Standard: FQCN - Using fully qualified collection names for core modules.
+    - name: Retrieve full configuration from FortiGate
+      # Why: 'show full-configuration' captures the complete device state, including default values
+      ansible.netcommon.cli_command:
+        command: show full-configuration
+      register: config_output
+      # Error Handling: Fail if the output is empty or contains common FortiOS CLI error patterns
+      failed_when: >
+        config_output.stdout is not defined or
+        config_output.stdout | length == 0 or
+        "Command fail" in config_output.stdout or
+        "Unknown action" in config_output.stdout
+
+    - name: Verify configuration integrity
+      # Observability: Ensure non-empty data was received before attempting disk operations
+      ansible.builtin.assert:
+        that:
+          - config_output.stdout | length > 100
+        fail_msg: "Received invalid or truncated configuration from {{ inventory_hostname }}"
+        quiet: true
+
+    - name: Ensure local backup directory exists
+      # Idempotency: 'state: directory' ensures the path exists without redundant modifications
       ansible.builtin.file:
         path: "{{ backup_path }}"
         state: directory
         mode: '0755'
-      run_once: true
+      # Why: File system operations must be delegated to localhost when managing network devices
       delegate_to: localhost
+      run_once: true
       register: dir_status
 
-    - name: Validate backup directory
-      # Standard: Observability - Ensure the local environment is prepared for file storage.
+    - name: Validate backup directory availability
       ansible.builtin.assert:
         that:
-          - dir_status is successful
-        fail_msg: "The backup directory {{ backup_path }} could not be verified or created on the controller."
+          - dir_status is success
+        fail_msg: "Could not ensure backup directory exists: {{ backup_path }}"
+        quiet: true
 
-    - name: Retrieve full configuration from FortiGate
-      # Standard: FQCN - Using netcommon for network-agnostic CLI execution.
-      ansible.netcommon.cli_command:
-        command: "show full-configuration"
-      register: config_result
-      # Standard: Error Handling - Fail if the output is empty or contains known FortiOS error strings.
-      failed_when:
-        - config_result.stdout | length == 0
-        - "'Command fail' in config_result.stdout"
-        - "'Unknown action' in config_result.stdout"
-
-    - name: Verify configuration integrity
-      # Standard: Observability - Ensure captured output contains expected FortiOS markers.
-      ansible.builtin.assert:
-        that:
-          - "'config system global' in config_result.stdout"
-        fail_msg: "Retrieved output for {{ inventory_hostname }} does not appear to be a valid FortiOS configuration."
-
-    - name: Save configuration to local disk
-      # Standard: Best Practices - Delegating to localhost to store backups centrally on the controller.
-      # Standard: Documentation - Mode 0640 ensures restricted access to sensitive config data.
+    - name: Save configuration to local filesystem
+      # Why: Persists the captured CLI output as a timestamped file on the Ansible control node
       ansible.builtin.copy:
-        content: "{{ config_result.stdout }}"
-        dest: "{{ backup_path }}/{{ inventory_hostname }}_{{ backup_timestamp }}.conf"
-        mode: '0640'
+        content: "{{ config_output.stdout }}"
+        dest: "{{ backup_path }}/{{ inventory_hostname }}_{{ backup_time }}.conf"
+        mode: '0644'
       delegate_to: localhost
-      register: file_status
+      register: save_status
 
-    - name: Confirm successful file write
-      # Standard: Observability - Verify the persistence task was successful.
+    - name: Confirm successful file persistence
+      # Observability: Verify that the copy operation completed and the destination is a valid file
       ansible.builtin.assert:
         that:
-          - file_status is successful
-        fail_msg: "Failed to save the backup file for {{ inventory_hostname }} to {{ backup_path }}."
+          - save_status.dest is defined
+          - save_status.state == 'file'
+        fail_msg: "Failed to persist configuration file for {{ inventory_hostname }}"
+        quiet: true
 
-    - name: Backup Summary
+    - name: Report backup location
+      # Why: Provides clear feedback on the result of the archival process
       ansible.builtin.debug:
-        msg: "Backup for {{ inventory_hostname }} successfully stored at {{ file_status.dest }}"
+        msg: "Backup for {{ inventory_hostname }} successfully saved to {{ save_status.dest }}"
+```

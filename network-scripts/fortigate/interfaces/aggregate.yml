@@ -1,36 +1,34 @@
----
-# FortiGate Aggregate Interfaces - Production Standard
-# Purpose: This playbook retrieves the status of Link Aggregation Groups (LAG) to verify network redundancy.
-# Standards: Idempotency (Read-only), Observability (Assert/Register), FQCN usage, and robust Error Handling.
-- name: Retrieve FortiGate Aggregate Interface Status
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Aggregate Interface Status Inspection
+# Purpose: Retrieves and validates the status of Link Aggregation Groups (LAG)
+# Standards: Idempotent, Observable, and Error-Aware
+- name: Inspect FortiGate Aggregate Interfaces
   hosts: fortigate
   gather_facts: false
-  # Ensure the playbook stops if a host is unreachable or a task fails
-  any_errors_fatal: true
 
   tasks:
-    - name: Fetch aggregate interface details via CLI
-      # Using FQCN for portability and to follow Ansible best practices
+    - name: Fetch system aggregate interface status via CLI
+      # Use Fully Qualified Collection Name (FQCN) for network operations
       ansible.netcommon.cli_command:
         command: get system aggregate
       register: agg_result
-      # Idempotency: Read-only 'get' commands are inherently idempotent.
-      # Error Handling: Identify failure if the command returns known error strings or no output.
-      failed_when:
-        - agg_result.stdout is not defined or agg_result.stdout | length == 0
-        - "'Unknown command' in agg_result.stdout"
-        - "'Command fail' in agg_result.stdout"
+      # Read-only operations must not trigger a 'changed' state to maintain idempotency
+      changed_when: false
+      # Explicitly fail if FortiOS returns a command error string
+      failed_when: 
+        - agg_result.failed or "Command fail" in agg_result.stdout
 
-    - name: Validate that aggregate interface data was returned
-      # Observability: Assert that the command produced a non-empty response to ensure data integrity
+    - name: Validate aggregate telemetry retrieval
+      # Observability: Assert that the command returned data and is properly registered
       ansible.builtin.assert:
         that:
+          - "agg_result.stdout is defined"
           - "agg_result.stdout | length > 0"
-        fail_msg: "Failed to retrieve aggregate interface details or no aggregates are configured on this device."
-        success_msg: "Successfully captured aggregate interface information."
+        fail_msg: "Operational telemetry retrieval failed: Output is empty or undefined."
+        success_msg: "Aggregate interface telemetry successfully captured."
 
-    - name: Display Aggregate Interface configuration
-      # Idempotency: Safe to run multiple times without modifying the system state
+    - name: Display aggregate interface details
+      # Provide formatted output for human operators during execution
       ansible.builtin.debug:
         msg: |
           ======================= AGGREGATE INTERFACE STATUS =======================

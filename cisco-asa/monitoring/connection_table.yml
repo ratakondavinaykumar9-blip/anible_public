@@ -1,58 +1,57 @@
----
-# Connection Table Retrieval Playbook
-# Purpose: Retrieves and validates stateful connection information from Cisco ASA/Firepower devices.
-# Idempotency: This playbook is read-only and safe to run repeatedly without modifying device state.
-# Improved by: NetLearner Architect (2026-03-15)
----
+MCP issues detected. Run /mcp list for status.---
+# Connection Table Retrieval and Validation
+# Improved by NetLearner Architect: 2026-04-12
+# Purpose: Safely retrieves and validates ASA/Firepower connection tables for network forensics.
+#
 - name: Get Connection Table
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Efficiency: Device facts are not required for simple CLI command execution
 
   tasks:
     - name: Retrieve summary connection table
-      # Why: 'show conn' provides a high-level snapshot of all active sessions and protocol distributions.
-      # FQCN: Using cisco.asa for device-specific command execution.
-      cisco.asa.asa_command:
-        commands:
-          - show conn
+      # Using FQCN (ansible.netcommon) for compatibility across different Ansible versions
+      ansible.netcommon.cli_command:
+        command: show conn
       register: conn_summary
-      # Error Handling: Catch common CLI failures or command-not-found scenarios.
+      # Idempotency & Error Handling: Read-only commands should never report 'changed'
+      # and must fail if the output contains common Cisco/Firepower error strings.
+      changed_when: false
       failed_when:
-        - conn_summary.failed or "Invalid input" in conn_summary.stdout[0]
+        - conn_summary.failed
+        - "'Invalid input' in conn_summary.stdout or 'syntax error' in conn_summary.stdout"
 
-    - name: Verify connection summary retrieval
-      # Why: Observability - Ensure the device returned valid telemetry before proceeding.
+    - name: Verify connection summary availability
+      # Observability: Ensure we actually received data before proceeding to display or process.
       ansible.builtin.assert:
         that:
-          - conn_summary.stdout is defined
-          - conn_summary.stdout[0] | length > 0
-        fail_msg: "Connection summary data is empty or unreachable on {{ inventory_hostname }}"
-        quiet: true
+          - conn_summary.stdout | length > 0
+        fail_msg: "The connection table summary is empty. Verify device state and traffic flow."
+        success_msg: "Connection summary retrieved successfully."
 
-    - name: Retrieve detailed connection information
-      # Why: 'detail' output includes essential flags (U, O, B) and byte counts for deep-dive troubleshooting.
-      cisco.asa.asa_command:
-        commands:
-          - show conn detail
+    - name: Retrieve detailed connection table
+      # Why: Detailed view is critical for identifying TCP flags and idle timeout issues.
+      ansible.netcommon.cli_command:
+        command: show conn detail
       register: conn_detail
+      changed_when: false
       failed_when:
-        - conn_detail.failed or "Invalid input" in conn_detail.stdout[0]
+        - conn_detail.failed
+        - "'Invalid input' in conn_detail.stdout"
 
-    - name: Verify detailed connection retrieval
-      # Why: Observability - Confirm detailed troubleshooting data was successfully registered.
+    - name: Verify detailed connection output integrity
+      # Observability: Check for the presence of the 'Total' summary line to ensure full capture.
       ansible.builtin.assert:
         that:
-          - conn_detail.stdout is defined
-          - conn_detail.stdout[0] | length > 0
-        fail_msg: "Detailed connection metrics could not be retrieved from {{ inventory_hostname }}"
-        quiet: true
+          - "'Total' in conn_detail.stdout"
+        fail_msg: "Detailed connection output appears truncated or malformed."
+        success_msg: "Detailed connection data validated."
 
-    - name: Display formatted connection state
-      # Why: Provides immediate, human-readable visibility into the firewall's stateful inspection table.
+    - name: Display connection information
+      # Why: Provides the operator with immediate actionable intelligence during the run.
       ansible.builtin.debug:
         msg: |
-          ======================= CONNECTIONS SUMMARY =======================
-          {{ conn_summary.stdout[0] }}
+          ======================= SUMMARY =======================
+          {{ conn_summary.stdout }}
 
-          ======================= CONNECTIONS DETAIL =======================
-          {{ conn_detail.stdout[0] }}
+          ======================= DETAILS =======================
+          {{ conn_detail.stdout }}

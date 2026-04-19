@@ -1,41 +1,42 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# ==============================================================================
-# PLAYBOOK: Retrieve EtherChannel Information
-# AUTHOR: NetLearner Architect
-# DESCRIPTION: Safely retrieves and validates EtherChannel status on Cisco ASA
-#              or Firepower devices using automated validation and error checks.
-# ==============================================================================
-- name: Get EtherChannel Status
+# Playbook: Audit EtherChannel Configuration
+# Standards: Idempotent (Read-only), Observability (Assert), FQCN Usage.
+# Purpose: This playbook retrieves and validates EtherChannel status on ASA/Firepower devices 
+# to ensure architectural compliance and link redundancy.
+
+- name: Get EtherChannel Information
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
     - name: Execute 'show etherchannel' command
-      # Best Practice: Using Fully Qualified Collection Name (FQCN) for Cisco ASA
-      cisco.asa.asa_command:
-        commands:
-          - show etherchannel
-      register: ec_output
-      # Error Handling: Specifically catch CLI errors or invalid commands
+      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interaction.
+      ansible.netcommon.cli_command:
+        command: show etherchannel
+      register: ec_result
+      # Error Handling: Fail if the command execution fails or returns CLI-specific error patterns.
       failed_when:
-        - "'Invalid input' in ec_output.stdout[0]"
-        - "'ERROR' in ec_output.stdout[0]"
-      # Idempotency: Read-only 'show' commands are inherently idempotent.
+        - ec_result.failed
+        - "'Invalid input' in ec_result.stdout"
 
-    - name: Assert EtherChannel data presence
-      # Observability: Verify that the device returned data to ensure reliability
+    - name: Validate EtherChannel data retrieval
+      # Observability: Asserting that the output is defined and contains data ensures 
+      # we are not processing null states in downstream automation.
       ansible.builtin.assert:
         that:
-          - "ec_output.stdout[0] is defined"
-          - "ec_output.stdout[0] | length > 0"
-        fail_msg: "EtherChannel information is missing or the command failed to execute correctly."
-        success_msg: "EtherChannel information retrieved successfully."
+          - ec_result.stdout is defined
+          - ec_result.stdout | length > 0
+        fail_msg: "EtherChannel output is empty. The device may not have EtherChannels configured."
+        success_msg: "EtherChannel data successfully captured."
 
-    - name: Display EtherChannel summary
-      # Documentation: Structured output for human-readable operational logs
+    - name: Display formatted EtherChannel status
+      # Documentation: Providing a clear, structured view of the operational state for the architect.
       ansible.builtin.debug:
         msg: |
-          ======================= ETHERCHANNEL STATUS =======================
-          Device: {{ inventory_hostname }}
-          -------------------------------------------------------------------
-          {{ ec_output.stdout[0] }}
+          ======================= ETHERCHANNEL DATA =======================
+          HOST: {{ inventory_hostname }}
+          RETRIEVAL STATUS: SUCCESS
+          -----------------------------------------------------------------
+          {{ ec_result.stdout }}
+```

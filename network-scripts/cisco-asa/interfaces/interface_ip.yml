@@ -1,35 +1,44 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Interface IP Configuration Audit
-# This playbook retrieves and validates interface IP settings on ASA/Firepower devices.
+# NetLearner Architect Standardized Interface Configuration Playbook
+# Purpose: Retrieves and validates Interface IP assignments on Cisco ASA/Firepower devices.
+# Standards: Idempotency (read-only), Observability (asserts), Documentation (inline why-comments).
+
 - name: Interface IP Config
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve current interface IP configuration
-      # Use FQCN for platform-specific command execution
-      # This task is inherently idempotent as it only reads the device state
-      cisco.asa.asa_command:
-        commands:
-          - show ip address
-      register: ip_output
-      # Error handling: fail if the command execution fails or returns an error string
+    - name: Retrieve current IP configuration via CLI command
+      # Using Fully Qualified Collection Name (FQCN) for reliability.
+      # Why: Ensures consistent module resolution regardless of local environment configuration.
+      ansible.netcommon.cli_command:
+        command: show ip address
+      register: ip_result
+      # Idempotency: Read-only status checks must never report a 'changed' state.
+      changed_when: false
+      # Error Handling: Explicitly fail if the ASA returns common error signatures.
       failed_when: 
-        - ip_output.failed
-        - "'Invalid' in ip_output.stdout[0]"
+        - "'Invalid input' in ip_result.stdout"
+        - "'ERROR' in ip_result.stdout"
 
-    - name: Verify retrieval of interface data
-      # Observability: Assert that the output contains expected headers to ensure data integrity
+    - name: Validate that the retrieved output is meaningful
+      # Observability: Asserting that the device returned the expected interface table headers.
+      # Why: Prevents silent failures where a command executes but returns no data or junk.
       ansible.builtin.assert:
         that:
-          - "'Interface' in ip_output.stdout[0]"
-          - "'IP-Address' in ip_output.stdout[0]"
-        fail_msg: "The 'show ip address' command returned unexpected or empty results."
-        success_msg: "Interface IP configuration successfully retrieved and validated."
+          - "ip_result.stdout | length > 0"
+          - "'Interface' in ip_result.stdout"
+          - "'Address' in ip_result.stdout"
+        fail_msg: "CRITICAL: Received invalid or empty IP configuration from {{ inventory_hostname }}."
+        success_msg: "SUCCESS: Valid IP configuration retrieved for {{ inventory_hostname }}."
 
-    - name: Display Interface IP Configuration
-      # Documentation: Provide a formatted view of the operational state for the operator
+    - name: Display formatted Interface IP information
+      # Observability: Structured debug output for audit trails and manual verification.
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACE IP =======================
-          {{ ip_output.stdout[0] }}
+          ======================= INTERFACE IP STATUS =======================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ ansible_date_time.iso8601 | default('N/A') }}
+          {{ ip_result.stdout }}
+```

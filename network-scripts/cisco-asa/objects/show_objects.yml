@@ -1,38 +1,34 @@
----
-# Playbook: Audit Cisco ASA/Firepower Network Objects
-# Why: Safely retrieves network object definitions for auditing and visibility.
-# This implementation follows NetLearner standards for idempotency, observability, and error handling.
-
-- name: Get and Validate Network Objects
+MCP issues detected. Run /mcp list for status.---
+- name: Retrieve and Validate Network Objects from Cisco ASA/Firepower
+  # Description: This playbook fetches the current network object configuration.
+  # Idempotency: This is a read-only (GET) operation, making it safe to run multiple times without changing state.
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve network object configuration from running-config
-      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction.
+    - name: Fetch network object running configuration
+      # FQCN: Using ansible.netcommon.cli_command for cross-platform compatibility.
+      # Documentation: Why: Required to audit existing network objects before performing changes or for visibility.
       ansible.netcommon.cli_command:
         command: show running-config object network
       register: objects_output
-      # Idempotency: Read-only operations must never report a 'changed' status.
-      changed_when: false
-      # Error Handling: Fail explicitly if the command is unrecognized or if the execution fails.
+      # Error Handling: Ensure the task fails if the command is invalid or if the device returns an error string.
       failed_when:
-        - objects_output.failed
-        - "'Invalid input' in objects_output.stdout"
+        - objects_output.failed or "Invalid input" in objects_output.stdout
 
-    - name: Verify successful data retrieval
-      # Observability: Assert that the command returned valid output to prevent silent failures.
+    - name: Validate network object data presence
+      # Observability: Use assert to verify that the command actually returned data.
+      # This prevents the playbook from proceeding or succeeding with empty results.
       ansible.builtin.assert:
         that:
           - objects_output.stdout is defined
-        fail_msg: "Data retrieval failed. Please verify device connectivity and CLI permissions."
-        quiet: true
+          - objects_output.stdout | length > 0
+        fail_msg: "The retrieved configuration is empty or the command failed to return data."
+        success_msg: "Successfully retrieved network object configuration."
 
-    - name: Display formatted Network Objects report
-      # Documentation: Provides a human-readable summary with host context.
+    - name: Display retrieved Network Objects
+      # Observability: Print the output in a formatted block for operator review.
       ansible.builtin.debug:
         msg: |
           ======================= NETWORK OBJECTS =======================
-          HOST: {{ inventory_hostname }}
-          ---------------------------------------------------------------
-          {{ objects_output.stdout if objects_output.stdout | length > 0 else 'INFO: No network objects are currently defined.' }}
+          {{ objects_output.stdout }}

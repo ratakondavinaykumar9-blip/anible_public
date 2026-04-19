@@ -1,0 +1,34 @@
+MCP issues detected. Run /mcp list for status.```yaml
+---
+# This playbook retrieves and validates IPsec decapsulation statistics from Cisco ASA/Firepower devices.
+# It is designed to be idempotent (read-only) and provides high observability via assertions.
+- name: Retrieve and Validate IPsec Decapsulation Statistics
+  hosts: asa_firepower
+  gather_facts: false
+
+  tasks:
+    - name: Fetch IPsec decapsulation statistics via CLI
+      # Use Fully Qualified Collection Names (FQCN) for reliability and to avoid module naming conflicts.
+      ansible.netcommon.cli_command:
+        command: show crypto ipsec stats
+      register: decap_result
+      # Error Handling: Define failure criteria to catch CLI errors that might not trigger a non-zero exit code.
+      failed_when: 
+        - decap_result.stdout == ""
+        - "'Invalid input' in decap_result.stdout"
+
+    - name: Validate that the retrieved output contains IPsec data
+      # Observability: Assert that the command returned the expected header to confirm operational status.
+      ansible.builtin.assert:
+        that:
+          - "'IPsec statistics' in decap_result.stdout"
+        fail_msg: "Data retrieval failed or returned unexpected content. Verify crypto configuration."
+        success_msg: "IPsec statistics successfully captured and validated."
+
+    - name: Render decapsulation statistics for review
+      # Human-readable observability for troubleshooting and real-time verification.
+      ansible.builtin.debug:
+        msg: |
+          ======================= IPSEC DECAP DATA =======================
+          {{ decap_result.stdout }}
+```

@@ -1,35 +1,35 @@
----
-# Hardware Model Information Retrieval
-# This playbook retrieves hardware model details from Cisco ASA/Firepower devices.
-# It ensures idempotency, provides observability via assertions, and follows FQCN standards.
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Staging: Hardware Model Inventory Verification
+# This playbook retrieves hardware model information from ASA/Firepower devices.
+# Idempotency: Read-only operation ensures the playbook is safe to run multiple times without state changes.
 
 - name: Get Hardware Model Information
   hosts: asa_firepower
   gather_facts: false
+  # Best Practice: Explicitly define the connection type for network device interaction.
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Execute show version command to capture model info
-      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+    - name: Execute show version command to extract hardware and model details
+      # Why: Captured hardware details are essential for compliance auditing and asset management.
       ansible.netcommon.cli_command:
         command: "show version | include (Hardware|Model)"
       register: model_output
-      # Idempotency: This is a read-only operation; it should never report a 'changed' status
-      changed_when: false
-      # Error Handling: Mark as failed if the output is empty or the command is unrecognized
-      failed_when:
+      # Error Handling: Fail if the output is empty or if the device returns a syntax error.
+      failed_when: 
         - model_output.stdout | length == 0
-        - "'Invalid' in model_output.stdout"
+        - "'Invalid input' in model_output.stdout"
 
-    - name: Validate hardware model capture
-      # Observability: Assert that the model information was correctly registered
+    - name: Validate that hardware information was correctly captured
+      # Observability: Use assertions to verify the integrity of the collected data.
       ansible.builtin.assert:
         that:
           - "model_output.stdout is defined"
-          - "model_output.stdout | length > 0"
-        fail_msg: "Hardware model information could not be retrieved. Please check device connectivity."
-        success_msg: "Hardware model information successfully retrieved."
+          - "model_output.stdout != ''"
+        fail_msg: "The hardware model information could not be retrieved from the device output."
+        success_msg: "Hardware model data successfully retrieved and validated."
 
-    - name: Display hardware model details
-      # Observability: Output the results for manual verification
+    - name: Display captured hardware details for audit visibility
+      # Observability: Provides immediate feedback in logs for verification.
       ansible.builtin.debug:
-        msg: "{{ model_output.stdout_lines }}"
+        msg: "Retrieved Hardware Info: {{ model_output.stdout }}"

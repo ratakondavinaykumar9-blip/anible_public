@@ -1,7 +1,8 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 - name: Enterprise Syslog-ng Centralized Log Server & Network Integration
   hosts: syslog_servers:network_devices
-  gather_facts: yes
+  gather_facts: true
   vars:
     # --- Global Infrastructure Parameters ---
     syslog_server_ip: "10.100.10.50"
@@ -33,23 +34,27 @@
   tasks:
     # =========================================================================
     # SECTION 1: Syslog-ng Server Configuration (Linux)
+    # Why: Centralizes logs for auditing, compliance, and real-time analysis.
     # =========================================================================
     - name: Configure Syslog-ng Central Server
       when: "'syslog_servers' in group_names"
       block:
         - name: Ensure Syslog-ng packages are installed
+          # Idempotency: 'present' ensures package exists without forced updates.
           ansible.builtin.package:
             name: "{{ syslog_ng_packages }}"
             state: present
           register: pkg_install_result
 
         - name: Verify package installation success
+          # Observability: Immediate validation of the package manager's state.
           ansible.builtin.assert:
             that:
               - pkg_install_result is successful
-            fail_msg: "Failed to install required Syslog-ng packages."
+            fail_msg: "ERROR: Failed to install required Syslog-ng packages. Check internet/repo access."
 
         - name: Create required directory structure
+          # Idempotency: Explicit owner/group/mode prevents drift.
           ansible.builtin.file:
             path: "{{ item }}"
             state: directory
@@ -61,7 +66,8 @@
             - "{{ pki_dir }}"
           register: dir_creation
 
-        - name: Verify PKI assets existence (mTLS Pre-requisite)
+        - name: Check for PKI assets (mTLS Pre-requisite)
+          # Why: mTLS requires valid certs. This avoids service crashes on startup.
           ansible.builtin.stat:
             path: "{{ item }}"
           loop:
@@ -69,9 +75,17 @@
             - "{{ server_cert_path }}"
             - "{{ server_key_path }}"
           register: cert_stats
-          failed_when: not item.stat.exists
+
+        - name: Verify PKI asset existence
+          # Observability: Explicitly asserting each file exists before proceeding.
+          ansible.builtin.assert:
+            that:
+              - item.stat.exists
+            fail_msg: "CRITICAL: PKI asset {{ item.item }} is missing. Secure logs require mTLS certs."
+          loop: "{{ cert_stats.results }}"
 
         - name: Deploy Syslog-ng configuration from template
+          # Idempotency: Uses syntax validation to prevent pushing broken configs.
           ansible.builtin.template:
             src: syslog-ng.conf.j2
             dest: /etc/syslog-ng/syslog-ng.conf
@@ -86,32 +100,36 @@
           ansible.builtin.service:
             name: syslog-ng
             state: started
-            enabled: yes
+            enabled: true
           register: service_status
 
         - name: Verify Syslog-ng is listening on the designated port
+          # Error Handling: ignore_errors allows the assert task to provide a better failure message.
           ansible.builtin.wait_for:
             port: "{{ syslog_port }}"
             host: "{{ syslog_server_ip }}"
             state: started
             timeout: 5
-          ignore_errors: yes
+          ignore_errors: true
           register: port_check
 
         - name: Assert operational readiness
+          # Observability: Final health check ensures the service is actually functional.
           ansible.builtin.assert:
             that:
               - service_status.state == 'started'
               - port_check is succeeded
-            fail_msg: "Syslog-ng server failed validation checks."
+            fail_msg: "CRITICAL: Syslog-ng server is running but not listening on port {{ syslog_port }}."
 
     # =========================================================================
     # SECTION 2: Network Device Integration (Cisco/Generic)
+    # Why: Ensures end-to-end logging visibility across the infrastructure.
     # =========================================================================
     - name: Configure Network Device Logging
       when: "'network_devices' in group_names"
       block:
         - name: Configure global logging parameters
+          # Idempotency: 'state: merged' only adds missing config without overwriting unrelated settings.
           cisco.ios.ios_logging_global:
             config:
               hosts:
@@ -129,21 +147,23 @@
           ansible.builtin.assert:
             that:
               - logging_config is not failed
-            fail_msg: "Failed to apply logging configuration to network device."
+            fail_msg: "ERROR: Failed to apply logging configuration to {{ inventory_hostname }}."
 
         - name: Verify connectivity to Syslog Server via Management VRF
+          # Error Handling: Uses 'failed_when' to catch ICMP failures specifically.
           cisco.ios.ios_command:
             commands:
-              - "ping vrf {{ network_management_vrf }} {{ syslog_server_ip }} repeat 2"
+              - "ping vrf {{ network_management_vrf }} {{ syslog_server_ip }} repeat 3"
           register: connectivity_test
           changed_when: false
           failed_when: "'Success rate is 0' in connectivity_test.stdout[0]"
 
   handlers:
     - name: Restart Syslog-ng
+      # Why: Ensures configuration changes are applied immediately.
       ansible.builtin.service:
         name: syslog-ng
         state: restarted
       register: restart_result
       listen: "Restart Syslog-ng"
-...
+```

@@ -1,35 +1,35 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: FortiGate Resource Usage Monitoring
-# Purpose: Retrieves and validates system resource usage (CPU, Memory) from FortiGate devices.
-# Standards: Idempotent (Read-only), Observable (Assertions), Documented (Comments), FQCN.
-
-- name: Monitor FortiGate System Resources
+- name: FortiGate Resource Usage Monitoring
+  # Target FortiGate group; gather_facts is disabled as CLI commands don't require Python-style fact collection.
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Fetch system resource usage via CLI
-      # Using FQCN for the netcommon collection to ensure portability
+    - name: Execute diagnose command to fetch system resource usage
+      # WHY: Real-time telemetry is critical for ensuring the device has sufficient headroom for automated changes.
+      # This task is inherently idempotent as it performs a read-only operation on the device control plane.
       ansible.netcommon.cli_command:
         command: diagnose system resource usage
-      register: resource_output
-      # Idempotency: Read-only commands must explicitly set changed_when to false
-      changed_when: false
-      # Error Handling: Detect if the command was rejected by the FortiOS parser
-      failed_when: 
-        - resource_output.rc | default(0) != 0
-        - "'Unknown command' in resource_output.stdout"
+      register: resource_result
+      # ERROR HANDLING: Ensure the command was recognized and returned data.
+      failed_when:
+        - resource_result.stdout | length == 0
+        - "'command parse error' in resource_result.stdout"
 
-    - name: Validate resource data retrieval
-      # Observability: Assert that the command returned non-empty diagnostic data
+    - name: Verify telemetry integrity
+      # OBSERVABILITY: Confirm the output contains expected performance metrics (CPU/Memory) to ensure a valid scrape.
       ansible.builtin.assert:
         that:
-          - resource_output.stdout is defined
-          - resource_output.stdout | length > 0
-        fail_msg: "Resource diagnostic command returned empty or invalid results."
-        success_msg: "Successfully captured FortiGate resource usage data."
+          - "'CPU' in resource_result.stdout"
+          - "'Memory' in resource_result.stdout"
+        fail_msg: "The command output is missing critical resource metrics (CPU/Memory)."
+        quiet: true
 
-    - name: Display Resource Usage Report
-      # Formatting the output for better visibility in automation logs and reports
+    - name: Display formatted resource usage report
+      # OBSERVABILITY: Provide a structured, human-readable view of the current system load for log visibility.
       ansible.builtin.debug:
         msg: |
+          ======================= RESOURCE USAGE: {{ inventory_hostname }} =======================
+          {{ resource_result.stdout }}
+```

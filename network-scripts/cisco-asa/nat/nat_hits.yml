@@ -1,37 +1,40 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NAT Translation Hits
-# This playbook retrieves NAT hitcount statistics from Cisco ASA/Firepower devices.
-# Implementation follows standards for Idempotency, Observability, and Best Practices.
-
-- name: Get NAT Translation Hitcounts
+# Playbook: Cisco ASA/Firepower NAT Hitcount Retrieval
+# Purpose: Audits NAT translation hits to identify active/stale rules.
+# Architect Note: This operation is idempotent as it performs a non-disruptive read-only query.
+- name: Get NAT Translation Hits
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute 'show nat' command to retrieve hitcounts
-      # Use FQCN for consistent plugin resolution.
-      # Read-only commands are inherently idempotent as they do not modify state.
+    - name: Execute command to retrieve NAT hitcounts
+      # FQCN: ansible.netcommon.cli_command is used for compatibility with ASA/FTD CLI
       ansible.netcommon.cli_command:
         command: show nat | include hitcount
       register: nat_hits
-      # Error Handling: Ensure the task fails if the command is unrecognized or execution fails.
+      # Error Handling: Explicitly handle command failure or CLI syntax errors
       failed_when: 
-        - nat_hits.failed | default(false)
-        - "'Invalid' in nat_hits.stdout"
+        - nat_hits.failed or "Invalid" in nat_hits.stdout
+      # Idempotency: show commands do not change device state
+      changed_when: false
 
-    - name: Validate that NAT hitcount data was retrieved
-      # Observability: Use assertions to verify that the output contains data,
-      # preventing silent failures in automation workflows.
+    - name: Verify NAT translation data was returned
+      # Observability: Ensure the buffer contains data before proceeding
       ansible.builtin.assert:
         that:
           - nat_hits.stdout is defined
           - nat_hits.stdout | length > 0
-        fail_msg: "No NAT hitcount data returned. Verify NAT rules exist on the target device."
-        success_msg: "NAT hitcount data successfully captured."
+        fail_msg: "No NAT hitcount data found. Verify NAT configuration on {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display NAT Hitcount Results
-      # Observability: Provide clear, formatted output for operational visibility.
+    - name: Display NAT Statistics Report
+      # Documentation: Formatted output for operator visibility
       ansible.builtin.debug:
         msg: |
-          ======================= NAT HITS =======================
+          ==========================================================
+          NAT HITCOUNT SUMMARY FOR {{ inventory_hostname | upper }}
+          ==========================================================
           {{ nat_hits.stdout }}
+          ==========================================================
+```

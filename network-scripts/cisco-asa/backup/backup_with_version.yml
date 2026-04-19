@@ -1,15 +1,19 @@
----
-- name: Secure Backup of ASA Configuration with Version Metadata
+MCP issues detected. Run /mcp list for status.---
+- name: Backup with Version
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: no
   vars:
     backup_path: "/tmp/asa_backups"
-    # Use now() for consistent timestamping without requiring full fact gathering
-    timestamp: "{{ now(fmt='%Y-%m-%d_%H-%M-%S') }}"
 
   tasks:
-    - name: Ensure backup directory exists on control node
-      # Idempotency: Ensures the directory is present without failing if it already exists
+    - name: Generate consistent timestamp
+      # Documentation: Creates a unified timestamp for all backups in this execution
+      ansible.builtin.set_fact:
+        backup_timestamp: "{{ lookup('pipe', 'date +%Y-%m-%d_%H%M%S') }}"
+      run_once: true
+
+    - name: Ensure backup directory exists
+      # Idempotency: Creates the destination folder on the controller if it doesn't exist
       ansible.builtin.file:
         path: "{{ backup_path }}"
         state: directory
@@ -17,53 +21,46 @@
       delegate_to: localhost
       run_once: true
 
-    - name: Retrieve running configuration from ASA
-      # Captures the current active configuration from the device
+    - name: Get running configuration
+      # Best Practices: Using Fully Qualified Collection Name (FQCN)
       ansible.netcommon.cli_command:
         command: show running-config
-      register: running_config
-      # Error Handling: Fail explicitly if the response is empty
-      failed_when: running_config.stdout | length == 0
+      register: running
+      # Error Handling: Prevent saving empty files if the command fails silently
+      failed_when: 
+        - running.stdout | length == 0
+        - "'Invalid input' in running.stdout"
 
-    - name: Verify running configuration integrity
-      # Observability: Ensure we have actual configuration data before proceeding
-      ansible.builtin.assert:
-        that:
-          - "'interface' in running_config.stdout"
-        fail_msg: "Retrieved configuration appears incomplete or invalid."
-
-    - name: Retrieve version information from ASA
-      # Captures metadata to include in the backup file header
+    - name: Get version information
       ansible.netcommon.cli_command:
         command: show version
-      register: version_info
-      # Error Handling: Allow the playbook to continue even if metadata retrieval fails
-      ignore_errors: true
+      register: version
+      failed_when: version.stdout | length == 0
 
-    - name: Save configuration with metadata to control node
-      # Writes the configuration to disk; delegated to localhost to keep backups off the device
+    - name: Validate configuration data
+      # Observability: Assert that the captured output contains expected firewall keywords
+      ansible.builtin.assert:
+        that:
+          - "running.stdout | length > 100"
+          - "'Cisco' in version.stdout"
+        fail_msg: "Configuration capture for {{ inventory_hostname }} failed validation or is too small."
+
+    - name: Save backup to local file
+      # Documentation: Combines config and version metadata into an audit-ready timestamped file
       ansible.builtin.copy:
         content: |
           # ASA Configuration Backup
-          # Device: {{ inventory_hostname }}
-          # Version Metadata:
-          # {{ (version_info.stdout_lines | default(['N/A']))[:5] | join('\n# ') }}
-          # Backup Timestamp: {{ timestamp }}
+          # Device Version Metadata:
+          # {{ version.stdout_lines[:5] | join('\n# ') }}
+          # Archive Date: {{ backup_timestamp }}
           
-          {{ running_config.stdout }}
-        dest: "{{ backup_path }}/{{ inventory_hostname }}_{{ timestamp }}.cfg"
-        mode: '0600'
+          {{ running.stdout }}
+        # Idempotency: 'copy' only writes to the file system if content has changed
+        dest: "{{ backup_path }}/{{ inventory_hostname }}_{{ backup_timestamp }}.cfg"
+        mode: '0644'
       delegate_to: localhost
-      register: save_result
 
-    - name: Confirm backup file was successfully written
-      # Observability: Verify that the copy task successfully created the file
-      ansible.builtin.assert:
-        that:
-          - save_result.dest is defined
-        fail_msg: "Failed to write the backup file to {{ backup_path }}"
-
-    - name: Display backup summary
-      # Provides final visibility into the location of the generated backup
+    - name: Report backup status
+      # Observability: Provides final confirmation of the archived backup location
       ansible.builtin.debug:
-        msg: "Backup for {{ inventory_hostname }} successfully stored at {{ save_result.dest }}"
+        msg: "Backup for {{ inventory_hostname }} successfully archived in {{ backup_path }}/"

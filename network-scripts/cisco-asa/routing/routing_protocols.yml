@@ -1,29 +1,35 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: Routing Protocols Analysis
+# ARCHITECTURAL AUDIT: Routing Protocol Verification
+# This playbook retrieves and validates the routing protocol configuration on ASA/Firepower devices.
+# It is idempotent (read-only) and implements NetLearner observability standards.
+- name: Audit Routing Protocols
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Performance optimization: device facts are not required for this audit.
 
   tasks:
-    - name: Retrieve active routing protocol configuration
-      # Use FQCN (Best Practice). Retrieval tasks are idempotent as they do not modify the device state.
-      # Output is registered to provide visibility into the command result for observability.
+    - name: Retrieve active routing protocol configuration from device
+      # Using Fully Qualified Collection Names (FQCN) for cross-platform compatibility and long-term stability.
       ansible.netcommon.cli_command:
-        command: show running-config | include router
-      register: routing_info
-      # Error Handling: Explicitly fail the task if the command execution encounters an error.
-      failed_when: routing_info.failed
+        command: "show running-config | include router"
+      register: protocols_capture
+      # Error Handling: Only fail if the command itself returns a system error, not if the output is empty.
+      failed_when:
+        - protocols_capture.failed | default(false)
+        - "'Invalid input' in protocols_capture.stderr or 'Error' in protocols_capture.stderr"
 
-    - name: Validate command success
-      # Observability: Assert that the command returned a valid response to ensure data integrity.
+    - name: Assert successful data capture for architectural observability
+      # Observability: Validating that the captured object exists and is usable for downstream reporting.
       ansible.builtin.assert:
         that:
-          - routing_info.stdout is defined
-        fail_msg: "Failed to retrieve data from {{ inventory_hostname }}. Check connectivity and credentials."
-        quiet: true
+          - protocols_capture.stdout is defined
+        fail_msg: "Critical: Failed to retrieve routing configuration from {{ inventory_hostname }}."
+        success_msg: "Success: Routing configuration successfully retrieved from {{ inventory_hostname }}."
 
-    - name: Display Routing Protocol Configuration
-      # Observability: Provide clear, formatted output to the console for operator review.
+    - name: Display routing protocol status report
+      # Providing a clean, human-readable summary that accounts for empty configurations.
       ansible.builtin.debug:
         msg: |
           ======================= ROUTING PROTOCOLS: {{ inventory_hostname }} =======================
-          {{ routing_info.stdout if routing_info.stdout | length > 0 else 'No active routing protocols detected.' }}
+          {{ protocols_capture.stdout if protocols_capture.stdout | trim | length > 0 else 'STATUS: No active routing protocols detected.' }}
+```

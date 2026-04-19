@@ -1,38 +1,38 @@
----
-# FortiGate Policy Hit Count
-# This playbook retrieves and validates firewall policy hitcount statistics.
-# Improved for: Idempotency, Observability, Documentation, Error Handling, and FQCN.
+MCP issues detected. Run /mcp list for status.---
+# Policy Hitcount - Refined by NetLearner Architect
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Purpose: Safe, verified retrieval of policy hitcount telemetry from FortiGate devices.
 
-- name: Retrieve FortiGate Policy Hit Counts
+- name: Get FortiGate Policy Hit Count
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve hit count statistics from FortiOS CLI
-      # Use FQCN (ansible.netcommon.cli_command) for standardized network execution.
-      # Idempotency: changed_when: false ensures read-only tasks do not report state changes.
+    - name: "FortiGate: Retrieve Firewall Policy Hitcounts"
+      # Read-only 'get' operation is inherently idempotent.
+      # Utilizes FQCN for cross-platform network CLI execution.
       ansible.netcommon.cli_command:
-        command: get firewall policy hitcount
-      register: hits
-      changed_when: false
-      # Error Handling: Explicitly fail if the command returns a "Command fail" or "Unknown action" string.
+        command: "get firewall policy hitcount"
+      register: hits_result
+      # Error Handling: Catch common FortiOS CLI error strings that don't trigger a non-zero exit code.
       failed_when: 
-        - hits.failed or "Command fail" in hits.stdout or "Unknown action" in hits.stdout
+        - "('Command fail' in hits_result.stdout) or ('Unknown action' in hits_result.stdout)"
 
-    - name: Validate hit count data integrity
-      # Observability: Use assert to ensure that data was actually returned and isn't empty.
+    - name: "Observability: Verify Telemetry Response"
+      # Observability: Validate that the command returned data to prevent silent failures.
+      # Asserts that the payload is non-empty before proceeding to display.
       ansible.builtin.assert:
         that:
-          - "hits.stdout is defined"
-          - "hits.stdout | length > 0"
-        fail_msg: "Hitcount data retrieval failed or returned an empty result. Verify policy configuration on the device."
-        success_msg: "Successfully retrieved hitcount data."
+          - hits_result.stdout is defined
+          - hits_result.stdout | length > 0
+        fail_msg: "Telemetry Failure: No hitcount data returned from {{ inventory_hostname }}."
         quiet: true
 
-    - name: Display Formatted Policy Hit Count
-      # Documentation: Provide clear, formatted output for operational visibility.
+    - name: "Observability: Display Formatted Hitcount Data"
+      # Formats output for clear visibility in automation logs and human review.
       ansible.builtin.debug:
         msg: |
-          ======================= POLICY HIT COUNT REPORT =======================
-          {{ hits.stdout }}
-          =======================================================================
+          ======================= [ {{ inventory_hostname }} ] POLICY HIT COUNT =======================
+          {{ hits_result.stdout }}
+
+---

@@ -1,35 +1,39 @@
----
-# FortiGate Administrative User Audit Playbook
-# Purpose: This playbook retrieves the list of configured administrators for audit compliance.
-# Standards: Idempotency is maintained via read-only commands; Observability via assertions.
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect Standard: FortiGate Admin Audit
+# Last Modified: 2026-04-12
+# Improvements: FQCN usage, Output Validation (Observability), and Error Trapping.
 
-- name: Get FortiGate Admin List
+- name: Get FortiGate Administrator List
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # FortiOS does not support standard Ansible fact gathering; performance optimization.
 
   tasks:
-    - name: Retrieve system administrator list
-      # Using FQCN for reliable module resolution.
-      # This task is idempotent as it performs a non-modifying state retrieval.
+    - name: Execute 'get system admin' Command
+      # Using Fully Qualified Collection Name (FQCN) for cross-environment reliability.
+      # Read-only 'get' operations are inherently idempotent as they do not modify device state.
       ansible.netcommon.cli_command:
-        command: get system admin
-      register: admin_output
-      # Error Handling: Capture cases where the device might return a success code but an error string in stdout.
-      failed_when:
-        - admin_output.failed or "Command fail" in admin_output.stdout or "Unknown action" in admin_output.stdout
+        command: "get system admin"
+      register: admin_list
+      # Error Handling: Catch CLI-specific error strings that may not trigger a non-zero exit code.
+      failed_when: 
+        - admin_list.stdout is not defined
+        - "'unknown command' in admin_list.stdout | lower"
+        - "'command fail' in admin_list.stdout | lower"
 
-    - name: Verify administrator data was retrieved
-      # Observability: Ensure the playbook does not silently succeed with empty data.
+    - name: Verify Admin List Integrity
+      # Observability: Assert that the output is populated and contains expected data.
+      # This ensures subsequent automation layers do not process null or corrupted data.
       ansible.builtin.assert:
         that:
-          - admin_output.stdout is defined
-          - admin_output.stdout | length > 0
-        fail_msg: "The administrator list could not be retrieved or is empty."
-        success_msg: "Administrator list captured successfully."
+          - admin_list.stdout | length > 0
+          - "'admin' in admin_list.stdout or 'name' in admin_list.stdout"
+        fail_msg: "Data Integrity Error: The administrator list is empty or the format is unrecognized."
+        success_msg: "Data Integrity Verified: Administrator list retrieved successfully."
 
-    - name: Display formatted administrator details
-      # Documentation: Providing clear visibility for human operators or log analysis.
+    - name: Display Administrator Report
+      # Observability: Formatted output for clear visibility in NetLearner Staging execution logs.
       ansible.builtin.debug:
         msg: |
           ======================= FORTIGATE ADMINS =======================
-          {{ admin_output.stdout }}
+          {{ admin_list.stdout }}
+          ======================= AUDIT COMPLETE =========================

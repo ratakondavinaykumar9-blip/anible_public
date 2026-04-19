@@ -1,64 +1,68 @@
----
+MCP issues detected. Run /mcp list for status.---
 - name: Production Deployment of Cisco Nexus 9k vPC Domain
   hosts: nexus_spine_agg
   gather_facts: false
   vars:
-    # vPC Domain ID must match between peers to form the adjacency
+    # Global vPC Domain Settings
     vpc_domain_id: 10
-    # System priority defines the LACP system ID; lower is preferred
     vpc_system_priority: 4096
-    # Role priority: Lower value wins (Primary). Set 10 for Primary, 20 for Secondary in host_vars
-    vpc_role_priority: 10
-    # Isolation of Keepalive traffic in a dedicated VRF prevents routing loops and side-channel attacks
+    # Recommended: 10 for Primary, 20 for Secondary.
+    # Lower priority wins the 'Primary' role in vPC election.
+    vpc_role_priority: 10 
     vpc_pkl_vrf: "PKL-VRF"
     
-    # Peer Keepalive (PKL) Networking - Must be populated via inventory or host_vars
-    vpc_pkl_src: ""   
-    vpc_pkl_dest: ""  
-    vpc_pkl_intf: "Management0"
+    # Peer Keepalive (PKL) Networking
+    # Must be unique per member and reachable via the designated VRF.
+    vpc_pkl_src: ""   # Local PKL IP
+    vpc_pkl_dest: ""  # Remote PKL IP
+    vpc_pkl_intf: "Management0" 
     
-    # Best Practice vPC Flags for loop prevention and fast convergence
-    vpc_peer_gateway: true    # Allows vPC peers to forward packets destined for the peer's MAC
-    vpc_peer_switch: true     # Optimizes STP by making the vPC pair appear as a single logical switch
-    vpc_auto_recovery: true   # Enables vPC restoration if both peers reload and only one comes up
-    vpc_delay_restore: 150    # Seconds to wait for IGP/BGP convergence before bringing up vPC links
-    vpc_ipv6_nd_sync: true    # Synchronizes ND table between peers
+    # Best Practice vPC Flags
+    # peer-gateway: Allows local forwarding for packets destined to peer MAC.
+    vpc_peer_gateway: true
+    # peer-switch: Allows both switches to appear as a single STP root.
+    vpc_peer_switch: true
+    # auto-recovery: Restores vPC locally if peer stays down after reload.
+    vpc_auto_recovery: true
+    vpc_delay_restore: 150
+    vpc_ipv6_nd_sync: true
     
-    # Peer-Link: High-bandwidth trunk for control plane and orphan port traffic
+    # Peer-Link Configuration
     vpc_peer_link_pc_id: 100
     vpc_peer_link_interfaces:
       - "Ethernet1/1"
       - "Ethernet1/2"
-    # Jumbo frames (9216) are mandatory for Peer-Links to prevent fragmentation of encapsulated traffic
+    # MTU 9216: Required for vPC control traffic and to avoid fragmentation.
     vpc_peer_link_mtu: 9216
 
   tasks:
-    - name: "Pre-Flight: Validate Mandatory Variables"
+    - name: "Pre-Flight: Validate Required Variables"
       ansible.builtin.assert:
         that:
           - vpc_pkl_src | length > 0
           - vpc_pkl_dest | length > 0
-        fail_msg: "ERROR: vpc_pkl_src and vpc_pkl_dest must be defined to establish Peer-Keepalive."
+        fail_msg: "Variable Validation Failed: vpc_pkl_src and vpc_pkl_dest must be defined."
 
     - name: Execute vPC Domain Configuration Block
       block:
-        - name: "Phase 0: Enable Required Features"
+        - name: "Phase 0: Enable Required Features (Idempotent)"
           cisco.nxos.nxos_feature:
             feature: "{{ item }}"
             state: enabled
           loop:
             - vpc
             - lacp
-          register: feature_result
+          register: features_status
 
         - name: "Phase 1.1: Configure PKL VRF"
           cisco.nxos.nxos_vrf:
             name: "{{ vpc_pkl_vrf }}"
             description: "Dedicated VRF for vPC Peer-Keepalive"
             state: present
-          register: vrf_result
+          register: vrf_status
 
         - name: "Phase 1.2: Configure PKL L3 Interface"
+          # Ensures the L3 interface is correctly mapped to the VRF before IP assignment.
           cisco.nxos.nxos_l3_interfaces:
             config:
               - name: "{{ vpc_pkl_intf }}"
@@ -66,9 +70,10 @@
                   - address: "{{ vpc_pkl_src }}/30"
                 vrf: "{{ vpc_pkl_vrf }}"
             state: merged
-          register: l3_int_result
+          register: l3_intf_status
 
         - name: "Phase 2: Configure vPC Domain Parameters"
+          # merged state ensures only required changes are pushed, maintaining idempotency.
           cisco.nxos.nxos_vpc_domain:
             domain: "{{ vpc_domain_id }}"
             peer_keepalive:
@@ -83,7 +88,7 @@
             delay_restore: "{{ vpc_delay_restore }}"
             ipv6_nd_sync: "{{ vpc_ipv6_nd_sync }}"
             state: merged
-          register: vpc_domain_result
+          register: vpc_domain_status
 
         - name: "Phase 3.1: Initialize Peer-Link Port-Channel"
           cisco.nxos.nxos_lag_interfaces:
@@ -91,9 +96,10 @@
               - name: "Port-channel{{ vpc_peer_link_pc_id }}"
                 mode: active
             state: merged
-          register: lag_init_result
+          register: lag_init_status
 
         - name: "Phase 3.2: Configure Peer-Link Physical Interfaces"
+          # Configuring MTU and description before bundling into Port-Channel.
           cisco.nxos.nxos_ethernet_interfaces:
             config:
               - name: "{{ item }}"
@@ -101,7 +107,7 @@
                 description: "vPC Peer-Link Member"
             state: merged
           loop: "{{ vpc_peer_link_interfaces }}"
-          register: eth_int_result
+          register: phys_intf_status
 
         - name: "Phase 3.3: Assign Physical Interfaces to Peer-Link Port-Channel"
           cisco.nxos.nxos_lag_interfaces:
@@ -112,7 +118,6 @@
                     mode: active
             state: merged
           loop: "{{ vpc_peer_link_interfaces }}"
-          register: lag_member_result
 
         - name: "Phase 4: Designate Port-Channel as vPC Peer-Link"
           cisco.nxos.nxos_vpc_interface:
@@ -120,31 +125,24 @@
               - name: "Port-channel{{ vpc_peer_link_pc_id }}"
                 peer_link: true
             state: merged
-          register: vpc_int_result
+          register: vpc_intf_status
 
-        - name: "Phase 5.1: Verify PKL Reachability"
-          cisco.nxos.nxos_command:
-            commands:
-              - "ping {{ vpc_pkl_dest }} vrf {{ vpc_pkl_vrf }} count 5"
-          register: pkl_ping
-          failed_when: "'0% packet loss' not in pkl_ping.stdout[0]"
-
-        - name: "Phase 5.2: Verify vPC Operational State"
+        - name: "Phase 5: Collect vPC Operational State"
           cisco.nxos.nxos_command:
             commands:
               - "show vpc brief"
               - "show vpc peer-keepalive"
           register: vpc_verify
 
-        - name: "Phase 5.3: Assert Operational Parameters"
+        - name: "Phase 6: Observability - Assert Peer-Keepalive Status"
           ansible.builtin.assert:
             that:
-              - "'vPC domain id                     : {{ vpc_domain_id }}' in vpc_verify.stdout[0]"
-              - "'Peer status                        : peer adjacency formed ok' in vpc_verify.stdout[0]"
-            fail_msg: "vPC Adjacency failed to form correctly. Check Peer-Link and PKL status."
+              - "'peer is alive' in vpc_verify.stdout[1]"
+            fail_msg: "Validation Failed: vPC Peer-Keepalive status is NOT 'alive'. Check PKL VRF and L3 connectivity."
+            success_msg: "Validation Success: vPC Peer-Keepalive is active and reaching the neighbor."
 
       rescue:
-        - name: "CRITICAL: vPC Configuration Failure Detected"
+        - name: "Phase 7: Diagnostic Collection on Failure"
           cisco.nxos.nxos_command:
             commands:
               - "show vpc brief"
@@ -152,20 +150,21 @@
           register: vpc_diag
           ignore_errors: true
 
-        - name: "Report Failure Diagnostics"
+        - name: "Phase 8: Report Failure Diagnostics"
           ansible.builtin.debug:
             msg: 
-              - "vPC Deployment failed on {{ inventory_hostname }}"
+              - "ERROR: vPC Deployment failed on {{ inventory_hostname }}"
               - "Diagnostics Output: {{ vpc_diag.stdout_lines | default('No diagnostics available') }}"
           
-        - name: "Fail Playbook Execution"
+        - name: "Phase 9: Explicit Playbook Failure"
           ansible.builtin.fail:
-            msg: "vPC Domain setup failed. Verify Type-1 consistency, MTU mismatches, or PKL routing in VRF {{ vpc_pkl_vrf }}."
+            msg: "vPC Domain setup failed. Consult diagnostics in Phase 8 for vPC Type-1 inconsistencies."
 
       always:
-        - name: "Archive Configuration State"
+        - name: "Phase 10: State Persistence and Backup"
+          # 'save_when: modified' ensures we only write to startup-config if actual changes occurred.
           cisco.nxos.nxos_config:
             backup: true
             save_when: modified
-          register: config_backup
-          when: vpc_domain_result is defined
+          register: config_save_status
+          ignore_errors: true

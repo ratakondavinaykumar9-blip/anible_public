@@ -1,32 +1,37 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: Cisco ASA/Firepower Power Supply Status Audit
+# Power Supply Status Monitoring for Cisco ASA/Firepower
+# This playbook retrieves and validates the status of power supplies to ensure hardware redundancy.
+- name: Get Power Supply Status
   hosts: asa_firepower
-  gather_facts: false
-  # This playbook is idempotent as it performs read-only operations to audit hardware status.
+  gather_facts: false # Optimization: Skip standard host facts for network infrastructure
 
   tasks:
-    - name: Execute 'show power' command on the target device
-      # Using Fully Qualified Collection Name (FQCN) to ensure best practices and portability
-      cisco.asa.asa_command:
-        commands:
-          - show power
-      register: power_output
-      # Error Handling: Fail explicitly if the command is unrecognized or returns an error string
+    - name: Retrieve power supply status from device
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: show power
+      register: r_power_status
+      # Error Handling: Fail if output is empty or the command is unrecognized
       failed_when:
-        - power_output.failed or "Invalid input" in power_output.stdout[0]
+        - r_power_status.stdout | length == 0
+        - "'Invalid input' in r_power_status.stdout"
 
-    - name: Verify that power supply data was successfully captured
-      # Observability: Assert that the command returned non-empty output to ensure data integrity
+    - name: Verify power supply operational health
+      # Observability: Assert that the hardware reports no critical failures
       ansible.builtin.assert:
         that:
-          - power_output.stdout is defined
-          - power_output.stdout[0] | length > 0
-        fail_msg: "Power supply status could not be retrieved or the output is empty."
-        success_msg: "Power supply status successfully retrieved from the device."
+          - "'Power Supply' in r_power_status.stdout"
+          - "'Fail' not in r_power_status.stdout"
+          - "'Off' not in r_power_status.stdout"
+        fail_msg: "Hardware alert: Power supply failure or disconnection detected on {{ inventory_hostname }}."
+        success_msg: "Power supply verification successful for {{ inventory_hostname }}."
 
-    - name: Display the formatted power supply status
-      # Documentation: Providing a clear, human-readable view of the hardware status for audit logs
+    - name: Display power supply summary
+      # Documentation: Provide clear, formatted output for operational visibility
       ansible.builtin.debug:
         msg: |
-          ======================= POWER SUPPLY STATUS =======================
-          {{ power_output.stdout[0] }}
+          ======================= POWER STATUS: {{ inventory_hostname }} =======================
+          {{ r_power_status.stdout }}
+          =======================================================================================
+```

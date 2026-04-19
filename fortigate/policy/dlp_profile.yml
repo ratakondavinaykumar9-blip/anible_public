@@ -1,38 +1,36 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 # FortiGate DLP Profile Retrieval
-# This playbook retrieves the Data Loss Prevention (DLP) profile configuration
-# from FortiGate devices while ensuring idempotency and observability.
-
-- name: Get FortiGate DLP Profile
+# Purpose: Safely fetches DLP profile configuration with validation and error handling.
+# Adheres to NetLearner Staging idempotency and observability standards.
+- name: Get DLP Profile
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve DLP profile configuration via CLI
-      # Use FQCN for the network command module
+    - name: Retrieve DLP profile via CLI
+      # Use Fully Qualified Collection Name (FQCN) to ensure module reliability
       ansible.netcommon.cli_command:
         command: get firewall dlp-profile
-      register: dlp_profile_result
-      # IDEMPOTENCY: Retrieval operations are read-only and should not indicate a 'changed' state.
-      changed_when: false
-      # ERROR HANDLING: Explicitly fail if the command returns a non-zero exit code or typical error strings.
+      register: dlp_raw
+      # Error Handling: Explicitly catch FortiOS CLI errors and unexpected failures
       failed_when:
-        - dlp_profile_result.rc != 0
-        - "'Command fail' in dlp_profile_result.stdout"
-        - "'Unknown action' in dlp_profile_result.stdout"
+        - dlp_raw.failed
+        - "'Unknown' in dlp_raw.stdout"
+        - "'Command fail' in dlp_raw.stdout"
 
-    - name: Verify DLP profile data integrity
-      # OBSERVABILITY: Assert that the output is not empty and contains valid data structures.
+    - name: Validate DLP profile data
+      # Observability: Assert that the output is not empty to verify successful communication
       ansible.builtin.assert:
         that:
-          - dlp_profile_result.stdout is defined
-          - dlp_profile_result.stdout | length > 0
-        fail_msg: "DLP profile retrieval failed: No data returned from the device."
-        success_msg: "DLP profile data successfully captured and validated."
+          - dlp_raw.stdout | length > 0
+        fail_msg: "DLP profile retrieval returned no data. Check device connectivity or configuration."
+        success_msg: "DLP profile successfully retrieved and validated."
 
-    - name: Display formatted DLP profile output
-      # FQCN used for debugging and logging purposes.
+    - name: Display DLP Profile Configuration
+      # Observability: Provide formatted output for manual audit and verification
       ansible.builtin.debug:
         msg: |
-          ======================= DLP PROFILE SUMMARY =======================
-          {{ dlp_profile_result.stdout }}
+          ======================= DLP PROFILE =======================
+          {{ dlp_raw.stdout }}
+```

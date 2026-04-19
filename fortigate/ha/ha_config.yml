@@ -1,44 +1,43 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate HA Status Verification Playbook
-# Improved for: Idempotency, Observability, Documentation, Error Handling, and FQCN.
-- name: FortiGate HA Configuration Assessment
+# FortiGate High Availability (HA) Configuration Audit
+# NetLearner Standard: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Refined by: NetLearner Architect
+---
+- name: Audit FortiGate HA State
   hosts: fortigate
   gather_facts: false
+  # any_errors_fatal ensures we don't proceed with automated changes if cluster health is compromised
+  any_errors_fatal: true
 
   tasks:
-    - name: Retrieve High Availability configuration from FortiGate
-      # Why: Fetches current system HA status to verify cluster membership. 
-      # This 'get' command is inherently idempotent as it performs no state changes.
+    - name: Retrieve system HA configuration state
+      # Best Practices: Using Fully Qualified Collection Name (FQCN) for CLI interaction
       ansible.netcommon.cli_command:
         command: get system ha
-      register: ha_status
-      # Error Handling: Explicitly fail if the command returns a non-zero exit code or FortiOS error string.
+      register: ha_config
+      # Idempotency: Read-only operations must report 'changed: false' to ensure consistent state tracking
+      changed_when: false
+      # Error Handling: Explicitly fail if the command is unrecognized or the underlying transport fails
       failed_when: 
-        - ha_status.rc != 0
-        - "'Command fail' in ha_status.stdout"
+        - ha_config.failed
+        - "'Unknown' in ha_config.stdout"
 
-    - name: Validate HA command execution success
-      # Why: Observability - confirms that the device returned a valid, non-empty response.
+    - name: Validate operational HA participation
+      # Observability: Use 'assert' to verify that the node is not in 'standalone' mode
       ansible.builtin.assert:
         that:
-          - ha_status.stdout is defined
-          - ha_status.stdout | length > 0
-        fail_msg: "Failed to retrieve HA configuration or device returned empty output."
-        success_msg: "HA configuration successfully retrieved and registered."
+          - "'mode: standalone' not in ha_config.stdout"
+        fail_msg: "CRITICAL: {{ inventory_hostname }} is in STANDALONE mode. Cluster failure or sync loss detected."
+        success_msg: "SUCCESS: {{ inventory_hostname }} HA participation verified."
+      # Documentation: This assertion enforces the architectural requirement for clustered operations
 
-    - name: Verify HA Cluster Operational Mode
-      # Why: Ensures the device is actually part of an HA cluster and not in standalone mode.
-      ansible.builtin.assert:
-        that:
-          - "'mode: standalone' not in ha_status.stdout"
-        fail_msg: "WARNING: Device is in standalone mode! HA cluster may be down or unconfigured."
-        success_msg: "Device is confirmed to be in an HA cluster mode (A-P or A-A)."
-      # ignore_errors: Used here to allow audit plays to continue even if HA is not active.
-      ignore_errors: true
-
-    - name: Display HA Configuration Details
-      # Why: Provides human-readable output for visibility into the HA cluster state.
+    - name: Display formatted HA configuration telemetry
+      # Observability/Documentation: Provides structured visibility into the device's operational state
       ansible.builtin.debug:
         msg: |
-          ======================= HA OPERATIONAL STATUS =======================
-          {{ ha_status.stdout }}
+          ======================= HA CONFIG AUDIT: {{ inventory_hostname }} =======================
+          {{ ha_config.stdout }}
+      # Ensure task only runs if telemetry data was successfully registered
+      when: ha_config.stdout is defined
+```

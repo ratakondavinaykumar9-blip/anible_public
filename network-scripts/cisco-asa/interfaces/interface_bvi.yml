@@ -1,37 +1,33 @@
----
-# NetLearner Architect Standardized Playbook: BVI Retrieval
-# Purpose: Retrieves the configuration and operational status of the Bridge Virtual Interface (BVI).
-# Idempotency: This playbook is inherently idempotent as it utilizes read-only 'show' commands.
-- name: Get Bridge Virtual Interface (BVI) Status
+MCP issues detected. Run /mcp list for status.---
+# Bridge Virtual Interface (BVI) Status Verification
+# Purpose: Retrieves and validates the BVI status to ensure bridge-group connectivity is operational.
+- name: Get and Verify Bridge Virtual Interface (BVI)
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute 'show interface BVI' command
-      # Use Fully Qualified Collection Name (FQCN) for consistency and portability.
+    - name: Retrieve BVI interface status
+      # FQCN: Using ansible.netcommon.cli_command for standardized CLI execution across network devices.
+      # Idempotency: This is a read-only operation; it is safe to run multiple times without changing state.
       ansible.netcommon.cli_command:
         command: show interface BVI
-      register: bvi_result
-      # Error Handling: Do not fail if the BVI interface is simply not configured on the device.
-      # We only fail on actual communication or execution errors.
-      failed_when: 
-        - bvi_result.failed
-        - "'Invalid input' not in bvi_result.stdout"
-        - "'not found' not in bvi_result.stdout"
+      register: bvi_output
+      # Error Handling: Explicitly fail if the interface is missing or the command is unrecognized by the OS.
+      failed_when:
+        - bvi_output.failed or "Invalid input" in bvi_output.stdout or "not found" in bvi_output.stdout
 
-    - name: Validate command response integrity
-      # Observability: Ensure that the command returned a valid stdout object to prevent downstream failures.
+    - name: Validate BVI observability
+      # Observability: Ensure that the command output is populated and meaningful before proceeding.
       ansible.builtin.assert:
         that:
-          - bvi_result.stdout is defined
-        fail_msg: "Data retrieval failure: No output received from {{ inventory_hostname }}."
-        quiet: true
+          - bvi_output.stdout is defined
+          - bvi_output.stdout | length > 0
+        fail_msg: "Data Capture Error: The BVI interface may not be configured on this host."
+        success_msg: "Data Capture Success: BVI interface status retrieved and validated."
 
-    - name: Provide formatted operational visibility
-      # Documentation: Use a structured debug message to clearly indicate if the BVI is present or missing.
+    - name: Display BVI status report
+      # Documentation: Provide a formatted view of the BVI status for operational auditing and transparency.
       ansible.builtin.debug:
         msg: |
-          ===========================================================
-          BVI STATUS REPORT - {{ inventory_hostname }}
-          ===========================================================
-          {{ bvi_result.stdout if 'interface BVI' in bvi_result.stdout else 'INFO: BVI interface is not configured on this device.' }}
+          ======================= BVI STATUS REPORT =======================
+          {{ bvi_output.stdout }}

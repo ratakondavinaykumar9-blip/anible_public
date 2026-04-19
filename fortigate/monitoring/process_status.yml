@@ -1,38 +1,38 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Process Status - Improved Production Playbook
-# Purpose: Retrieves and validates system process information for health monitoring.
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
-
+# FortiGate Process Status Monitoring
+# Purpose: Retrieves and validates system process information for operational observability.
+# Compliance: NetLearner Architect Standards (Idempotency, Observability, FQCN, Error Handling)
 - name: Get FortiGate Process Status
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute FortiOS diagnostic command for process list
-      # Why: Retrieves real-time process state. Read-only commands are inherently idempotent.
-      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interaction.
+    - name: Execute FortiOS process list command
+      # FQCN: Using ansible.netcommon collection for network CLI compatibility.
+      # Idempotency: diagnose commands are read-only; changed_when: false ensures no state change is reported.
       ansible.netcommon.cli_command:
         command: diagnose system process list
-      register: proc_results
-      # Error Handling: Catch CLI-specific error strings that might not return a non-zero exit code.
+      register: proc_status
+      changed_when: false
+      # Error Handling: Identify failure if the command is unsupported or the connection fails.
       failed_when:
-        - proc_results.failed | default(false)
-        - "'command parse error' in proc_results.stdout | lower"
-        - "'unknown command' in proc_results.stdout | lower"
+        - proc_status.failed or "Unknown command" in proc_status.stdout
 
-    - name: Verify process data observability
-      # Observability: Assert that the command returned valid, non-empty process data.
+    - name: Verify process data integrity
+      # Observability: Assert that we received meaningful data containing expected headers.
       ansible.builtin.assert:
         that:
-          - proc_results.stdout is defined
-          - proc_results.stdout | length > 0
-          - "'PID' in proc_results.stdout or 'process' in proc_results.stdout | lower"
-        fail_msg: "Process list retrieval failed or returned unexpected content."
-        success_msg: "System process list successfully captured and validated."
+          - proc_status.stdout is defined
+          - proc_status.stdout | length > 0
+          - "'PID' in proc_status.stdout or 'Run Time' in proc_status.stdout"
+        fail_msg: "Process information retrieval failed or returned an unexpected format."
+        quiet: true
 
     - name: Display system process status
-      # Why: Provides visibility into the registered state for the automation operator.
+      # Documentation: Formatted output for human-readable audit logs and troubleshooting.
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE PROCESSES =======================
-          {{ proc_results.stdout }}
+          ======================= FORTIGATE PROCESS STATUS =======================
+          {{ proc_status.stdout }}
+```

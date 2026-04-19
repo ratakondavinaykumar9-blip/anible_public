@@ -1,31 +1,31 @@
----
-- name: Retrieve Cisco ASA Interface Statistics
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect Standard - Interface Statistics Retrieval
+# Purpose: Gathers interface packet counters for Cisco ASA/Firepower platforms.
+# Standards: Idempotency (Read-only), Observability (Assert), Best Practices (FQCN).
+- name: Get Interface Counters
   hosts: asa_firepower
   gather_facts: false
-  # Standard: Documentation - Provides read-only visibility into interface health for monitoring
 
   tasks:
-    - name: Fetch interface counters using regex filtering
-      # Standard: Best Practices - Use FQCN for specific platform collections
-      # Standard: Idempotency - Read-only commands are inherently idempotent and safe for repeated execution
-      cisco.asa.asa_command:
-        commands:
-          - show interface | include (OK|input packets|output packets)
-      register: interface_counters
-      # Standard: Error Handling - Prevents silent failures if the command returns an error or empty string
-      failed_when:
-        - interface_counters.failed or interface_counters.stdout[0] == ""
-        - "'Invalid input' in interface_counters.stdout[0]"
+    - name: Execute show interface command
+      # Why: Using cli_command for filtered retrieval. Safe for repeat execution (Idempotent).
+      ansible.netcommon.cli_command:
+        command: "show interface | include (OK|input packets|output packets)"
+      register: counters
+      # Error Handling: Explicit failure if command returns no data to prevent silent success.
+      failed_when: counters.stdout == ""
 
-    - name: Validate that counter data was successfully retrieved
-      # Standard: Observability - Explicitly verify the data exists before proceeding
+    - name: Verify counter data integrity
+      # Why: Observability check to confirm the response contains expected operational status flags.
       ansible.builtin.assert:
         that:
-          - interface_counters.stdout[0] | length > 0
-        fail_msg: "Interface counter data is missing or could not be parsed."
-        success_msg: "Interface statistics successfully captured."
+          - "'OK' in counters.stdout"
+        fail_msg: "Interface data is missing status flags. Verify connectivity and CLI permissions."
+        success_msg: "Interface counters successfully validated."
 
-    - name: Display captured interface statistics
-      # Standard: Observability - Outputs the filtered results for manual verification/logging
+    - name: Output interface statistics
+      # Why: Provides formatted output of counters for audit logging and manual review.
       ansible.builtin.debug:
-        msg: "{{ interface_counters.stdout_lines[0] }}"
+        msg: "{{ counters.stdout_lines }}"
+
+---

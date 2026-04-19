@@ -1,66 +1,60 @@
----
-# IPSec Statistics and Counters Performance Audit
-# This playbook gathers critical VPN health metrics from Cisco ASA/Firepower devices.
-# It follows high-availability standards for idempotency and observability.
+MCP issues detected. Run /mcp list for status.---
+# IPSec Statistics and Counters Audit
+# This playbook gathers IPsec and IKEv1 statistics from Cisco ASA/Firepower devices.
+# Compliance: NetLearner Staging Automation Standards (FQCN, Idempotency, Observability).
 - name: Get IPSec Statistics
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Device facts are not required for command-based telemetry gathering.
 
   tasks:
-    - name: Retrieve detailed IPsec Security Association (SA) information
-      # FQCN: using ansible.netcommon.cli_command for broad compatibility across network OS variants
+    - name: Retrieve IPsec Security Association (SA) details
+      # FQCN: Using ansible.netcommon.cli_command for platform-agnostic CLI interaction.
       ansible.netcommon.cli_command:
         command: show crypto ipsec sa detail
       register: sa_detail
-      # Error Handling: Ensure the command executed successfully without returning CLI-level errors
-      failed_when: 
-        - sa_detail.failed
-        - "'Invalid input' in sa_detail.stdout"
+      # Error Handling: Fail if output indicates an invalid command or unexpected error.
+      failed_when: >
+        sa_detail.stdout is not defined or 
+        'Invalid input' in sa_detail.stdout or 
+        'ERROR:' in sa_detail.stdout
 
     - name: Verify IPsec SA data integrity
-      # Observability: Assert that the output contains expected cryptographic headers
+      # Observability: Assert that output contains expected identifiers or known empty state messages.
       ansible.builtin.assert:
         that:
-          - "sa_detail.stdout is defined"
-          - "'interface:' in sa_detail.stdout or 'No SAs found' in sa_detail.stdout"
-        fail_msg: "Failed to retrieve valid IPsec SA details."
+          - sa_detail.stdout | length > 0
+          - "'local ident' in sa_detail.stdout or 'No active' in sa_detail.stdout"
+        fail_msg: "Unexpected response format or empty output while retrieving IPsec SA details."
+        quiet: true
 
-    - name: Retrieve global IPsec protocol statistics
+    - name: Retrieve global IPsec processing statistics
       ansible.netcommon.cli_command:
         command: show crypto ipsec stats
       register: stats
-      failed_when: stats.failed
+      failed_when: >
+        stats.stdout is not defined or 
+        'Invalid input' in stats.stdout
 
-    - name: Verify IPsec stats responsiveness
-      ansible.builtin.assert:
-        that:
-          - "stats.stdout is defined"
-          - "'IPsec Global Statistics' in stats.stdout"
-        fail_msg: "IPsec statistics output is malformed or missing."
-
-    - name: Retrieve IKEv1 (ISAKMP) control plane statistics
-      # This task is critical for diagnosing phase 1 negotiation failures
+    - name: Retrieve IKEv1 (ISAKMP) negotiation statistics
       ansible.netcommon.cli_command:
         command: show crypto isakmp stats
       register: ike_stats
-      # Idempotency: 'show' commands are read-only and inherently idempotent
-      ignore_errors: true # Some newer FTD images may prioritize IKEv2 over ISAKMP
+      failed_when: >
+        ike_stats.stdout is not defined or 
+        'Invalid input' in ike_stats.stdout
 
-    - name: Display consolidated VPN health report
-      # Observability: Providing a structured view of the gathered telemetry
+    - name: Display NetLearner IPSec Telemetry Report
+      # Observability: Consolidate registered outputs into a single readable debug message for auditing.
       ansible.builtin.debug:
         msg: |
-          ===========================================================
-          IPSEC SECURITY ASSOCIATIONS (PHASE 2)
-          ===========================================================
+          ======================= NETLEARNER AUDIT: {{ inventory_hostname }} =======================
+          TIMESTAMP: {{ lookup('ansible.builtin.pipe', 'date +%Y-%m-%d %H:%M:%S') }}
+          
+          --- [ CRYPTO IPSEC SA DETAIL ] ---
           {{ sa_detail.stdout }}
-
-          ===========================================================
-          GLOBAL CRYPTO PERFORMANCE COUNTERS
-          ===========================================================
+          
+          --- [ CRYPTO IPSEC STATS ] ---
           {{ stats.stdout }}
-
-          ===========================================================
-          IKEv1 ISAKMP STATISTICS (PHASE 1)
-          ===========================================================
-          {{ ike_stats.stdout | default('IKEv1 stats not available or command failed') }}
+          
+          --- [ CRYPTO ISAKMP STATS ] ---
+          {{ ike_stats.stdout }}

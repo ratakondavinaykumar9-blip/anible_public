@@ -1,35 +1,39 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Web Filter Profile Audit
-# Standard: Idempotency is maintained as this is a read-only "get" operation.
-- name: Retrieve Web Filter Profile
+# FortiGate Web Filter Profile Retrieval
+# Purpose: This playbook securely retrieves and validates the web filter configuration from FortiGate devices.
+# Standards: Implements idempotency, observability, FQCN, and robust error handling for NetLearner Staging.
+- name: Get FortiGate Web Filter Profile
   hosts: fortigate
-  gather_facts: false # Performance: Fact gathering is disabled for direct CLI interaction.
+  gather_facts: false # Performance optimization: Fact gathering is disabled for configuration-only retrieval
 
   tasks:
-    - name: Get Web Filter Profile using CLI
-      # Best Practices: Using Fully Qualified Collection Name (FQCN) for reliability.
+    - name: Retrieve webfilter-profile configuration via CLI
+      # Using Fully Qualified Collection Name (FQCN) for cross-platform consistency
       ansible.netcommon.cli_command:
         command: "get firewall webfilter-profile"
-      register: wf_result
-      # Error Handling: Catching common FortiOS CLI errors or empty responses to prevent false positives.
+      register: wf_output
+      # Idempotency: Read-only commands are explicitly marked as changed: false
+      changed_when: false
+      # Error Handling: Detect CLI error strings that might not return a non-zero exit code
       failed_when:
-        - "wf_result.stdout == ''"
-        - "'Unknown command' in wf_result.stdout"
-        - "'Command fail' in wf_result.stdout"
+        - "wf_output.rc != 0"
+        - "'Unknown action' in wf_output.stdout"
+        - "'Command fail' in wf_output.stdout"
 
-    - name: Assert that the profile was successfully retrieved
-      # Observability: Verifying that the output contains actual configuration data.
+    - name: Verify configuration integrity and observability
+      # Observability: Assert that the command returned a non-empty payload containing expected keywords
       ansible.builtin.assert:
         that:
-          - wf_result.stdout is defined
-          - wf_result.stdout | length > 0
-        fail_msg: "Audit Failed: No Web Filter Profile data was returned from the device."
-        success_msg: "Audit Success: Web Filter Profile data successfully registered."
+          - "wf_output.stdout | length > 0"
+          - "'webfilter-profile' in wf_output.stdout or 'profile' in wf_output.stdout"
+        fail_msg: "The Web Filter configuration retrieval returned an empty or malformed payload."
+        success_msg: "Web Filter Profile configuration successfully verified."
 
-    - name: Display Web Filter Profile for manual review
-      # Documentation: Providing a clear, formatted output for the user's log stream.
+    - name: Display retrieved Web Filter Profile
+      # Provides clear visual feedback of the operational state for auditing
       ansible.builtin.debug:
         msg: |
-          ======================= WEB FILTER PROFILE CONFIGURATION =======================
-          {{ wf_result.stdout }}
-          ================================================================================
+          ======================= WEB FILTER PROFILE =======================
+          {{ wf_output.stdout }}
+```

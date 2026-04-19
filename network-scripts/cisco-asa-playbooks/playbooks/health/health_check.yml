@@ -1,122 +1,97 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# ASA Health Check - Performance and Resource Monitoring
-# This playbook collects health metrics from Cisco ASA/Firepower devices.
-# Standards: Idempotent (Read-only), Observable (Asserts), Documented, FQCN.
+# ASA Health Check - CPU, Memory, Connections
+# Standards applied: Idempotency, Observability, Documentation, Error Handling, FQCN
 - name: ASA Health Check
   hosts: asa_firepower
   gather_facts: false
   vars:
+    # Default format is 'text' for CLI debugging; use 'json' for system integration
     output_format: text
 
   tasks:
-    - name: Gather facts for reporting timestamp
-      # Why: Enables the 'ansible_date_time' variable for the JSON report
-      ansible.builtin.setup:
-        gather_subset:
-          - "!all"
-          - "min"
-      delegate_to: localhost
+    - name: Capture execution timestamp from controller
+      # Standard gather_facts is disabled for speed; generate local timestamp for report consistency
+      ansible.builtin.set_fact:
+        execution_timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
 
-    - name: Get system resource usage
-      # Why: Monitor usage of XLATE, connections, and other resource limits
-      cisco.asa.asa_command:
-        commands:
-          - show resource usage
+    - name: Fetch system resource usage
+      # Gathers usage stats for connections, XLATEs, and other licensed resources
+      ansible.netcommon.cli_command:
+        command: show resource usage
       register: resource_output
+      # Error Handling: Validate command execution and ensure non-empty output
       failed_when: 
-        - resource_output.failed or "Invalid" in resource_output.stdout[0]
+        - resource_output.failed or resource_output.stdout | length == 0
 
-    - name: Verify resource output integrity
-      # Observability: Ensure we received a valid response before proceeding
-      ansible.builtin.assert:
-        that:
-          - "resource_output.stdout[0] is search('Resource')"
-        fail_msg: "Resource usage command did not return expected data."
-
-    - name: Get connection statistics
-      # Why: Identify session spikes that could indicate DDoS or capacity issues
-      cisco.asa.asa_command:
-        commands:
-          - show conn count
+    - name: Fetch active connection count
+      # Monitors stateful connection table metrics
+      ansible.netcommon.cli_command:
+        command: show conn count
       register: conn_output
       failed_when: 
-        - conn_output.failed or "Invalid" in conn_output.stdout[0]
+        - conn_output.failed or conn_output.stdout | length == 0
 
-    - name: Verify connection stats integrity
-      # Observability: Validate that session count data is present
-      ansible.builtin.assert:
-        that:
-          - "conn_output.stdout[0] is search('in use')"
-        fail_msg: "Connection count command did not return expected data."
-
-    - name: Get CPU utilization
-      # Why: Detect high processor load that impacts traffic throughput
-      cisco.asa.asa_command:
-        commands:
-          - show cpu usage
+    - name: Fetch CPU utilization profile
+      # Captures 5s, 1m, and 5m usage snapshots
+      ansible.netcommon.cli_command:
+        command: show cpu usage
       register: cpu_output
       failed_when: 
-        - cpu_output.failed or "Invalid" in cpu_output.stdout[0]
+        - cpu_output.failed or cpu_output.stdout | length == 0
 
-    - name: Verify CPU usage integrity
-      # Observability: Check for valid CPU percentage data
-      ansible.builtin.assert:
-        that:
-          - "cpu_output.stdout[0] is search('CPU usage')"
-        fail_msg: "CPU usage command did not return expected data."
-
-    - name: Get memory status
-      # Why: Monitor for memory leaks or exhaustion risks
-      cisco.asa.asa_command:
-        commands:
-          - show memory
+    - name: Fetch memory allocation details
+      # Monitors system heap and free memory status
+      ansible.netcommon.cli_command:
+        command: show memory
       register: mem_output
       failed_when: 
-        - mem_output.failed or "Invalid" in mem_output.stdout[0]
+        - mem_output.failed or mem_output.stdout | length == 0
 
-    - name: Verify memory output integrity
-      # Observability: Confirm memory statistics were successfully retrieved
+    - name: Validate telemetry integrity
+      # Observability: Assert that received strings contain expected headers to ensure data validity
       ansible.builtin.assert:
         that:
-          - "mem_output.stdout[0] is search('Free')"
-        fail_msg: "Memory info command did not return expected data."
+          - "'Resource' in resource_output.stdout"
+          - "'connections' in conn_output.stdout"
+          - "'CPU' in cpu_output.stdout"
+          - "'Free' in mem_output.stdout"
+        fail_msg: "Telemetry validation failed. The ASA output may be malformed or truncated."
 
-    - name: Generate structured JSON health report
-      # Why: Provides a machine-readable format for SolarWinds or SIEM ingestion
-      # Idempotency: Overwrites the local file on the controller with current state
+    - name: Persist health report to persistent storage
+      # Idempotency: 'copy' module ensures the destination file is updated only if content changes
       ansible.builtin.copy:
         content: |
           {
             "device": "{{ inventory_hostname }}",
-            "timestamp": "{{ ansible_date_time.iso8601 }}",
-            "resources": {{ resource_output.stdout[0] | to_json }},
-            "connections": {{ conn_output.stdout[0] | to_json }},
-            "cpu": {{ cpu_output.stdout[0] | to_json }},
-            "memory": {{ mem_output.stdout[0] | to_json }}
+            "timestamp": "{{ execution_timestamp }}",
+            "resources": {{ resource_output.stdout | to_json }},
+            "connections": {{ conn_output.stdout | to_json }},
+            "cpu": {{ cpu_output.stdout | to_json }},
+            "memory": {{ mem_output.stdout | to_json }}
           }
         dest: "/tmp/asa_health_{{ inventory_hostname }}.json"
         mode: '0644'
-      when: output_format | default('text') == 'json'
-      delegate_to: localhost
+      when: output_format == 'json'
 
-    - name: Display human-readable health summary
-      # Why: Immediate feedback for network administrators during execution
+    - name: Display formatted summary to operator
+      # Observability: Provides immediate visibility for manual health audits
       ansible.builtin.debug:
         msg: |
           ============================================================
-          Health Check: {{ inventory_hostname }}
-          Timestamp: {{ ansible_date_time.iso8601 }}
+          ASA HEALTH SUMMARY | {{ inventory_hostname }}
+          TIMESTAMP: {{ execution_timestamp }}
           ============================================================
-          CPU USAGE:
-          {{ cpu_output.stdout[0] }}
+          [RESOURCE USAGE]
+          {{ resource_output.stdout }}
 
-          MEMORY STATUS:
-          {{ mem_output.stdout[0] }}
+          [CONNECTION STATS]
+          {{ conn_output.stdout }}
 
-          CONNECTIONS:
-          {{ conn_output.stdout[0] }}
+          [CPU UTILIZATION]
+          {{ cpu_output.stdout }}
 
-          RESOURCES:
-          {{ resource_output.stdout[0] }}
-          ============================================================
-      when: output_format | default('text') == 'text'
+          [MEMORY STATUS]
+          {{ mem_output.stdout }}
+      when: output_format == 'text'
+```

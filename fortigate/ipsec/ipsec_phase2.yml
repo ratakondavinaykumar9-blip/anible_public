@@ -1,36 +1,44 @@
----
-# IPsec Phase 2 Retrieval and Verification
-# This playbook retrieves IPsec Phase 2 configuration from FortiGate devices.
-# It adheres to NetLearner standards for idempotency, observability, and error handling.
-- name: Retrieve FortiGate IPsec Phase 2 Information
+MCP issues detected. Run /mcp list for status.---
+# FortiGate IPSec Phase 2 Retrieval
+# Improved: 2026-04-12
+# Original Author: Arjun (OpenClaw)
+#
+# Standards Adherence:
+# 1. Idempotency: 'get' operations are read-only and inherently safe for multiple runs.
+# 2. Observability: Uses 'register' for output capture and 'assert' for data verification.
+# 3. Documentation: Comments explain the technical rationale for each task choice.
+# 4. Error Handling: 'failed_when' catches specific FortiOS CLI parse errors or invalid actions.
+# 5. Best Practices: Full use of Fully Qualified Collection Names (FQCN).
+
+- name: Retrieve IPSec Phase 2 Status
   hosts: fortigate
   gather_facts: false
+  # Senior Practice: Stop execution on connection failure to prevent cascading errors.
+  any_errors_fatal: true
 
   tasks:
-    - name: Fetch IPsec Phase 2 status from device
-      # Using FQCN for the network CLI command module.
-      # This is idempotent as it is a read-only operation.
+    - name: Fetch IPSec Phase 2 details from device CLI
+      # Using FQCN for the network-agnostic CLI command module.
       ansible.netcommon.cli_command:
         command: "get vpn ipsec phase2"
-      register: ph2_result
-      # Error Handling: Ensure the command was parsed correctly by FortiOS.
+      register: ph2_output
+      # Error Handling: Catch unrecognized commands, syntax errors, or failed executions.
       failed_when:
-        - "'command parse error' in ph2_result.stdout"
-        - "'Unknown action' in ph2_result.stdout"
+        - ph2_output.failed
+        - '"command parse error" in ph2_output.stdout or "Unknown action" in ph2_output.stdout'
 
-    - name: Verify data integrity of Phase 2 output
-      # Observability: Use assert to verify that the command returned data.
-      # This prevents false positives in automation pipelines.
+    - name: Verify data integrity of Phase 2 response
+      # Observability: Ensure the response is non-empty and contains configuration markers.
       ansible.builtin.assert:
         that:
-          - "ph2_result.stdout is defined"
-          - "ph2_result.stdout | length > 0"
-        fail_msg: "IPsec Phase 2 retrieval failed or returned empty output."
-        success_msg: "IPsec Phase 2 data successfully captured."
+          - ph2_output.stdout | length > 0
+          - "'vpn ipsec phase2' in ph2_output.stdout or 'entry' in ph2_output.stdout"
+        fail_msg: "Device {{ inventory_hostname }} returned invalid or empty Phase 2 data."
+        success_msg: "Successfully validated Phase 2 data for {{ inventory_hostname }}."
 
-    - name: Display IPsec Phase 2 Status
-      # Documentation: Providing a clear, formatted view of the operational state.
+    - name: Display Phase 2 Operational State
+      # Observability: Render the raw CLI output for administrative review and logging.
       ansible.builtin.debug:
         msg: |
-          ======================= IPSEC PHASE 2 REPORT =======================
-          {{ ph2_result.stdout }}
+          ======================= IPSEC PHASE 2: {{ inventory_hostname }} =======================
+          {{ ph2_output.stdout }}

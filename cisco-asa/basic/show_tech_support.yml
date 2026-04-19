@@ -1,53 +1,52 @@
+MCP issues detected. Run /mcp list for status.---
+# Playbook: Get Tech Support Info (Improved)
+# Purpose: Collect diagnostic data from ASA/Firepower devices with rigorous validation and error handling.
+# Standards: Idempotency, Observability, FQCN, and defensive logic.
+# Author: NetLearner Architect
 ---
-# Enhanced Show Tech Support Playbook
-# Optimized for: Idempotency, Observability, Documentation, Error Handling, and FQCN standards
 - name: Get Tech Support Info
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Performance optimization: device facts not required for CLI execution.
 
   tasks:
-    - name: Collect Tech Support Information from Device
-      # Using FQCN for network CLI interaction. 
-      # Read-only 'show' commands are inherently idempotent as they do not alter device state.
+    - name: Execute 'show tech-support' on target device
+      # Why: Captures comprehensive diagnostic state for troubleshooting.
+      # Best Practice: Using FQCN for network CLI interaction.
       ansible.netcommon.cli_command:
         command: show tech-support
-      register: tech_support_output
-      # Error Handling: Ensure we fail if the output contains common error indicators
+      register: tech
+      # Error Handling: Ensure output is captured and command was recognized.
       failed_when: 
-        - tech_support_output.stdout is not defined or tech_support_output.stdout | length == 0
-        - "'Invalid input' in tech_support_output.stdout"
-        - "'% Permission denied' in tech_support_output.stdout"
+        - tech.stdout is not defined or tech.stdout | length == 0
+        - "'Invalid input' in tech.stdout"
 
-    - name: Validate Captured Tech Support Data
-      # Observability: Verify that the command returned substantial content before writing to disk
+    - name: Validate integrity of captured tech support data
+      # Observability: Assert that the output contains expected markers and sufficient data.
       ansible.builtin.assert:
         that:
-          - tech_support_output.stdout | length > 100
-        fail_msg: "Tech support output is suspiciously short or empty."
-        success_msg: "Tech support data successfully validated for persistence."
+          - "tech.stdout | length > 5000" # Tech-support output is typically large.
+          - "'show version' in tech.stdout" # Verification of sub-command execution.
+        fail_msg: "Tech support output for {{ inventory_hostname }} appears incomplete or invalid."
+        success_msg: "Successfully validated tech support payload for {{ inventory_hostname }}."
 
-    - name: Persist Tech Support Data to Local Filesystem
-      # Saves the collected data to a flat file for audit, archival, or vendor upload.
-      # mode: '0644' is set to follow security best practices for file permissions.
+    - name: Persist diagnostic data to local filesystem
+      # Idempotency: 'copy' module ensures destination file matches source content safely.
+      # Documentation: Using /tmp/ for ephemeral diagnostic staging.
       ansible.builtin.copy:
-        content: "{{ tech_support_output.stdout }}"
+        content: "{{ tech.stdout }}"
         dest: "/tmp/asa_tech_support_{{ inventory_hostname }}.txt"
-        mode: '0644'
-      register: file_save_result
+        mode: '0640' # Secure permissions for potentially sensitive diagnostic data.
+      register: file_result
 
-    - name: Verify File Persistence Success
-      # Observability: Confirm the file was successfully written and verify the checksum/state
+    - name: Verify file persistence success
+      # Observability: Confirm the write operation was completed successfully on the controller.
       ansible.builtin.assert:
         that:
-          - file_save_result.state == 'file'
-          - file_save_result.dest == "/tmp/asa_tech_support_" + inventory_hostname + ".txt"
-        fail_msg: "Failed to verify the creation of the tech support file."
+          - file_result.dest is defined
+          - not file_result.failed
+        fail_msg: "Failed to write diagnostic file to /tmp/ for {{ inventory_hostname }}."
 
-    - name: Display Summary of Operation
-      # Documentation: Provides a clear breadcrumb for the operator
+    - name: Display summary of operation
+      # Best Practice: Use FQCN for all modules including debug.
       ansible.builtin.debug:
-        msg: 
-          - "Status: Success"
-          - "Hostname: {{ inventory_hostname }}"
-          - "Destination: {{ file_save_result.dest }}"
-          - "Size: {{ tech_support_output.stdout | length }} bytes"
+        msg: "Diagnostic report for {{ inventory_hostname }} is available at {{ file_result.dest }}"

@@ -1,43 +1,36 @@
----
-# FortiGate Web Filter Profile Retrieval Playbook
-#
-# This playbook adheres to the NetLearner Architect standards:
-# 1. Idempotency: Uses read-only CLI commands.
-# 2. Observability: Utilizes 'register' and 'assert' for verification.
-# 3. Documentation: Includes descriptive comments for maintainability.
-# 4. Error Handling: Implements 'failed_when' to catch command execution errors.
-# 5. Best Practices: Employs Fully Qualified Collection Names (FQCN).
-
-- name: Retrieve and Verify Web Filter Profile
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Web Filter Profile Retrieval
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+- name: Get Web Filter Profile
   hosts: fortigate
-  gather_facts: false
+  gather_facts: no
 
   tasks:
-    - name: Get Web Filter Profile Configuration
-      # FQCN: Using ansible.netcommon.cli_command for device interaction
-      # This task is idempotent as it does not modify the device state.
+    - name: Retrieve web filter profile configuration
+      # Using FQCN for portability and clarity.
+      # The 'get' command is read-only, ensuring idempotency by not modifying device state.
+      # Note: Use 'show' for configuration and 'get' for operational status in FortiOS.
       ansible.netcommon.cli_command:
-        command: "get webfilter profile"
-      register: wf_output
-      # Error Handling: Ensure the command was understood by the FortiOS parser
-      failed_when: 
-        - wf_output.rc != 0 
-        - "'command parse error' in wf_output.stdout | lower"
+        command: get firewall webfilter-profile
+      register: wf
+      # Error Handling: Explicitly fail if FortiOS returns common CLI error patterns.
+      failed_when:
+        - wf.failed or "Unknown action" in wf.stdout or "Command fail" in wf.stdout
 
-    - name: Assert Web Filter Profile Retrieval Success
-      # Observability: Verify that the command returned non-empty configuration data
+    - name: Verify web filter profile data integrity
+      # Observability: Assert that data was successfully captured.
+      # This prevents subsequent tasks from processing empty strings silently.
       ansible.builtin.assert:
         that:
-          - "wf_output.stdout is defined"
-          - "wf_output.stdout | length > 0"
-        fail_msg: "Failed to retrieve web filter profile: Output is empty or undefined."
-        success_msg: "Web filter profile configuration successfully retrieved."
+          - wf.stdout is defined
+          - wf.stdout | length > 0
+        fail_msg: "Web filter profile retrieval failed: Output is empty or undefined."
+        success_msg: "Successfully validated web filter profile data."
+        quiet: true
 
-    - name: Display Web Filter Profile Configuration
-      # Observability: Formatted output for administrative audit and logging
+    - name: Display Web Filter Profile details
+      # Observability: Provide structured visual feedback for audit logs and operators.
       ansible.builtin.debug:
         msg: |
-          ==================================================================
-          FORTIGATE WEB FILTER PROFILE CONFIGURATION
-          ==================================================================
-          {{ wf_output.stdout }}
+          ======================= WEB FILTER PROFILE =======================
+          {{ wf.stdout }}

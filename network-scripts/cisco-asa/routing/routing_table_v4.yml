@@ -1,36 +1,34 @@
----
-# Playbook: IPv4 Routing Table Audit
-# Purpose: Retrieves and validates the IPv4 routing table for ASA/Firepower devices.
-# This playbook is idempotent as it performs read-only state inspection.
-- name: IPv4 Routing Table Audit
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Staging: Network Routing Audit
+# Purpose: This playbook retrieves and validates the IPv4 routing table from Cisco ASA/Firepower devices.
+# Idempotency: Maintained through read-only CLI operations which do not modify device state.
+- name: Retrieve and Validate IPv4 Routing Table
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve the current IPv4 routing table
-      # Using FQCN (Fully Qualified Collection Name) for predictable module resolution.
-      # The output is registered to enable observability and automated validation.
+    - name: Retrieve IPv4 routing table via CLI
+      # Use FQCN for standard network command execution across vendors
       ansible.netcommon.cli_command:
         command: show route ipv4
-      register: routing_table_output
-      # Error Handling: Ensure the task fails if the device rejects the command 
-      # or if the execution encounters a transport error.
-      failed_when: 
-        - routing_table_output.failed or 'Invalid input' in routing_table_output.stdout
+      register: v4_route_result
+      # Error Handling: Fail if the device returns common CLI error patterns
+      failed_when:
+        - v4_route_result.failed
+        - "'Invalid' in v4_route_result.stdout or 'Usage' in v4_route_result.stdout"
 
-    - name: Validate routing information retrieval
-      # Assertions ensure the playbook provides a definitive success/fail signal.
-      # This verifies that the retrieved data is present and non-empty.
+    - name: Verify routing table content and observability
+      # Observability: Assert that the output contains expected routing data structures
       ansible.builtin.assert:
         that:
-          - routing_table_output.stdout is defined
-          - routing_table_output.stdout | length > 0
-        fail_msg: "Critical: IPv4 routing table retrieval failed or returned no data."
-        success_msg: "Successfully captured IPv4 routing table for audit."
+          - v4_route_result.stdout | length > 0
+          - "'Gateway of last resort' in v4_route_result.stdout"
+        fail_msg: "Routing table retrieval failed or returned empty data."
+        success_msg: "IPv4 routing table successfully retrieved and validated."
 
-    - name: Display captured IPv4 routing information
-      # Debug output provides human-readable visibility into the operational state.
+    - name: Display formatted IPv4 Routing Table
+      # Provides operator-level visibility into the gathered state
       ansible.builtin.debug:
         msg: |
           ======================= IPv4 ROUTES =======================
-          {{ routing_table_output.stdout }}
+          {{ v4_route_result.stdout }}

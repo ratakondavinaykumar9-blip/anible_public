@@ -1,33 +1,46 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook to audit SNMP configuration on Cisco ASA/Firepower devices.
-# This read-only operation is inherently idempotent and safe for repeated execution.
-- name: Get SNMP Status
+# Playbook: SNMP Configuration Audit
+# Purpose: Retrieves and validates SNMP server status on Cisco ASA/Firepower devices.
+# Standards: NetLearner Architect - Idempotency, Observability, and FQCN.
+- name: Get and Validate SNMP Status
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
     - name: Retrieve SNMP server configuration
-      # Using FQCN for platform-specific command execution ensures consistency and reliability.
-      cisco.asa.asa_command:
-        commands:
-          - show snmp-server
+      # Using FQCN for cross-platform reliability.
+      # This task is inherently idempotent as it performs a read-only operation.
+      ansible.netcommon.cli_command:
+        command: show snmp-server
       register: snmp_output
-      # Explicit error handling to catch cases where the command is unsupported or fails on the target.
+      # Error Handling: Ensure we fail if the command is unrecognized or unauthorized.
       failed_when: 
-        - snmp_output.failed or 'Invalid input' in snmp_output.stdout[0]
+        - snmp_output.failed or "Invalid input" in snmp_output.stdout
 
-    - name: Validate SNMP configuration retrieval
-      # Assertions provide observability by confirming that the expected data was successfully captured.
+    - name: Validate SNMP configuration observability
+      # Observability: Assert that the command returned meaningful data.
       ansible.builtin.assert:
         that:
-          - snmp_output.stdout[0] is defined
-          - snmp_output.stdout[0] | length > 0
-        fail_msg: "Failed to retrieve SNMP configuration or the output is empty."
-        success_msg: "SNMP configuration successfully retrieved."
+          - snmp_output.stdout is defined
+          - snmp_output.stdout | length > 0
+        fail_msg: "Data retrieval failed: No SNMP configuration found on {{ inventory_hostname }}."
+        success_msg: "SNMP configuration successfully captured from {{ inventory_hostname }}."
 
-    - name: Display SNMP configuration
-      # Debugging output provides human-readable observability for operational auditing.
+    - name: Display SNMP operational state
+      # Documentation: Provides visual verification for the network operator.
       ansible.builtin.debug:
         msg: |
-          ======================= SNMP STATUS =======================
-          {{ snmp_output.stdout[0] }}
+          ======================= SNMP STATUS: {{ inventory_hostname }} =======================
+          {{ snmp_output.stdout }}
+
+    - name: Check for active SNMP communities/hosts
+      # Observability: Verify if SNMP is actually functional (not just enabled).
+      # We use ignore_errors here because an unconfigured state is a valid finding, not a script failure.
+      ansible.builtin.assert:
+        that:
+          - "'snmp-server host' in snmp_output.stdout or 'snmp-server community' in snmp_output.stdout"
+        fail_msg: "WARNING: SNMP is enabled but no hosts or communities are defined on {{ inventory_hostname }}."
+        quiet: true
+      ignore_errors: true
+```

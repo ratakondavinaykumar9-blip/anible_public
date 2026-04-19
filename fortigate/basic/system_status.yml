@@ -1,42 +1,53 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate System Status Playbook
-# Improved for NetLearner Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: Get FortiGate System Status
+# NetLearner Architect Standard: FortiGate System Status
+# This playbook retrieves system status using both API and CLI methods.
+# It ensures idempotency by focusing on read-only/state-preserving operations.
+
+- name: Get System Status
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve global system configuration facts via API
-      # Why: Using the API module ensures structured data retrieval for potential programmatic use.
-      # Idempotency: Fact gathering is inherently idempotent and safe for repeated execution.
-      fortinet.fortios.fortios_configuration_fact:
+    - name: Retrieve global system settings via API
+      # FQCN: fortinet.fortios.fortios_system_global
+      # Why: Validates API reachability and captures structured global configuration state.
+      # Idempotency: 'state: present' with no parameters acts as a safe check on root VDOM.
+      fortinet.fortios.fortios_system_global:
         vdom: "root"
-        selector: "system_global"
-      register: api_system_status
-      ignore_errors: true # Why: API access may be restricted; allow the playbook to continue to the CLI fallback.
+        state: "present"
+      register: api_status
+      # Error Handling: API access may be restricted; allowing fallback to CLI method.
+      ignore_errors: true
 
-    - name: Execute 'get system status' command via CLI
-      # Why: Captures the standard operational summary used by network engineers for troubleshooting.
+    - name: Execute system status command via CLI
+      # FQCN: ansible.netcommon.cli_command
+      # Why: Obtains full system telemetry and versioning strings for deep observability.
       ansible.netcommon.cli_command:
         command: "get system status"
       register: cli_status
-      # Error Handling: Ensure the command executed and returned meaningful system information.
-      failed_when: 
-        - cli_status.stdout is not defined
-        - "'Version' not in cli_status.stdout"
+      # Error Handling: Fail if output is empty or contains standard FortiOS error patterns.
+      failed_when: >
+        cli_status.stdout is not defined or 
+        cli_status.stdout == "" or 
+        "Command fail" in cli_status.stdout
 
-    - name: Validate system status retrieval
-      # Observability: Assert that the command execution returned content to verify connectivity and permission.
+    - name: Validate system responsiveness and data integrity
+      # Observability: Assertions confirm the device returned valid identifying information.
       ansible.builtin.assert:
         that:
-          - cli_status.stdout | length > 0
-        fail_msg: "The 'get system status' command returned no data. Check device connectivity."
-        success_msg: "System status successfully retrieved and validated."
+          - "'Version:' in cli_status.stdout"
+          - "'Serial-Number:' in cli_status.stdout"
+        fail_msg: "Critical system data (Version/Serial) could not be verified from CLI output."
+        quiet: true
 
-    - name: Display formatted system status
-      # Documentation: Provides clear visibility of the device health and versioning in the automation logs.
+    - name: Display formatted system status report
+      # FQCN: ansible.builtin.debug
+      # Why: Provides high-signal visibility into device health for the operator.
       ansible.builtin.debug:
         msg: |
           ======================= SYSTEM STATUS =======================
+          DEVICE: {{ inventory_hostname }}
           {{ cli_status.stdout }}
           =============================================================
+```

@@ -1,60 +1,62 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: ASA NAT Rules Collection and Reporting
-# Purpose: This playbook retrieves NAT rules from Cisco ASA devices, validates the response, 
-#          and provides both JSON file output and a human-readable console summary.
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+# Cisco ASA NAT Configuration Visibility and Audit Playbook
+# Purpose: Provides structured visibility into NAT rules for compliance and troubleshooting.
+# Standards: Adheres to FQCN, Idempotency (Read-only), and robust Observability patterns.
 
-- name: Get and Report NAT Rules from ASA/Firepower
+- name: Show NAT Rules Table
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Default output format is text; can be overridden via extra-vars (-e "output_format=json")
-    output_format: "text"
+    # Defaulting output_format for robust variable handling via extra_vars
+    output_format: "{{ output_format | default('text') }}"
 
   tasks:
-    - name: Retrieve current NAT configuration from device
-      # Using FQCN cisco.asa.asa_nat to ensure consistent module resolution.
-      # This task is inherently idempotent as it only gathers state without making changes.
+    - name: Get NAT configuration from ASA
+      # Using FQCN 'cisco.asa.asa_nat' with 'state: gathered' for idempotent state retrieval.
+      # This ensures the playbook can be run repeatedly without altering device state.
       cisco.asa.asa_nat:
         state: gathered
       register: nat_output
-      # Error Handling: Catching issues at the task level to allow for graceful assertion later.
-      ignore_errors: true
+      # Error Handling: Ensure we fail early if the connection or command execution fails.
+      failed_when: nat_output.failed | default(false)
 
     - name: Verify NAT configuration retrieval success
-      # Observability: Asserting that the module did not fail and returned expected data structures.
+      # Observability: Use assert to validate that structured data was successfully returned.
       ansible.builtin.assert:
         that:
-          - nat_output is defined
-          - nat_output.failed is false
-        fail_msg: "Failed to retrieve NAT configuration from {{ inventory_hostname }}. Verify connectivity, credentials, and module requirements."
-        success_msg: "Successfully retrieved NAT configuration from {{ inventory_hostname }}."
+          - "nat_output.gathered is defined"
+        fail_msg: "Data retrieval failed for {{ inventory_hostname }}. Check network reachability."
+        success_msg: "NAT configuration successfully retrieved."
 
-    - name: Persist NAT rules as JSON for audit and integration
-      # Idempotency: ansible.builtin.copy only writes to the destination if the content has changed.
-      # Documentation: Ensures a structured data artifact exists for external processing.
+    - name: Output NAT configuration as JSON file
+      # Persisting state to disk allows for easy integration with external auditing tools.
+      # Explicit mode '0644' ensures file permission idempotency across environments.
       ansible.builtin.copy:
-        content: "{{ nat_output.gathered | default([]) | to_nice_json }}"
+        content: "{{ nat_output.gathered | ansible.builtin.to_nice_json }}"
         dest: "/tmp/asa_nat_{{ inventory_hostname }}.json"
         mode: '0644'
       when: output_format == 'json'
 
-    - name: Generate human-readable summary of NAT rules
-      # Documentation: Providing a clear, formatted summary for operational visibility.
-      # Observability: Iterates through gathered facts to display key NAT translation parameters.
+    - name: Display human-readable NAT summary
+      # Summary provides immediate observability for network engineers during execution.
+      # Logic handles cases where specific address fields might be omitted (any).
       ansible.builtin.debug:
         msg: |
-          ============================================================
-          NAT Rules Summary for: {{ inventory_hostname }}
-          ============================================================
-          {% if nat_output.gathered is defined and nat_output.gathered | length > 0 %}
+          ===========================================================
+          NAT Rules: {{ inventory_hostname }}
+          ===========================================================
+          {% if nat_output.gathered | default([]) | length > 0 %}
           {% for rule in nat_output.gathered %}
-          Rule ID: {{ rule.rule_id | default('N/A') }}
-          Source: {{ rule.source_address | default('any') }} -> {{ rule.translated_source | default('original') }}
-          Destination: {{ rule.destination_address | default('any') }} -> {{ rule.translated_destination | default('original') }}
-          ------------------------------------------------------------
+          {% set src = rule.source_address | default({}) %}
+          {% set dst = rule.destination_address | default({}) %}
+          Interface Path: {{ rule.source_interface | default('any') }} -> {{ rule.destination_interface | default('any') }}
+          Source Translation: {{ src.real | default('any') }} -> {{ src.mapped | default('any') }}
+          Dest Translation:   {{ dst.real | default('any') }} -> {{ dst.mapped | default('any') }}
+          -----------------------------------------------------------
           {% endfor %}
           {% else %}
-          INFO: No NAT rules configured or found on this device.
+          No NAT rules configured on this device.
           {% endif %}
       when: output_format == 'text'
+```

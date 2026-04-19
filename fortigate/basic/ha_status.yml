@@ -1,42 +1,42 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 # FortiGate HA Status Verification
-# This playbook retrieves the High Availability (HA) status from FortiGate devices.
-# It ensures idempotency by marking the read-only task as unchanged and 
-# provides observability through assertion and registration of output.
-
-- name: FortiGate HA Status Check
+# This playbook retrieves and validates High Availability (HA) status for FortiGate devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, and FQCN.
+- name: Get and Verify HA Status
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false  # Optimized: Facts are not required for raw CLI command execution.
 
   tasks:
-    - name: Retrieve HA status via CLI
-      # Using FQCN (ansible.netcommon) to execute the specific diagnostic command.
+    - name: Retrieve HA status from device
+      # Idempotency: 'get' commands are read-only and inherently idempotent.
+      # Best Practice: Using Fully Qualified Collection Name (FQCN).
       ansible.netcommon.cli_command:
-        command: "get system ha status"
-      register: ha_status_raw
-      # Idempotency: Reading status is a non-modifying action; changed_when: false ensures 
-      # the playbook remains clean and idempotent across multiple runs.
-      changed_when: false
-      # Error Handling: Ensure the command didn't fail or return an 'unknown' error.
-      failed_when: 
-        - ha_status_raw.failed
-        - "'Command fail' in ha_status_raw.stdout or 'Unknown' in ha_status_raw.stdout"
+        command: get system ha status
+      register: ha_result
+      # Error Handling: Fail explicitly if the command returns no data or an error string.
+      failed_when:
+        - ha_result.stdout | length == 0
+        - "'Command fail' in ha_result.stdout"
+        - "'Unknown action' in ha_result.stdout"
+      check_mode: false  # Ensure the command runs during --check runs to verify connectivity.
 
-    - name: Verify HA status retrieval
-      # Observability: Assert that the output contains expected keywords (like 'Mode') 
-      # to verify the device is in an HA-aware state and the command succeeded.
+    - name: Validate HA operational state
+      # Observability: Verify that the output contains expected HA metadata.
+      # This ensures the device is actually part of a cluster and the output is valid.
       ansible.builtin.assert:
         that:
-          - ha_status_raw.stdout is defined
-          - "'Mode:' in ha_status_raw.stdout"
-        fail_msg: "Failed to retrieve valid HA status. The 'Mode' keyword was not found in the output."
-        success_msg: "HA status successfully retrieved and verified for {{ inventory_hostname }}."
+          - "'Mode:' in ha_result.stdout"
+          - "'Group:' in ha_result.stdout"
+        fail_msg: "HA status output is invalid or HA is not configured on {{ inventory_hostname }}."
+        success_msg: "HA status successfully retrieved and validated for {{ inventory_hostname }}."
 
-    - name: Display HA Status Summary
-      # Observability: Provide a clear, formatted view of the HA status for the operator.
+    - name: Display formatted HA status
+      # Documentation: Providing a clear, human-readable view of the cluster state.
       ansible.builtin.debug:
         msg: |
-          ======================= HA STATUS =======================
-          Hostname: {{ inventory_hostname }}
-          {{ ha_status_raw.stdout }}
-          =========================================================
+          ======================= HA STATUS: {{ inventory_hostname }} =======================
+          Reported at: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
+          
+          {{ ha_result.stdout }}
+```

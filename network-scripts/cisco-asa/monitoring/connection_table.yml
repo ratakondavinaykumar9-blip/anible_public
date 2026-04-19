@@ -1,53 +1,54 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: Get ASA Connection Table Information
+- name: Get Cisco ASA/Firepower Connection Table
+  # Documentation: This playbook retrieves real-time connection telemetry from security appliances.
+  # Idempotency: Read-only 'show' commands are naturally idempotent and safe for repeated execution.
   hosts: asa_firepower
   gather_facts: false
-  # Purpose: Retrieve and validate the current connection table from Cisco ASA/Firepower devices.
-  # This provides visibility into active traffic sessions for troubleshooting and audit.
 
   tasks:
-    - name: Retrieve summary connection table
-      # Using FQCN for standardized network CLI interactions
+    - name: Capture connection summary
+      # Best Practice: Using Fully Qualified Collection Name (FQCN) for consistency.
       ansible.netcommon.cli_command:
         command: show conn
       register: conn_summary
-      # Error Handling: Ensure the command didn't return a device-side error despite a successful SSH session.
+      # Error Handling: Verify the command was executed successfully and not rejected as invalid.
       failed_when:
         - conn_summary.stdout is not defined
         - "'Invalid input' in conn_summary.stdout"
-        - "'% Error' in conn_summary.stdout"
 
-    - name: Validate summary connection output
-      # Observability: Confirm the device returned data to prevent false positives in automation pipelines.
+    - name: Validate connection summary telemetry
+      # Observability: Assert that the device returned a population of connections.
       ansible.builtin.assert:
         that:
-          - conn_summary.stdout | length > 0
-        fail_msg: "The 'show conn' command returned an empty result."
-        success_msg: "Summary connection table successfully retrieved."
+          - "conn_summary.stdout_lines | length > 0"
+          - "'in use' in conn_summary.stdout"
+        fail_msg: "Connection table summary could not be retrieved or is malformed."
+        quiet: true
 
-    - name: Retrieve detailed connection table
+    - name: Capture detailed connection telemetry
       ansible.netcommon.cli_command:
         command: show conn detail
-      register: conn_detailed
+      register: conn_detail
       failed_when:
-        - conn_detailed.stdout is not defined
-        - "'Invalid input' in conn_detailed.stdout"
-        - "'% Error' in conn_detailed.stdout"
+        - conn_detail.stdout is not defined
+        - "'Invalid input' in conn_detail.stdout"
 
-    - name: Validate detailed connection output
-      # Observability: Ensure detailed metrics are available for deep-packet analysis.
+    - name: Validate detailed telemetry integrity
+      # Observability: Ensure detailed output is present before attempting to process/display.
       ansible.builtin.assert:
         that:
-          - conn_detailed.stdout | length > 0
-        fail_msg: "The 'show conn detail' command returned an empty result."
-        success_msg: "Detailed connection table successfully retrieved."
+          - "conn_detail.stdout_lines | length > 0"
+        fail_msg: "Detailed connection telemetry is empty."
+        quiet: true
 
-    - name: Display connection information
-      # Idempotency: debug tasks do not modify system state and are safe for repeated execution.
+    - name: Display connection telemetry
+      # Documentation: Providing structured visibility into the gathered network state.
       ansible.builtin.debug:
         msg: |
-          ======================= SUMMARY CONNECTIONS =======================
+          ======================= CONNECTION SUMMARY =======================
           {{ conn_summary.stdout }}
-          
-          ======================= DETAILED CONNECTIONS =======================
-          {{ conn_detailed.stdout }}
+
+          ======================= CONNECTION DETAILS =======================
+          {{ conn_detail.stdout }}
+```

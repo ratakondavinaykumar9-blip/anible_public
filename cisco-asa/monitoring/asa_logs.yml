@@ -1,41 +1,40 @@
----
-# Asa Logs - Improved Version
-# This playbook retrieves the most recent log entries from Cisco ASA devices.
-# Improved according to NetLearner standards for Network Automation.
+MCP issues detected. Run /mcp list for status.---
+# Asa Logs
+# Improved: 2026-04-12
+# Author: NetLearner Architect
+# Purpose: Retrieves and validates the most recent log entries from Cisco ASA devices.
+# Idempotency: Safe to run multiple times; no state changes are performed.
 
-- name: Get Recent Logs from Cisco ASA
+- name: Get Recent Logs
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # log_count defines the number of lines to retrieve from the logging buffer.
     log_count: 50
 
   tasks:
-    - name: Retrieve logs from the ASA buffer
-      # FQCN: Using the platform-specific ASA command module for better reliability
-      cisco.asa.asa_command:
-        commands:
-          - "show logging | last {{ log_count }}"
-      register: logs_raw
-      # Error Handling: Fail if the module reports failure or if the output contains ASA error strings
-      failed_when: 
-        - logs_raw.failed or "% Invalid" in logs_raw.stdout[0]
-      # Idempotency: Read-only 'show' commands are inherently idempotent as they do not modify device state.
+    - name: Execute 'show logging' command on target device
+      # Use Fully Qualified Collection Name (FQCN)
+      ansible.netcommon.cli_command:
+        command: "show logging | last {{ log_count }}"
+      register: logs_result
+      # Error Handling: Ensure we fail on invalid command strings or execution errors
+      failed_when: >
+        logs_result.failed or
+        'Invalid input' in logs_result.stdout or
+        'Incomplete command' in logs_result.stdout
 
-    - name: Validate that log data was returned
-      # Observability: Verify that the command returned actual data to ensure the buffer is not empty
+    - name: Verify that logs were successfully retrieved
+      # Observability: Confirm the stdout is not empty using an assertion
       ansible.builtin.assert:
         that:
-          - "logs_raw.stdout is defined"
-          - "logs_raw.stdout[0] | length > 0"
-        fail_msg: "No logs found or retrieval failed for {{ inventory_hostname }}. The logging buffer may be empty."
-        success_msg: "Log retrieval successful for {{ inventory_hostname }}."
+          - logs_result.stdout is defined
+          - logs_result.stdout | length > 0
+        fail_msg: "Log retrieval failed: Output is empty or undefined. Verify logging is enabled on the ASA."
+        success_msg: "Logs successfully retrieved from the buffer."
 
-    - name: Display retrieved logs to console
-      # Observability: Formatted debug output for human operators with clear separation
+    - name: Display the recent log entries
+      # Best Practices: Use clear formatting for the debug message
       ansible.builtin.debug:
         msg: |
-          ======================= RECENT LOGS ({{ inventory_hostname }}) =======================
-          {{ logs_raw.stdout[0] }}
-          =====================================================================================
-      when: logs_raw.stdout[0] | length > 0
+          ======================= RECENT LOGS (LAST {{ log_count }} LINES) =======================
+          {{ logs_result.stdout }}

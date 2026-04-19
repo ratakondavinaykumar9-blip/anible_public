@@ -1,40 +1,44 @@
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Firmware Information Retrieval
+# Improved: 2026-03-18
+# Author: NetLearner Architect
+#
+# Purpose: Retrieves and validates system firmware status, including partitions and build versions.
+# Standards: Idempotency (read-only), Observability (assertions), FQCN, and Robust Error Handling.
 ---
-# FortiGate Firmware Information Audit
-# Purpose: Retrieves and validates firmware status for compliance and lifecycle tracking.
-# Standards: Idempotency, Observability, FQCN, Error Handling.
-- name: FortiGate Firmware Audit
+- name: "FIRMWARE | Monitor FortiGate Firmware Status"
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute firmware retrieval command
-      # Why: Pulls current active and backup firmware versions from the device flash for auditing.
-      # This task is idempotent as it performs a read-only operation.
+    - name: "FIRMWARE | Retrieve system firmware details"
+      # Idempotency: Read-only CLI command execution has no impact on device state.
+      # FQCN: Using fully qualified collection names ensures portability across automation environments.
       ansible.netcommon.cli_command:
-        command: get system firmware
-      register: fw_result
-      # Error Handling: Ensure we fail if the command is unrecognized or execution fails.
-      failed_when: 
-        - fw_result.failed 
-        - "'Unknown' in fw_result.stdout or 'Error' in fw_result.stdout"
+        command: "get system firmware"
+      register: fortigate_fw_raw
+      # Error Handling: Fail if the response is empty, indicating a possible connection or parsing issue.
+      # Idempotency: 'changed_when: false' ensures the task does not report a "changed" state for a read-only action.
+      # Check Mode: 'check_mode: no' allows the command to run during dry runs to gather state information.
+      changed_when: false
+      check_mode: no
+      failed_when: fortigate_fw_raw.stdout | length == 0
 
-    - name: Verify firmware data integrity
-      # Observability: Asserts that the device returned a valid response containing version data.
-      # This ensures downstream automation or reporting has valid data to process.
+    - name: "ASSERT | Validate firmware data integrity"
+      # Observability: Confirm that the output contains critical structural keywords (Version, Partition).
       ansible.builtin.assert:
         that:
-          - "fw_result.stdout is defined"
-          - "fw_result.stdout | length > 0"
-          - "'Version' in fw_result.stdout or 'build' in fw_result.stdout"
-        fail_msg: "Data Integrity Error: Firmware output for {{ inventory_hostname }} is invalid or incomplete."
-        success_msg: "Data Integrity Verified: Firmware information successfully captured."
+          - "'Version' in fortigate_fw_raw.stdout"
+          - "'Partition' in fortigate_fw_raw.stdout"
+        fail_msg: "The 'get system firmware' command returned an unrecognized or empty format from {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display formatted firmware status
-      # Why: Provides a clear, human-readable summary for operational logs and visibility.
+    - name: "DISPLAY | Report Firmware Monitoring Results"
+      # Documentation: Provides structured, human-readable output for auditing and log verification.
       ansible.builtin.debug:
         msg: |
-          ======================= FIRMWARE AUDIT: {{ inventory_hostname }} =======================
-          TIMESTAMP: {{ ansible_date_time.iso8601 | default('N/A') }}
+          ======================= FIRMWARE STATUS =======================
+          DEVICE: {{ inventory_hostname }}
           
-          {{ fw_result.stdout }}
-          =========================================================================================
+          --- SYSTEM FIRMWARE OUTPUT ---
+          {{ fortigate_fw_raw.stdout }}

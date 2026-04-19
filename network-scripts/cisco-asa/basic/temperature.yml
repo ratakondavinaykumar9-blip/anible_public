@@ -1,39 +1,36 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Monitor Temperature Sensors
-# This playbook retrieves and validates temperature data from Cisco ASA/Firepower devices.
-# It adheres to enterprise standards for idempotency, observability, and robust error handling.
-- name: Network Health Monitoring - Temperature
+# Playbook to monitor hardware temperature on ASA/Firepower devices.
+# Proactive thermal monitoring is essential for hardware health and preventing unexpected shutdowns.
+- name: Monitor Hardware Temperature
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Optimization: System facts are not required for these CLI-based tasks.
 
   tasks:
-    - name: Retrieve temperature sensor data
-      # Using FQCN (Fully Qualified Collection Name) for reliable network command execution.
-      # This task is inherently idempotent as it performs a read-only operation.
+    - name: Retrieve hardware temperature via CLI
+      # Use Fully Qualified Collection Name (FQCN) for reliability and clarity.
+      # Read-only CLI commands are inherently idempotent as they do not modify device state.
       ansible.netcommon.cli_command:
         command: show temperature
       register: temp_output
-      # Error Handling: Explicitly fail if the command execution fails or returns an 'Invalid input' string.
-      failed_when: 
-        - temp_output.failed or "Invalid input" in temp_output.stdout
+      # Error Handling: Explicitly fail if the device returns an empty response or an error string.
+      failed_when: >
+        temp_output.stdout | length == 0 or
+        'Invalid' in temp_output.stdout or
+        'Error' in temp_output.stdout
 
-    - name: Verify telemetry data integrity
-      # Observability: Assert that the command returned meaningful data before proceeding.
-      # This ensures that subsequent automation or reporting doesn't process null values.
+    - name: Validate captured temperature data
+      # Observability: Use assertions to verify that the output contains expected thermal indicators.
       ansible.builtin.assert:
         that:
-          - temp_output.stdout is defined
-          - temp_output.stdout | length > 0
-        fail_msg: "Temperature telemetry is missing or empty."
-        success_msg: "Temperature telemetry successfully validated."
+          - "'Temperature' in temp_output.stdout or 'Celsius' in temp_output.stdout"
+        fail_msg: "The command output does not contain valid temperature information."
+        success_msg: "Hardware temperature data successfully validated."
 
-    - name: Output formatted temperature report
-      # Documentation & Observability: Provides a human-readable summary for log analysis.
+    - name: Display formatted temperature status
+      # Observability: Provide a clear, human-readable report of the device's thermal health.
       ansible.builtin.debug:
         msg: |
-          ======================= TEMPERATURE REPORT =======================
-          Device: {{ inventory_hostname }}
-          Status: Success
-          ------------------------------------------------------------------
+          ======================= TEMPERATURE STATUS: {{ inventory_hostname }} =======================
           {{ temp_output.stdout }}
-          ==================================================================
+```

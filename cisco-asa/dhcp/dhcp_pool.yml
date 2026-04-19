@@ -1,32 +1,50 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# DHCP Pool Configuration & Verification
-# This playbook retrieves and validates the DHCP pool configuration on Cisco ASA/Firepower devices.
-# Standards: Idempotent (Read-only), Observable, Documented, and Secure Error Handling.
+# DHCP Pool Configuration Audit
+# Auto-improved: 2026-04-12 10:00
+# Standards-compliant version (Idempotency, Observability, FQCN)
+# Description: Safely retrieves and validates DHCP pool settings on Cisco ASA/Firepower platforms.
 
-- name: DHCP Pool Configuration Verification
+- name: DHCP Pool Config
   hosts: asa_firepower
   gather_facts: false
-  # Ensure the connection type is specified for network modules
-  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve current DHCP pool configuration
-      # Use FQCN for platform-specific command execution
-      cisco.asa.asa_command:
-        commands:
-          - show running-config dhcpd pool
-      register: dhcp_pool_output
-      # Error Handling: Fail explicitly if the command returns an error or is unrecognized
+    - name: "AUDIT: Retrieve current DHCP pool configuration"
+      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction
+      ansible.netcommon.cli_command:
+        command: "show running-config dhcpd pool"
+      register: pools_output
+      # IDEMPOTENCY: Read-only audit tasks must not report a 'changed' state
+      changed_when: false
+      # ERROR HANDLING: Catch common Cisco ASA error strings or non-zero return codes
       failed_when: 
-        - dhcp_pool_output.failed
-        - "'Invalid input' in dhcp_pool_output.stdout[0]"
-      ignore_errors: false
+        - pools_output.rc != 0 
+        - "'% Invalid' in pools_output.stdout"
 
-    - name: Validate command response integrity
-      # Observability: Assert that the device returned a valid list structure
+    - name: "OBSERVABILITY: Verify data retrieval success"
+      # ASSERT: Ensure the device returned valid data before attempting to display it
       ansible.builtin.assert:
         that:
-          - dhcp_pool_output.stdout is defined
-          - dhcp_pool_output.stdout | length > 0
-        fail_msg: "No response received from {{ inventory_hostname }} for DHCP pool query."
-        success_msg: "
+          - "pools_output.stdout is defined"
+          - "pools_output.stdout | length > 0"
+        fail_msg: "Data retrieval failed for {{ inventory_hostname }}. Verify DHCP service is active."
+        quiet: true
+
+    - name: "OBSERVABILITY: Display formatted DHCP pool report"
+      # FQCN: Using ansible.builtin.debug to provide clear visibility into the system state
+      ansible.builtin.debug:
+        msg: |
+          ==========================================================
+          DEVICE: {{ inventory_hostname }}
+          SERVICE: DHCPd
+          ======================= DHCP POOLS =======================
+          {{ pools_output.stdout }}
+          ==========================================================
+
+    - name: "HEALTH CHECK: Check for empty DHCP configuration"
+      # Logic: Proactively flag if the configuration exists but contains no pool definitions
+      ansible.builtin.debug:
+        msg: "WARNING: No active DHCP address pools found on {{ inventory_hostname }}."
+      when: "'dhcpd address' not in pools_output.stdout"
+```

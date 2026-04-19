@@ -1,39 +1,38 @@
----
-# AAA Servers Configuration Audit
-# Purpose: This playbook retrieves and validates the AAA server configuration on Cisco ASA/Firepower devices.
-# Standards: Ensures idempotency, provides observability through assertions, and follows FQCN best practices.
-
-- name: AAA Servers Audit
+MCP issues detected. Run /mcp list for status.---
+# Playbook: AAA Server Configuration Audit
+# Purpose: Safely retrieves and validates AAA configuration from Cisco ASA/Firepower hosts.
+# Standards: Idempotency, Observability, Documentation, Error Handling, and FQCN usage.
+- name: Audit AAA Servers
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
     - name: Retrieve AAA server running configuration
-      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction.
-      # Idempotency: Marked as 'changed_when: false' because this is a read-only operation that does not modify device state.
+      # Uses FQCN to execute a show command on the network device.
       ansible.netcommon.cli_command:
         command: show running-config aaa-server
       register: aaa_result
+      # Idempotency: Read-only operations must always report 'changed: false' to ensure 
+      # the playbook remains safe and reporting reflects actual state changes.
       changed_when: false
-      # Error Handling: Fail explicitly if the command is unrecognized by the device or if the task fails.
-      failed_when:
-        - aaa_result.failed or "invalid input" in aaa_result.stdout | lower
+      # Error Handling: Fail the task if the command fails or if the device returns 
+      # an "Invalid input" error (e.g., if the command isn't supported on the OS version).
+      failed_when: aaa_result.failed or 'Invalid input' in aaa_result.stdout
 
-    - name: Validate AAA configuration data
-      # Observability: Assert that the command successfully returned configuration data to prevent silent failures.
+    - name: Verify AAA configuration exists
+      # Observability: Uses assertion to verify that configuration data was actually 
+      # returned and is not just an empty string.
       ansible.builtin.assert:
         that:
           - aaa_result.stdout is defined
           - aaa_result.stdout | length > 0
-        fail_msg: "AAA server configuration could not be retrieved or is empty on {{ inventory_hostname }}."
-        success_msg: "AAA configuration successfully captured for {{ inventory_hostname }}."
+        fail_msg: "AAA configuration could not be retrieved or the output is empty."
+        quiet: true
 
-    - name: Display AAA Server Details
-      # Documentation: Provides a structured view of the retrieved configuration for the operator.
+    - name: Display AAA configuration for audit
+      # Observability: Outputs the registered variable content in a formatted block 
+      # for the operator's review.
       ansible.builtin.debug:
         msg: |
-          ======================= AAA SERVERS AUDIT =======================
-          Device: {{ inventory_hostname }}
-          Status: Success
-          Configuration Output:
+          ======================= AAA SERVERS =======================
           {{ aaa_result.stdout }}

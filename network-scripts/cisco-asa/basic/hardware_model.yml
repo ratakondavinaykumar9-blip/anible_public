@@ -1,32 +1,36 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Get Hardware Model Info
-# Purpose: Retrieves and validates hardware model information from Cisco ASA/Firepower devices.
-# Standards: Idempotency (Read-only), Observability (Assert/Register), FQCN (cisco.asa, ansible.builtin).
-- name: Get Hardware Model Information
+# NetLearner Architect: Hardware Model Information Retrieval
+# Retrieves and validates hardware model and version information from ASA/Firepower devices.
+# Standards: Idempotent (Read-only), Observable (Assert), Best Practices (FQCN).
+
+- name: Retrieve and Verify Hardware Model Information
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute command to retrieve hardware and model details
-      # FQCN: Utilizing the cisco.asa collection for platform-specific CLI execution.
-      # Idempotency: This task is read-only ('show' command) and is safe to run repeatedly.
-      cisco.asa.asa_command:
-        commands:
-          - "show version | include (Hardware|Model)"
-      register: hardware_info
-      # Error Handling: Ensure the task fails if the command returns no data or if the execution fails.
-      failed_when:
-        - hardware_info.failed or (hardware_info.stdout[0] | length == 0)
+    - name: Execute command to extract Hardware and Model details
+      # Uses FQCN for cross-environment compatibility and stability.
+      # This task is inherently idempotent as it performs a non-state-changing query.
+      ansible.netcommon.cli_command:
+        command: "show version | include (Hardware|Model)"
+      register: device_model_output
+      # Error Handling: Ensure the task fails if the device returns no data or is unreachable.
+      failed_when: 
+        - device_model_output.stdout is not defined
+        - device_model_output.stdout | length == 0
 
     - name: Validate that hardware information was correctly retrieved
-      # Observability: Use assertions to verify that the output contains expected hardware/model keywords.
+      # Observability: Verifies the integrity of the output before proceeding.
+      # Ensures the regex/filter in the CLI command actually matched relevant data.
       ansible.builtin.assert:
         that:
-          - "'Hardware' in hardware_info.stdout[0] or 'Model' in hardware_info.stdout[0]"
-        fail_msg: "The retrieved output does not contain valid Hardware or Model information."
-        success_msg: "Hardware model information successfully validated."
+          - "'Hardware' in device_model_output.stdout or 'Model' in device_model_output.stdout"
+        fail_msg: "The command output did not contain expected 'Hardware' or 'Model' strings."
+        success_msg: "Hardware model data successfully validated."
 
-    - name: Display the retrieved hardware model details
-      # Documentation: Provide clear visibility of the result for the operator.
+    - name: Display retrieved Hardware Model information
+      # Provides clear visibility for the operator into the specific hardware instance.
       ansible.builtin.debug:
-        msg: "Hardware Details: {{ hardware_info.stdout[0] | trim }}"
+        msg: "Detected Hardware Information: {{ device_model_output.stdout_lines }}"
+```

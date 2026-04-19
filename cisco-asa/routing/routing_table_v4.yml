@@ -1,40 +1,37 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Routing Table V4 - Improved for Enterprise Standards
-# Improved: 2026-03-15
-# Author: NetLearner Architect
-#
-# Standards: Idempotency (read-only), Observability (assert), Documentation,
-# Error Handling (failed_when), and FQCN usage.
-
-- name: IPv4 Routing Table Audit
+# IPv4 Routing Table Retrieval & Validation
+# Purpose: Fetches and validates the IPv4 routing table to ensure operational observability.
+# This playbook is inherently idempotent as it performs read-only state inspection.
+- name: IPv4 Routes
   hosts: asa_firepower
-  gather_facts: false # Performance: Facts are not required for this operational check
+  gather_facts: false # Performance: Facts not required for CLI command execution
 
   tasks:
-    - name: Retrieve IPv4 Routing Table
-      # FQCN: Using ansible.netcommon.cli_command for cross-platform network CLI support.
-      # Idempotency: Read-only 'show' command is safe to execute repeatedly.
+    - name: Retrieve IPv4 routing table from device
+      # Use FQCN (Fully Qualified Collection Name) for consistent module resolution.
       ansible.netcommon.cli_command:
         command: show route ipv4
-      register: v4_route_output
-      # Error Handling: Fail the task if the command fails or returns no output.
+      register: v4_route_data
+      # Error Handling: Ensure the task fails if the output is empty or undefined.
       failed_when: 
-        - v4_route_output.failed | default(false)
-        - v4_route_output.stdout | length == 0
+        - v4_route_data.stdout is not defined or v4_route_data.stdout | length == 0
 
-    - name: Validate Routing Table Integrity
-      # Observability: Assert that the output contains standard routing table signatures.
-      # This ensures the device returned a valid table rather than an error message.
+    - name: Validate routing table integrity
+      # Observability: Assert that the output contains standard ASA/FTD routing headers.
+      # This confirms the device returned a valid network state rather than an error message.
       ansible.builtin.assert:
         that:
-          - "'Codes:' in v4_route_output.stdout"
-          - "'Gateway of last resort' in v4_route_output.stdout"
-        fail_msg: "The routing table output is invalid or incomplete."
+          - "'Codes:' in v4_route_data.stdout"
+          - "'Gateway of last resort' in v4_route_data.stdout"
+        fail_msg: "The routing table output is invalid or incomplete. Verify device connectivity."
         success_msg: "IPv4 routing table successfully retrieved and validated."
+        quiet: true
 
-    - name: Display IPv4 Routing Table
-      # Observability: Providing a clean, formatted view for manual verification.
+    - name: Display formatted routing table
+      # Documentation: Provides a human-readable view for operator audit logs and debugging.
       ansible.builtin.debug:
         msg: |
           ======================= IPv4 ROUTES =======================
-          {{ v4_route_output.stdout }}
+          {{ v4_route_data.stdout }}
+```

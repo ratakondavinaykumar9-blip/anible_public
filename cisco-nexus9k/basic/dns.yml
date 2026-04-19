@@ -1,60 +1,82 @@
----
-# DNS Configuration for Cisco Nexus 9000 Switches
-# Improved by NetLearner Architect
-# This playbook ensures consistent DNS and domain-name settings using idempotent resource modules.
+MCP issues detected. Run /mcp list for status.---
+# DNS Configuration for Cisco Nexus 9000
+# Ensures production-ready DNS setup with idempotency, observability, and validation.
+#
+# Author: Arjun (OpenClaw)
+# Improved by: NetLearner Architect
 
 - name: Configure DNS Settings
   hosts: nexus9k
   gather_facts: false
-  connection: ansible.netcommon.network_cli
+  connection: cisco.nxos.network_cli
 
   vars:
-    # VRF context for DNS, typically 'management' or 'default'
+    # Variables extracted with defaults to ensure playbook robustness
+    dns_primary: "{{ dns_servers.primary | default(omit) }}"
+    dns_secondary: "{{ dns_servers.secondary | default(omit) }}"
+    dns_domain_name: "{{ dns_domain | default('example.com') }}"
     dns_vrf: management
-    # Using the variable names from the original playbook for compatibility
-    dns_domain_name: "{{ dns_domain }}"
-    # Constructing a list of server dictionaries for the nxos_dns resource module
-    target_servers:
-      - server: "{{ dns_servers.primary }}"
-        vrf: "{{ dns_vrf }}"
-      - server: "{{ dns_servers.secondary }}"
-        vrf: "{{ dns_vrf }}"
+    # Constructing a list of active name servers for iterative configuration and validation
+    name_servers: "{{ [dns_primary, dns_secondary] | select('defined') | list }}"
 
   tasks:
-    - name: Manage DNS servers and domain name
-      # cisco.nxos.nxos_dns is used for idempotency (Resource Module approach)
-      # It ensures the state of the device matches the defined parameters
-      cisco.nxos.nxos_dns:
-        domain_name: "{{ dns_domain_name }}"
-        servers: "{{ target_servers }}"
-        state: merged
-      register: dns_config_result
-      # Observability: Notify the handler to save only when changes are detected
-      notify: Save NX-OS Configuration
-
-    - name: Audit DNS operational configuration
-      # Retrieve the running configuration to verify the changes were applied correctly
+    - name: Audit current DNS and domain configuration
+      # Why: To provide a baseline for idempotency and enable granular verification in subsequent tasks.
       cisco.nxos.nxos_command:
         commands:
-          - show run | include "ip name-server|ip domain-name"
-      register: operational_dns
+          - show running-config | include "ip name-server|ip domain-name"
+      register: current_dns_state
       changed_when: false
 
-    - name: Validate DNS configuration integrity
-      # Assert ensures that the intended configuration is reflected in the device output
+    - name: Configure DNS Name Servers with VRF context
+      # Idempotency: nxos_config ensures the line is present without redundant changes if the state matches.
+      # Best Practice: Uses FQCN and enforces management VRF separation for control-plane traffic.
+      cisco.nxos.nxos_config:
+        lines:
+          - "ip name-server {{ item }} use-vrf {{ dns_vrf }}"
+      loop: "{{ name_servers }}"
+      register: dns_server_config
+      # Observability: We register the loop output to verify each individual server application.
+
+    - name: Configure Default Domain Name
+      # Why: Required for resolution of unqualified hostnames within the local administrative domain.
+      cisco.nxos.nxos_config:
+        lines:
+          - "ip domain-name {{ dns_domain_name }}"
+      register: domain_name_config
+
+    - name: Verify operational DNS resolution state
+      # Why: Fetching the host table ensures the configuration is functionally active in the NX-OS control plane.
+      cisco.nxos.nxos_command:
+        commands:
+          - show hosts
+      register: dns_verify_operational
+      changed_when: false
+      # Error Handling: Ensure the command executes successfully without returning device errors.
+      failed_when: dns_verify_operational.failed
+
+    - name: Assert configuration is correctly reflected in host table
+      # Observability: Automated validation that applied settings are correctly indexed in the device's runtime state.
       ansible.builtin.assert:
         that:
-          - "dns_domain_name in operational_dns.stdout[0]"
-          - "dns_servers.primary in operational_dns.stdout[0]"
-          - "dns_servers.secondary in operational_dns.stdout[0]"
-        fail_msg: "DNS Validation Failed: Configuration missing from running-config on {{ inventory_hostname }}"
-        success_msg: "DNS Validation Succeeded: All settings verified on {{ inventory_hostname }}"
-      # Error Handling: Validation is critical for network reachability
-      ignore_errors: false
+          - "dns_domain_name in dns_verify_operational.stdout[0]"
+          - "item in dns_verify_operational.stdout[0]"
+        fail_msg: "Verification failed: DNS configuration missing from operational state for server {{ item }}."
+        success_msg: "DNS configuration verified successfully in the host table."
+      loop: "{{ name_servers }}"
+
+    - name: Persist configuration changes to startup-config
+      # Idempotency: Trigger a save operation only if any configuration task reported a 'changed' status.
+      # Best Practice: Use save_when: changed for efficient state management.
+      cisco.nxos.nxos_config:
+        save_when: changed
+      when: dns_server_config.changed or domain_name_config.changed
+      register: persistence_result
+      # Error Handling: Explicitly check for persistence success to avoid silent failures.
+      failed_when: persistence_result.failed
 
   handlers:
-    - name: Save NX-OS Configuration
-      # Persists the running-config to startup-config using FQCN
+    - name: save configuration
       cisco.nxos.nxos_config:
         save: true
-...
+---

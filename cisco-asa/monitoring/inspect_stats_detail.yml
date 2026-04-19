@@ -1,40 +1,42 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NetLearner Architect Improved Playbook
-# Purpose: Retrieve and validate service-policy inspection statistics from Cisco ASA/Firepower devices.
-# Standards: Idempotency (Read-only), Observability (Assertions), Documentation, Error Handling, FQCN.
-
-- name: Inspection Stats Detail
+# NetLearner Architect Standardized Playbook
+# Purpose: Retrieves and validates deep inspection statistics from Cisco ASA/Firepower devices.
+# Standards: Idempotency (read-only), Observability (assertions), FQCN (best practices).
+# Updated: 2026-04-12
+---
+- name: Inspection Stats Detail Recovery
   hosts: asa_firepower
-  gather_facts: false # Facts are not required for read-only CLI statistics collection.
+  gather_facts: false
 
   tasks:
     - name: Retrieve service-policy inspection statistics
-      # Using Fully Qualified Collection Name (FQCN) for consistency and portability.
+      # Using FQCN for cross-platform compatibility and maintainability.
       ansible.netcommon.cli_command:
         command: show service-policy inspect
-      register: inspect_stats
-      # Idempotency: 'show' commands are read-only and inherently safe to run multiple times.
-      # Error Handling: Ensure the task fails if the device returns an error message.
+      register: inspect_output
+      # Setting changed_when to false ensures the task is idempotent as it is a read-only operation.
+      changed_when: false
+      # Error handling: Fail if the device returns common error patterns for unsupported commands or syntax errors.
       failed_when:
-        - inspect_stats.failed | default(false)
-        - "'Invalid input' in inspect_stats.stdout or 'Usage' in inspect_stats.stdout"
+        - inspect_output.stdout is not defined
+        - "'% Invalid input' in inspect_output.stdout"
+        - "'ERROR:' in inspect_output.stdout"
 
-    - name: Validate the integrity of retrieved data
-      # Observability: Assert that the command returned a valid response containing expected keywords.
+    - name: Validate inspection data integrity
+      # Observability: Assert that the output contains expected headers to ensure the service-policy is actually configured.
       ansible.builtin.assert:
         that:
-          - "inspect_stats.stdout is defined"
-          - "inspect_stats.stdout | length > 0"
-          - "'Service-policy' in inspect_stats.stdout"
-        fail_msg: "Data Integrity Error: The device did not return valid service-policy inspection data."
-        success_msg: "Data Integrity Verified: Inspection statistics successfully captured and validated."
+          - "inspect_output.stdout | length > 0"
+          - "'Service-policy' in inspect_output.stdout or 'Inspect' in inspect_output.stdout"
+        fail_msg: "Inspection stats returned empty or invalid data. Verify service-policy configuration on the target."
+        success_msg: "Inspection statistics successfully retrieved and validated."
 
-    - name: Display formatted inspection results
-      # Documentation: Clear visual output for administrative review and audit trails.
+    - name: Display formatted inspection telemetry
+      # Provide clean visibility for NOC/SOC operators using the debug module.
       ansible.builtin.debug:
-        msg: |
-          ================================================================
-          DEVICE: {{ inventory_hostname }}
-          ======================= INSPECTION STATS =======================
-          {{ inspect_stats.stdout }}
-          ================================================================
+        msg: 
+          - "======================= INSPECTION STATS ======================="
+          - "{{ inspect_output.stdout }}"
+          - "================================================================"
+```

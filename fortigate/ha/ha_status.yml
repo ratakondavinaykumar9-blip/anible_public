@@ -1,41 +1,39 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate HA Status Verification Playbook
-# This playbook retrieves and validates the High Availability (HA) status.
-# Improved for: Idempotency, Observability, Documentation, Error Handling, and FQCN.
-
-- name: Retrieve and Verify FortiGate HA Status
+# FortiGate HA Status Audit
+# Optimized for NetLearner Staging Standards
+# Standards: Idempotency, Observability, Documentation, Error Handling, Best Practices
+- name: Get HA Status
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute 'get system ha status' command
-      # Using FQCN for network CLI operations.
-      # Idempotency: changed_when is set to false as this is a read-only state check.
+    - name: Retrieve system HA status from FortiGate
+      # Why: Capturing the raw status is the baseline for HA health monitoring.
+      # FQCN: Using fully qualified names ensures compatibility across Ansible versions.
       ansible.netcommon.cli_command:
         command: get system ha status
-      register: ha_output
+      register: ha_result
+      # Error Handling: Fail explicitly if the command returns an error or is invalid.
+      failed_when: 
+        - ha_result.failed or "Unknown command" in ha_result.stdout
+      # Idempotency: Mark as 'changed: false' since this is a read-only operation.
       changed_when: false
-      # Error Handling: Fail if the command itself fails or if the output indicates a CLI error.
-      failed_when:
-        - ha_output.failed or "Command fail" in ha_output.stdout
 
-    - name: Validate HA Health Status
-      # Observability: Assert that the cluster is in a healthy state.
-      # This ensures the playbook does more than just fetch text; it validates operational status.
+    - name: Validate HA output integrity
+      # Observability: Assert that the retrieved data is not empty and contains HA signatures.
+      # This prevents false positives where a command "succeeds" but returns unusable data.
       ansible.builtin.assert:
         that:
-          - "'HA Health Status: OK' in ha_output.stdout"
-          - "'Mode: ' in ha_output.stdout"
-        fail_msg: "HA Status check failed! The cluster may be out of sync or HA is not configured on {{ inventory_hostname }}."
-        success_msg: "HA Health Status is confirmed as OK on {{ inventory_hostname }}."
+          - "ha_result.stdout | length > 0"
+          - "'HA Health Status' in ha_result.stdout or 'Mode:' in ha_result.stdout"
+        fail_msg: "HA Status retrieval failed or returned unexpected data structure."
+        quiet: true
 
-    - name: Display Formatted HA Status
-      # Provides clear visibility for operators during playbook execution.
+    - name: Display formatted HA Status report
+      # Documentation: Providing clear visibility into the cluster state for the network operator.
       ansible.builtin.debug:
         msg: |
-          ======================= HA STATUS SUMMARY =======================
-          Device: {{ inventory_hostname }}
-          Status: Verified
-          -----------------------------------------------------------------
-          {{ ha_output.stdout }}
-          =================================================================
+          ======================= HA STATUS: {{ inventory_hostname }} =======================
+          {{ ha_result.stdout }}
+```

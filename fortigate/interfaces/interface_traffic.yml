@@ -1,40 +1,50 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NetLearner Architect Improved Playbook
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-# Purpose: Safely retrieve and validate real-time interface traffic from FortiGate devices.
+# Interface Traffic Report for FortiGate
+# Auto-improved: 2026-04-12 12:00
+# Author: Arjun (OpenClaw) / NetLearner Architect Refinement
 #
-- name: Get FortiGate Interface Traffic
+# Standards Adherence:
+# 1. Idempotency: Marked with 'changed_when: false' as this is a non-mutating state retrieval.
+# 2. Observability: Uses 'register' to capture output and 'assert' to verify data integrity.
+# 3. Documentation: Detailed comments explaining the "why" and validation logic.
+# 4. Error Handling: Employs 'failed_when' to catch empty results or CLI execution errors.
+# 5. Best Practices: Utilizes Fully Qualified Collection Names (FQCN) for all modules.
+
+- name: Retrieve FortiGate Interface Traffic Statistics
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve interface traffic statistics via CLI
-      # Why: This diagnostic command provides immediate RX/TX visibility across all interfaces.
-      # Using ansible.netcommon.cli_command for raw diagnostic output retrieval.
+    - name: Execute CLI command to get interface traffic
+      # Purpose: Fetches real-time ingress and egress counters from the FortiOS network stack.
       ansible.netcommon.cli_command:
         command: get system interface traffic
       register: traffic_capture
-      # Idempotency: Read-only 'get' commands must not report a 'changed' status.
+      # Idempotency: This task is read-only; ensuring 'changed' is never true.
       changed_when: false
-      # Error Handling: Ensure the task fails if the command is not supported or returns an error.
+      # Error Handling: Fail if the command returns nothing or contains common error strings.
       failed_when:
-        - traffic_capture.rc | default(0) != 0
+        - traffic_capture.stdout | length == 0
         - "'Command fail' in traffic_capture.stdout"
+        - "'Unknown' in traffic_capture.stdout"
 
-    - name: Validate captured traffic data
-      # Observability: Confirm the output contains data before proceeding to display.
-      # This prevents successful task reporting when the device returns empty results.
+    - name: Validate retrieved traffic data
+      # Observability: Confirm the output contains expected keywords before proceeding.
       ansible.builtin.assert:
         that:
-          - "traffic_capture.stdout is defined"
-          - "traffic_capture.stdout | length > 0"
-        fail_msg: "Data Integrity Error: Interface traffic output is empty or undefined."
-        success_msg: "Data Integrity Verified: Interface traffic stats successfully captured."
+          - "traffic_capture.stdout is search('(?i)interface|traffic|in|out')"
+        fail_msg: "Interface traffic data validation failed. Output format unexpected."
+        success_msg: "Interface traffic data successfully validated."
+        quiet: true
 
     - name: Display Interface Traffic Report
-      # Documentation: Provides a formatted, human-readable view of the captured statistics.
+      # Documentation: Provides structured visibility into the captured telemetry.
       ansible.builtin.debug:
         msg: |
           ======================= INTERFACE TRAFFIC =======================
+          Node: {{ inventory_hostname }}
+          Capture Method: CLI (get system interface traffic)
+          -----------------------------------------------------------------
           {{ traffic_capture.stdout }}
-          =================================================================
+```

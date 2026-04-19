@@ -1,58 +1,56 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Improved Cisco ASA Interface Audit Playbook
-# Standards: FQCN, Idempotency, Observability, Error Handling
-- name: Audit Interface Status and IP Addressing
+# NetLearner Architect - Optimized Interface Reporter
+# Purpose: Gathers and validates Cisco ASA interface configuration and operational state.
+# Standards Compliance: Idempotency, Observability, FQCN, and Robust Error Handling.
+
+- name: Get Interface Status and Details
   hosts: asa_firepower
-  gather_facts: false
-  connection: ansible.netcommon.network_cli
+  gather_facts: false # Disabled default fact gathering for performance; specific facts collected via modules.
 
   tasks:
-    - name: Gather structured interface configuration facts
-      # Using 'state: gathered' ensures idempotency by only reading current device state.
-      # FQCN used to ensure the correct collection version is invoked.
+    - name: Gather structured interface configuration
+      # Using 'state: gathered' ensures the task is read-only and idempotent.
+      # Fully Qualified Collection Name (FQCN) used to ensure reliability across environments.
       cisco.asa.asa_interfaces:
         state: gathered
       register: interfaces_output
 
-    - name: Verify interface data retrieval success
-      # Observability: Assert that the module successfully returned structured data.
+    - name: Verify interface configuration was retrieved
+      # Observability: Using assertions to catch data retrieval issues early in the play.
       ansible.builtin.assert:
         that:
-          - "interfaces_output.gathered is defined"
-        fail_msg: "Interface facts could not be retrieved from {{ inventory_hostname }}. Check network_cli connectivity."
+          - interfaces_output.gathered is defined
+        fail_msg: "Failed to gather interface facts from {{ inventory_hostname }}. Verify credentials and connectivity."
 
-    - name: Execute 'show ip address' for summary verification
-      # cisco.asa.asa_command is preferred over netcommon for ASA-specific parsing.
-      cisco.asa.asa_command:
-        commands:
-          - show ip address
+    - name: Get operational IP address summary
+      # Gathering operational state directly from the CLI for non-config data points (e.g., dynamic IPs).
+      ansible.netcommon.cli_command:
+        command: show ip address
       register: ip_addr_output
-      # Error Handling: Fail if the output indicates a syntax error or is empty.
-      failed_when: 
-        - ip_addr_output.failed or ip_addr_output.stdout | length == 0
-        - "'Invalid' in ip_addr_output.stdout[0]"
+      # Error Handling: Ensure the command returned data; otherwise, treat as a failure to prevent silent errors.
+      failed_when: ip_addr_output.stdout | length == 0
 
-    - name: Execute 'show interface' for hardware statistics
-      # Captures interface-level counters and physical layer status.
-      cisco.asa.asa_command:
-        commands:
-          - show interface
+    - name: Get detailed interface operational statistics
+      # Capturing raw interface counters and physical link details for troubleshooting.
+      ansible.netcommon.cli_command:
+        command: show interface
       register: interface_stats
-      failed_when: "interface_stats.stdout is not defined"
+      failed_when: interface_stats.stdout | length == 0
 
-    - name: Validate command responses are non-empty
-      # Observability: Ensure that critical operational commands returned data.
-      ansible.builtin.assert:
-        that:
-          - "ip_addr_output.stdout[0] | length > 0"
-          - "interface_stats.stdout[0] | length > 0"
-        fail_msg: "CLI command execution returned empty results on {{ inventory_hostname }}."
-
-    - name: Display structured interface facts
-      # Providing visibility into the object model for troubleshooting (enabled at -v level).
+    - name: Display summarized interface results
+      # Logic: Iterate through gathered interface facts to present a clean, human-readable summary.
+      # Defaults and Jinja2 filters ensure the report renders even if specific attributes are missing.
       ansible.builtin.debug:
-        var: interfaces_output.gathered
-        verbosity: 1
-
-    - name: Generate formatted interface summary report
-      # Documentation: This summary provides a human-readable audit trail of the interface state.
+        msg: |
+          ======================================================================
+          INTERFACE REPORT: {{ inventory_hostname }}
+          ======================================================================
+          {% for iface in interfaces_output.gathered %}
+          {{ iface.name | d('Unknown') }}:
+            Admin Status: {{ 'ENABLED' if iface.enabled | default(false) else 'DISABLED' }}
+            IPv4 Address: {{ iface.ipv4[0].address | d('Unassigned') if (iface.ipv4 is defined and iface.ipv4 | length > 0) else 'Unassigned' }}
+            Description:  {{ iface.description | d('None') }}
+          ----------------------------------------------------------------------
+          {% endfor %}
+```

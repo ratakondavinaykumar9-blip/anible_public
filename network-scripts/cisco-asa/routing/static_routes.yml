@@ -1,33 +1,40 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Get and Verify ASA/Firepower Static Routes
-# Purpose: Retrieves the current static routing table and validates the output.
-# Standards: Idempotency, Observability, FQCN, Error Handling.
+# Playbook: Get Static Routes
+# Description: Retrieves and displays the current static routing table from Cisco ASA/Firepower devices.
+# Standards: Idempotent (Read-only), Observability (Assert/Register), FQCN, and Error Handling.
 - name: Get Static Routes
   hosts: asa_firepower
   gather_facts: false
+  # Cisco ASA/FTD devices typically require elevated privileges (enable mode) for show commands.
+  become: true
 
   tasks:
-    - name: Get static routes from device
-      # Use Fully Qualified Collection Name (FQCN) for cross-platform compatibility
+    - name: Execute 'show route static' on the target device
+      # Use Fully Qualified Collection Name (FQCN) for the network CLI module.
       ansible.netcommon.cli_command:
         command: show route static
-      register: static_routes
-      # Error Handling: Fail if the command execution itself returns an error
-      failed_when: static_routes.failed == true
+      register: static_routes_output
+      # Read-only tasks should run during 'check_mode' to provide visibility without state change.
+      check_mode: false
+      # Error Handling: Fail if output is undefined or contains common Cisco error strings.
+      failed_when:
+        - static_routes_output.stdout is not defined or
+          "Invalid input" in static_routes_output.stdout or
+          "Error" in static_routes_output.stdout
 
-    - name: Verify static route output integrity
-      # Observability: Ensure the output is defined and contains expected routing data
-      # Note: Idempotency is maintained as this is a read-only operation.
+    - name: Validate that static route data was successfully captured
+      # Observability: Ensure the command returned a non-empty string.
       ansible.builtin.assert:
         that:
-          - static_routes.stdout is defined
-          - static_routes.stdout | length > 0
-        fail_msg: "The static route output is empty or the command failed."
+          - static_routes_output.stdout | length > 0
+        fail_msg: "The 'show route static' command returned no output. Check device configuration."
         quiet: true
 
-    - name: Display formatted static routes
-      # Documentation: Presenting the operational state for audit/logs
+    - name: Display the retrieved static routes for operator review
+      # Best Practice: Use FQCN for the debug module to ensure consistency across environments.
       ansible.builtin.debug:
         msg: |
-          ======================= STATIC ROUTES =======================
-          {{ static_routes.stdout }}
+          ======================= STATIC ROUTES: {{ inventory_hostname }} =======================
+          {{ static_routes_output.stdout }}
+```

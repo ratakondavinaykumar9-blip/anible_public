@@ -1,2 +1,200 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# =
+# ==============================================================================
+# Playbook: VPN Tunnel Troubleshooting (Cisco ASA/Firepower)
+# ==============================================================================
+# Author: NetLearner (OpenClaw)
+# Version: 1.1.0
+# Description: Improved VPN troubleshooting playbook with enhanced observability,
+#              idempotency, and error handling for Cisco security appliances.
+# ==============================================================================
+
+- name: Troubleshoot VPN Tunnel
+  hosts: asa_firepower
+  gather_facts: yes # Required for ansible_date_time used in reporting
+  connection: ansible.netcommon.network_cli
+
+  vars:
+    tunnel_name: ""
+    peer_ip: ""
+    detailed: false
+    save_report: true
+    report_path: "{{ lookup('env', 'HOME') }}/vpn_diagnostics"
+
+  tasks:
+    - name: Initialize VPN diagnostics
+      block:
+        - name: Ensure report directory exists
+          # IDEMPOTENCY: Using state: directory ensures the folder exists without 
+          # triggering unnecessary changes on subsequent runs.
+          ansible.builtin.file:
+            path: "{{ report_path }}"
+            state: directory
+            mode: '0755'
+          delegate_to: localhost
+          when: save_report | bool
+          run_once: true
+
+        - name: Gather system information
+          # OBSERVABILITY: Capturing version info to correlate issues with specific OS bugs.
+          ansible.netcommon.cli_command:
+            command: show version | include Software|Hardware|Serial
+          register: system_info
+          changed_when: false
+
+        - name: Verify device platform
+          # ERROR HANDLING: Ensure we are running against a supported platform.
+          ansible.builtin.assert:
+            that:
+              - "'Adaptive Security Appliance' in system_info.stdout or 'Firepower' in system_info.stdout"
+            fail_msg: "Device is not an ASA or Firepower appliance."
+
+    - name: Diagnose Phase 1 (IKE) Issues
+      block:
+        - name: Check IKEv1 SA status
+          ansible.netcommon.cli_command:
+            command: "show crypto isakmp sa {{ 'peer ' + peer_ip if peer_ip else '' }}"
+          register: ikev1_sa
+          changed_when: false
+          failed_when: false # Don't stop if no SAs are found
+
+        - name: Check IKEv2 SA status
+          ansible.netcommon.cli_command:
+            command: "show crypto ikev2 sa {{ 'remote ' + peer_ip if peer_ip else '' }}"
+          register: ikev2_sa
+          changed_when: false
+          failed_when: false
+
+        - name: Analyze IKE phase 1 state
+          ansible.builtin.set_fact:
+            ikev1_active: "{{ ikev1_sa.stdout | regex_findall('MM_READY|QM_READY|AM_READY') | length }}"
+            ikev1_issues: "{{ ikev1_sa.stdout | regex_findall('MM_NO_STATE|MM_KEY_EXCH|MM_AUTH') | length }}"
+            ikev2_active: "{{ ikev2_sa.stdout | regex_findall('Session active') | length }}"
+          when: ikev1_sa.stdout is defined or ikev2_sa.stdout is defined
+
+        - name: Assert Phase 1 Status
+          # OBSERVABILITY: Explicitly alert in the task flow if no active SAs are found.
+          ansible.builtin.debug:
+            msg: "WARNING: No active IKE SAs detected for the specified peer/tunnel."
+          when: (ikev1_active | int == 0) and (ikev2_active | int == 0)
+
+    - name: Diagnose Phase 2 (IPsec) Issues
+      block:
+        - name: Check IPsec SA status
+          ansible.netcommon.cli_command:
+            command: "show crypto ipsec sa {{ 'peer ' + peer_ip if peer_ip else '' }}"
+          register: ipsec_sa
+          changed_when: false
+          failed_when: false
+
+        - name: Parse IPsec SA details
+          ansible.builtin.set_fact:
+            # Using robust regex with default values to prevent template errors
+            ipsec_encaps: "{{ ipsec_sa.stdout | regex_findall('encap: (\\d+)') | first | default('0') }}"
+            ipsec_decaps: "{{ ipsec_sa.stdout | regex_findall('decap: (\\d+)') | first | default('0') }}"
+            ipsec_pkts_encap: "{{ ipsec_sa.stdout | regex_search('pkts encaps:\\s*(\\d+)', '\\1') | first | default('0') }}"
+            ipsec_pkts_decap: "{{ ipsec_sa.stdout | regex_search('pkts decaps:\\s*(\\d+)', '\\1') | first | default('0') }}"
+          when: ipsec_sa.stdout is defined and ipsec_sa.stdout | length > 0
+
+        - name: Verify IPsec Traffic Symmetry
+          # OBSERVABILITY: Assert that traffic is flowing in both directions.
+          ansible.builtin.assert:
+            that:
+              - "ipsec_pkts_encap | int > 0"
+              - "ipsec_pkts_decap | int > 0"
+            fail_msg: "Unidirectional traffic detected. Encaps: {{ ipsec_pkts_encap }}, Decaps: {{ ipsec_pkts_decap }}"
+            quiet: true
+          ignore_errors: true
+
+    - name: Check Crypto ACL and NAT
+      block:
+        - name: Get crypto ACL configuration
+          ansible.netcommon.cli_command:
+            command: "show running-config crypto map"
+          register: crypto_map
+          changed_when: false
+
+        - name: Get NAT exemption configuration
+          # IDEMPOTENCY: Read-only command to verify state.
+          ansible.netcommon.cli_command:
+            command: "show running-config nat | include exempt"
+          register: nat_exempt
+          changed_when: false
+          failed_when: false
+
+        - name: Identify Traffic Selectors
+          ansible.netcommon.cli_command:
+            command: "show access-list | include {{ item }}"
+          loop: "{{ ipsec_sa.stdout | regex_findall('access-list (\\S+)') | unique }}"
+          register: crypto_acl_details
+          when: ipsec_sa.stdout is defined and (ipsec_sa.stdout | regex_findall('access-list (\\S+)') | length > 0)
+          changed_when: false
+
+    - name: Reporting and Finalization
+      block:
+        - name: Run verbose diagnostics
+          ansible.netcommon.cli_command:
+            command: "{{ item }}"
+          loop:
+            - "show vpn-sessiondb detail l2l"
+            - "show crypto eli"
+            - "show asp drop frame vpn-ipsec"
+          register: vpn_detailed_output
+          when: detailed | bool
+          changed_when: false
+
+        - name: Generate Diagnostic Report
+          # BEST PRACTICE: Using FQCN for all modules and documenting the output path.
+          ansible.builtin.copy:
+            content: |
+              # VPN TROUBLESHOOTING REPORT
+              # Device: {{ inventory_hostname }}
+              # Timestamp: {{ ansible_date_time.iso8601 }}
+              
+              ## System Summary
+              {{ system_info.stdout | default('N/A') }}
+              
+              ## Diagnostic Results
+              - IKEv1 Status: {{ 'Active' if ikev1_active|int > 0 else 'Inactive/Down' }} ({{ ikev1_issues }} issues)
+              - IKEv2 Status: {{ 'Active' if ikev2_active|int > 0 else 'Inactive/Down' }}
+              - IPsec Encap: {{ ipsec_pkts_encap }}
+              - IPsec Decap: {{ ipsec_pkts_decap }}
+              - NAT Exempt: {{ 'Yes' if nat_exempt.stdout|length > 0 else 'No (Likely Issue)' }}
+              
+              ## Raw Logs (IKE Phase 1)
+              {{ ikev1_sa.stdout }}
+              {{ ikev2_sa.stdout }}
+              
+              ## Raw Logs (IPsec Phase 2)
+              {{ ipsec_sa.stdout }}
+              
+              ## Crypto Map
+              {{ crypto_map.stdout }}
+            dest: "{{ report_path }}/{{ inventory_hostname }}_vpn_report_{{ ansible_date_time.iso8601_basic }}.txt"
+            mode: '0640'
+          delegate_to: localhost
+          when: save_report | bool
+
+    - name: Troubleshooting Summary
+      ansible.builtin.debug:
+        msg: |
+          ======================================================================
+          VPN DIAGNOSTIC SUMMARY: {{ inventory_hostname }}
+          ======================================================================
+          PHASE 1 (IKE):  {{ 'PASS' if (ikev1_active|int > 0 or ikev2_active|int > 0) else 'FAIL' }}
+          PHASE 2 (IPSEC): {{ 'PASS' if (ipsec_pkts_encap|int > 0 and ipsec_pkts_decap|int > 0) else 'FAIL/DEGRADED' }}
+          NAT EXEMPTION:  {{ 'CONFIGURED' if (nat_exempt.stdout|length > 0) else 'MISSING' }}
+          
+          REPORT LOCATION: {{ report_path }}/{{ inventory_hostname }}_vpn_report_*.txt
+          ======================================================================
+          NEXT STEPS:
+          {% if ikev1_active|int == 0 and ikev2_active|int == 0 %}
+          - Verify Peer IP ({{ peer_ip | default('Not Provided') }}) reachability.
+          - Check IKE Pre-shared Key (PSK) and ISAKMP Policy match.
+          {% elif ipsec_pkts_encap|int == 0 or ipsec_pkts_decap|int == 0 %}
+          - Check Crypto ACL (Traffic Selector) for overlap/mismatch.
+          - Verify NAT Exemption is bypassing the correct subnets.
+          - Check for 'asp drop' indicating security policy violations.
+          {% endif %}
+---
+```

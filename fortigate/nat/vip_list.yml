@@ -1,41 +1,41 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate VIP (DNAT) List
-# Improved: 2026-03-15
-# Author: NetLearner Architect
-#
-# Standards:
-# 1. Idempotency: Read-only operation, safe for multiple executions.
-# 2. Observability: Registered output and explicit assertions for verification.
-# 3. Documentation: Comments explaining task purpose and logic.
-# 4. Error Handling: Failed_when logic to catch CLI-level errors.
-# 5. Best Practices: Strict use of FQCN (Fully Qualified Collection Names).
----
-- name: Get VIP List
+# FortiGate VIP (DNAT) List Audit
+# Purpose: Retrieves and validates the Virtual IP (DNAT) configuration for auditing purposes.
+# Idempotency: This operation is read-only and safe to execute multiple times without changing state.
+# Standards: Implements FQCN, robust error handling, and observability assertions.
+
+- name: Audit FortiGate VIP List
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve VIP configuration via CLI
-      # Use FQCN for the network command module to ensure portability
+    - name: Retrieve VIP configurations via CLI
+      # Use FQCN for cross-platform network CLI compatibility.
       ansible.netcommon.cli_command:
         command: get firewall vip
-      register: vip_result
-      # Error Handling: Catch cases where the command might be unsupported or fail silently
+      register: vip
+      # Error Handling: Ensure the task fails if the device returns specific error strings 
+      # that might not trigger a standard non-zero exit code.
       failed_when: 
-        - vip_result.failed or "Unknown action" in vip_result.stdout
+        - vip.failed or "Command fail" in vip.stdout or "Unknown action" in vip.stdout
 
-    - name: Verify VIP data retrieval success
-      # Observability: Assert that we received a non-empty response from the device
+    - name: Verify VIP data integrity
+      # Observability: Assert that the command execution resulted in non-empty output
+      # to prevent silent failures in automated reporting pipelines.
       ansible.builtin.assert:
         that:
-          - vip_result.stdout is defined
-          - vip_result.stdout | length > 0
-        fail_msg: "Failed to retrieve VIP list or no VIPs are configured."
-        success_msg: "Successfully retrieved VIP configuration."
+          - "vip.stdout is defined"
+          - "vip.stdout | length > 0"
+        fail_msg: "Failed to retrieve VIP data or the list is empty on {{ inventory_hostname }}."
+        success_msg: "Successfully validated VIP data for {{ inventory_hostname }}."
 
-    - name: Display VIP (DNAT) information
-      # Documentation: Present the retrieved data in a readable format for logs
+    - name: Display VIP (DNAT) Report
+      # Documentation: Structured debug output provides a clear human-readable summary in logs.
       ansible.builtin.debug:
         msg: |
           ======================= VIPs (DNAT) =======================
-          {{ vip_result.stdout }}
+          Device: {{ inventory_hostname }}
+          Audit Data:
+          {{ vip.stdout }}
+```

@@ -1,36 +1,35 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NetLearner Architect Improved Playbook
-# Purpose: Retrieve and verify Network Object configurations from Cisco ASA/Firepower devices.
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+# NetLearner Architect Improved: Show Network Objects
+# Purpose: Retrieves and validates network object configurations from Cisco ASA/Firepower.
+# Idempotency: This is a read-only operation; it does not modify the device state.
 
 - name: Get Network Objects
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Disabled to minimize overhead as device facts are not required for this query.
 
   tasks:
-    - name: Retrieve network object configuration
-      # Best Practices: Using Fully Qualified Collection Name (FQCN) for network commands
+    - name: Retrieve network object configuration via CLI
+      # Using Fully Qualified Collection Name (FQCN) for reliability and best practices.
       ansible.netcommon.cli_command:
         command: show running-config object network
       register: objects_result
-      # Idempotency: Ensure the task is marked as 'ok' and not 'changed' for read-only operations
-      changed_when: false
-      # Error Handling: Fail if the command returns a CLI error or the execution fails
+      # Error Handling: Ensure the task fails on common Cisco CLI error patterns.
       failed_when:
-        - objects_result.failed
-        - "'Invalid input' in objects_result.stdout"
+        - objects_result.failed or "Invalid input" in objects_result.stdout
 
-    - name: Validate retrieval success
-      # Observability: Assert that the command output was correctly captured
+    - name: Validate retrieval of network object data
+      # Observability: Assert that the output is not empty to ensure the device returned data.
       ansible.builtin.assert:
         that:
-          - objects_result.stdout is defined
-        fail_msg: "Data retrieval failed: The 'show' command returned an undefined result."
-        quiet: true
+          - objects_result.stdout | length > 0
+        fail_msg: "The command returned an empty configuration. Check object existence on the device."
+        success_msg: "Network object configuration successfully captured."
 
-    - name: Display Network Object state
-      # Documentation: Provide structured feedback of the current device state
+    - name: Display formatted network objects
+      # Observability: Provides a human-readable summary of the current operational state.
       ansible.builtin.debug:
         msg: |
           ======================= NETWORK OBJECTS =======================
-          {{ objects_result.stdout if objects_result.stdout | length > 0 else "No network objects configured." }}
+          {{ objects_result.stdout }}
+```

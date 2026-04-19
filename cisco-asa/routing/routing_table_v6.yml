@@ -1,38 +1,46 @@
+MCP issues detected. Run /mcp list for status.I will read the continuity file to ensure the improved playbook aligns with the current state and mandates of the NetLearner Staging environment.
+
+```yaml
 ---
-# Routing Table V6
-# Improved: 2026-03-15
-# Author: NetLearner Architect
-#
-# Purpose: This playbook retrieves and validates the IPv6 routing table from ASA/Firepower
-# devices. It follows enterprise standards for observability and error handling.
-#
-- name: IPv6 Routing Table Verification
+# NetLearner Staging: IPv6 Routing Table Verification
+# Author: NetLearner Architect (Refined from Arjun/OpenClaw)
+# Purpose: Retrieves and validates the IPv6 routing table on ASA/Firepower devices.
+# This operational check ensures IPv6 control plane visibility and reachability 
+# within the automated infrastructure.
+
+- name: IPv6 Routing Table Analysis
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Performance optimization: Device-level facts are not required for this check
 
   tasks:
-    - name: Retrieve IPv6 routing table from the security appliance
-      # Use FQCN for consistency; changed_when: false ensures idempotency reporting
+    - name: "Execute show route ipv6 command"
+      # Best Practice: Using FQCN for cross-platform network module compatibility
       ansible.netcommon.cli_command:
         command: show route ipv6
-      register: v6_routes_output
-      # Error Handling: Fail if the command is unsupported or the device returns an error string
-      failed_when:
-        - v6_routes_output.failed or "Invalid input" in v6_routes_output.stdout
-      changed_when: false
+      register: v6_route_data
+      # Error Handling: Explicit failure if the command returns an error or is unsupported
+      failed_when: 
+        - v6_route_data.failed
+        - "'invalid input' in v6_route_data.stdout | lower"
 
-    - name: Validate that IPv6 routing data was successfully captured
-      # Observability: Assert ensures that the playbook stops if critical data is missing
+    - name: "Validate routing table response"
+      # Observability: Assert that the command returned meaningful content
       ansible.builtin.assert:
         that:
-          - v6_routes_output.stdout is defined
-          - v6_routes_output.stdout | length > 0
-        fail_msg: "Failed to retrieve IPv6 routes. The output was empty or undefined."
-        success_msg: "IPv6 routing table captured successfully."
+          - v6_route_data.stdout is defined
+          - v6_route_data.stdout | length > 0
+          - "'IPv6' in v6_route_data.stdout"
+        fail_msg: "Critical: IPv6 routing table is empty or could not be parsed."
+        success_msg: "IPv6 routing table integrity verified."
 
-    - name: Display formatted IPv6 routing information
-      # Documentation: Provide visibility for operators during playbook execution
+    - name: "Display IPv6 Routing Table"
+      # Observability: Structured debug output for operator visibility
       ansible.builtin.debug:
         msg: |
+          ===========================================================
+          SITE/DEVICE: {{ inventory_hostname }}
+          TIMESTAMP  : {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S"') }}
           ======================= IPv6 ROUTES =======================
-          {{ v6_routes_output.stdout }}
+          {{ v6_route_data.stdout }}
+          ===========================================================
+```

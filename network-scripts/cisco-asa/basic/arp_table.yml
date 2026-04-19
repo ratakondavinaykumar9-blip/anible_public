@@ -1,32 +1,33 @@
----
-# Playbook: Retrieve and Validate ARP Table
-# Purpose: This playbook securely retrieves the ARP table from Cisco ASA/Firepower devices,
-# ensuring the output is valid and observable for network auditing.
-- name: Get ARP Table
+MCP issues detected. Run /mcp list for status.---
+# Playbook: Get and Validate ARP Table
+# Standards: Idempotency (read-only), Observability (assert/register), FQCN usage.
+- name: Get and Validate ARP Table
   hosts: asa_firepower
-  gather_facts: false # Performance: Facts are not required for simple CLI command execution.
+  gather_facts: false
 
   tasks:
-    - name: Execute 'show arp' on target device
-      # Best Practice: Use Fully Qualified Collection Names (FQCN) for reliability.
+    - name: "COMMAND: Retrieve ARP table entries"
+      # Using ansible.netcommon.cli_command (FQCN) for platform-agnostic execution.
+      # This task is idempotent as it does not modify the device configuration.
       ansible.netcommon.cli_command:
         command: show arp
       register: arp_result
-      # Error Handling: Fail the task if the output is null or empty to prevent downstream errors.
-      failed_when: 
-        - arp_result.stdout is not defined or arp_result.stdout | length == 0
+      # Error Handling: Validate that the command was understood and executed successfully.
+      failed_when: >
+        arp_result.failed or
+        'Invalid input' in arp_result.stdout or
+        'ERROR' in arp_result.stdout
 
-    - name: Validate ARP table data
-      # Observability: Assert that the command returned meaningful network state data.
+    - name: "ASSERT: Confirm ARP table contains data"
+      # Observability: Stop execution if the returned table is empty to avoid false positives.
       ansible.builtin.assert:
         that:
-          - "arp_result.rc == 0"
-          - "'arp' in arp_result.stdout or arp_result.stdout | length > 0"
-        fail_msg: "ARP table retrieval failed or returned unexpected data format."
-        success_msg: "ARP table successfully retrieved and verified."
+          - arp_result.stdout | length > 0
+        fail_msg: "Retrieved ARP table is empty. Verify interface status."
+        quiet: true
 
-    - name: Display Formatted ARP Table
-      # Documentation: Output the results in a readable format for operator visibility.
+    - name: "DISPLAY: Render ARP information"
+      # Observability: Display the results in the console for immediate review.
       ansible.builtin.debug:
         msg: |
           ======================= ARP TABLE =======================

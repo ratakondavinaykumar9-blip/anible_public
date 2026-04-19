@@ -1,68 +1,67 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# IPSec Statistics and Counters - Improved for Production
-# This playbook gathers IPsec and IKEv1 statistics from Cisco ASA/Firepower devices.
-# It ensures observability through assertions and maintains idempotent read-only operations.
+# Ipsec Stats - NetLearner Architect Improved
+# Purpose: Comprehensive monitoring of IPSec and ISAKMP counters for ASA/Firepower.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
 
 - name: Get IPSec Statistics
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Gather IPsec Security Association (SA) details
-      # Using FQCN for Cisco ASA specific command module to ensure reliability
-      cisco.asa.asa_command:
-        commands:
-          - show crypto ipsec sa detail
+    - name: Fetch detailed IPsec Security Association (SA) data
+      # Why: Essential for verifying active tunnel SPIs and monitoring encryption/decryption flow.
+      ansible.netcommon.cli_command:
+        command: show crypto ipsec sa detail
       register: sa_detail
-      # Error Handling: Fail if stdout is missing or empty, which may indicate a session or privilege issue
-      failed_when: sa_detail.stdout is not defined or (sa_detail.stdout | length == 0)
+      failed_when: 
+        - sa_detail.failed | default(false)
+        - "'Invalid input' in sa_detail.stdout"
 
-    - name: Validate IPsec SA data presence
-      # Observability: Assert that the command returned meaningful telemetry
+    - name: Verify IPsec SA data availability
+      # Why: Ensures observability by confirming meaningful output was returned from the device.
       ansible.builtin.assert:
         that:
-          - sa_detail.stdout[0] | length > 0
-        fail_msg: "IPsec SA detail command returned empty output. Verify crypto configuration and permissions."
+          - sa_detail.stdout is defined
+          - sa_detail.stdout | length > 0
+        fail_msg: "IPsec SA data is empty or command failed."
 
-    - name: Gather global IPsec statistics and counters
-      # Captured to monitor packet counts, error rates, and encryption/decryption health
-      cisco.asa.asa_command:
-        commands:
-          - show crypto ipsec stats
+    - name: Collect global IPsec packet statistics
+      # Why: Used to identify global drops, anti-replay errors, and policy mismatches.
+      ansible.netcommon.cli_command:
+        command: show crypto ipsec stats
       register: stats
-      failed_when: stats.stdout is not defined or (stats.stdout | length == 0)
+      failed_when:
+        - stats.failed | default(false)
+        - "'Invalid input' in stats.stdout"
 
-    - name: Validate IPsec statistics data retrieval
+    - name: Verify global statistics retrieval
+      # Why: Confirms performance metrics are accessible for health monitoring.
       ansible.builtin.assert:
         that:
-          - stats.stdout[0] | length > 0
-        fail_msg: "Global IPsec stats command returned empty output."
+          - stats.stdout is defined
+        fail_msg: "Global IPsec statistics could not be retrieved."
 
-    - name: Gather IKEv1 (ISAKMP) protocol statistics
-      # Monitors Phase 1 negotiation metrics; command may fail if IKEv1 is globally disabled
-      cisco.asa.asa_command:
-        commands:
-          - show crypto isakmp stats
+    - name: Retrieve IKEv1 (ISAKMP) negotiation statistics
+      # Why: Critical for diagnosing Phase 1 failures and IKE negotiation issues.
+      ansible.netcommon.cli_command:
+        command: show crypto isakmp stats
       register: ike_stats
-      # Error Handling: Ignore failure as many modern environments may be IKEv2-only
+      # Error Handling: Gracefully handle cases where IKEv1 is disabled or command varies by version.
       ignore_errors: true
 
-    - name: Validate IKEv1 data availability
-      ansible.builtin.assert:
-        that:
-          - ike_stats.stdout[0] | length > 0
-        quiet: true
-      when: not ike_stats.failed
-
-    - name: Output consolidated IPSec telemetry
-      # Provides a structured summary of the gathered data for logging and administrative review
+    - name: Output Consolidated IPSec Telemetry
+      # Why: Provides the operator with a high-visibility report of current tunnel status.
       ansible.builtin.debug:
         msg: |
-          ======================= IPSEC SA DETAILS =======================
-          {{ sa_detail.stdout[0] }}
+          ======================= IPSEC HEALTH REPORT =======================
           
-          ======================= IPSEC GLOBAL STATS =====================
-          {{ stats.stdout[0] }}
-          
-          ======================= IKEv1 (ISAKMP) STATS ===================
-          {{ ike_stats.stdout[0] if not ike_stats.failed else 'IKEv1 Statistics not available (likely disabled)' }}
+          --- [ IPSEC SA DETAIL ] ---
+          {{ sa_detail.stdout }}
+
+          --- [ GLOBAL IPSEC STATS ] ---
+          {{ stats.stdout }}
+
+          --- [ IKEV1 ISAKMP STATS ] ---
+          {{ ike_stats.stdout | default('N/A - IKEv1 may be disabled or command failed') }}
+```

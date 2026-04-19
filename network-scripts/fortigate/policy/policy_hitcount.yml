@@ -1,36 +1,33 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: FortiGate Policy Hit Count Retrieval
-# Purpose: This playbook retrieves policy hit counts from FortiGate devices to support audit and optimization.
-# Standards: Idempotent (Read-only), Observable (Assertions), Documented, FQCN compliant.
-- name: Get Policy Hit Count
+- name: FortiGate Policy Hit Count Analysis
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Fetch hit count data from firewall
-      # FQCN: Using ansible.netcommon.cli_command for standardized network CLI interaction.
+    - name: Retrieve Firewall Policy Hit Counts
+      # Why: Fetches operational statistics to identify unused firewall policies or verify traffic flow.
+      # Idempotency: This is a read-only operation and is inherently safe to run multiple times.
       ansible.netcommon.cli_command:
         command: get firewall policy hitcount
-      register: hits
-      # Idempotency: Marked as changed: false because this is a non-mutating 'get' command.
-      # This ensures the playbook is safe to run multiple times without indicating drift.
-      changed_when: false
-      # Error Handling: Explicitly check for common CLI failure indicators or "error" strings in the output.
+      register: hits_output
+      # Error Handling: Explicitly catch cases where the command might be unsupported or return CLI errors.
       failed_when:
-        - hits.failed or "Unknown action" in hits.stdout or "error" in hits.stdout.lower()
+        - hits_output.failed or "Unknown action" in hits_output.stdout or "error" in hits_output.stdout
 
-    - name: Assert hit count data is present
-      # Observability: Verify that the output is defined and not empty to confirm the command executed correctly.
+    - name: Validate Hit Count Data Integrity
+      # Observability: Asserts that the response is not empty and contains expected metadata before proceeding.
       ansible.builtin.assert:
         that:
-          - hits.stdout is defined
-          - hits.stdout | length > 0
-        fail_msg: "Data retrieval failed or the output was empty. Verify policy existence and permissions."
-        success_msg: "Successfully captured policy hit count data."
+          - hits_output.stdout is defined
+          - hits_output.stdout | length > 0
+        fail_msg: "The FortiGate returned an empty or invalid hit count response."
+        success_msg: "Verified valid hit count data structure from device."
 
-    - name: Display Policy Hit Count results
-      # Documentation: Present the raw command output in a formatted block for operator visibility.
+    - name: Display Policy Hit Count Report
+      # Why: Provides visibility into the retrieved metrics for auditing and troubleshooting.
       ansible.builtin.debug:
         msg: |
-          ======================= POLICY HIT COUNT =======================
-          {{ hits.stdout }}
+          ======================= FORTIGATE POLICY HIT COUNT REPORT =======================
+          {{ hits_output.stdout }}
+```

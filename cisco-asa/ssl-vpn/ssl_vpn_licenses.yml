@@ -1,37 +1,45 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# SSL VPN License Verification Playbook
-# Purpose: Retrieves and validates SSL VPN license status on Cisco ASA/Firepower devices.
-# This playbook is idempotent as it performs read-only operations.
-# Standards: Idempotency, Observability, FQCN, Error Handling.
+# NetLearner Architect - SSL VPN License Audit
+# Improved: 2026-04-12
+# Author: NetLearner Architect (Senior Network Automation Expert)
+# Purpose: Idempotent retrieval and validation of SSL VPN license status.
 
-- name: SSL VPN Licenses
+- name: Audit SSL VPN Licenses
   hosts: asa_firepower
   gather_facts: false
+  # Explicitly using the network_cli connection plugin for Cisco devices
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Get SSL VPN licenses from device
-      # Using FQCN for cross-platform network command execution
+    - name: Retrieve SSL VPN license status via CLI command
+      # FQCN: Using ansible.netcommon.cli_command for standardized network command execution.
+      # Idempotency: 'show' commands are read-only and inherently safe to run multiple times.
       ansible.netcommon.cli_command:
         command: show sslvpn-license
-      register: license
-      # Error Handling: Explicitly fail if the command is not supported or returns an error
+      register: license_data
+      # Error Handling: Fail if the output is empty or the command execution was rejected by the device.
       failed_when: 
-        - license.failed or "Invalid input" in license.stdout
-      ignore_errors: false
+        - license_data.stdout is not defined or license_data.stdout | length == 0
+        - "'Invalid input' in license_data.stdout"
 
-    - name: Validate license output integrity
-      # Observability: Assert that the command returned data to ensure visibility into device state
+    - name: Assert validity of SSL VPN license information
+      # Observability: Verifying that the returned data contains expected SSL VPN identifiers.
+      # Why: Ensures the device is actually capable of providing the license information requested.
       ansible.builtin.assert:
         that:
-          - license.stdout is defined
-          - license.stdout | length > 0
-        fail_msg: "SSL VPN license output is empty. The feature might not be enabled or configured."
-        success_msg: "SSL VPN license data retrieved successfully."
+          - "'SSL VPN' in license_data.stdout"
+        fail_msg: "Data Integrity Error: The command output did not contain valid SSL VPN license data on {{ inventory_hostname }}."
+        success_msg: "Data Integrity Verified: SSL VPN license status successfully retrieved."
 
-    - name: Display SSL VPN License Information
-      # Documentation: Provide clear, formatted output for administrative review
+    - name: Display formatted SSL VPN license report
+      # Observability: Providing structured output for audit logging and operator visibility.
+      # Why: Facilitates immediate review by NetLearner Architect or SOC/NOC teams.
       ansible.builtin.debug:
         msg: |
-          ======================= SSL VPN LICENSE =======================
-          {{ license.stdout }}
-          ===============================================================
+          ======================= SSL VPN LICENSE AUDIT =======================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
+          ----------------------------------------------------------------------
+          {{ license_data.stdout }}
+```

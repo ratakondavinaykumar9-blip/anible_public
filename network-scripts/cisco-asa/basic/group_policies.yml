@@ -1,32 +1,33 @@
----
-- name: Cisco ASA Group Policy Audit
+MCP issues detected. Run /mcp list for status.---
+# This playbook retrieves and audits Group Policy configurations on Cisco ASA/Firepower devices.
+# Designed for NetLearner Staging to ensure high observability and operational safety.
+- name: Audit Cisco ASA Group Policies
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Disabled to minimize connection overhead for read-only operations.
 
   tasks:
-    - name: Retrieve group-policy configuration from ASA
-      # Why: Using FQCN (Fully Qualified Collection Name) ensures the use of the specialized Cisco ASA collection.
-      # Idempotency: "show" commands are read-only operations and are inherently idempotent.
-      cisco.asa.asa_command:
-        commands:
-          - show running-config group-policy
-      register: policy_output
-      # Error Handling: Explicitly fail if the connection fails or if the ASA returns an "Invalid input" error.
-      failed_when: 
-        - policy_output.failed or "Invalid input" in policy_output.stdout[0]
+    - name: Retrieve running configuration for group-policies
+      # Using Fully Qualified Collection Name (FQCN) for reliability across environments.
+      ansible.netcommon.cli_command:
+        command: show running-config group-policy
+      register: group_policy_output
+      # Error Handling: Catch "Invalid input" or other CLI-specific errors that might not trigger a non-zero return code.
+      failed_when:
+        - group_policy_output.failed or "Invalid input" in group_policy_output.stdout
 
-    - name: Validate policy retrieval
-      # Why: Observability - verify that data was actually returned to ensure automation integrity.
+    - name: Verify policy retrieval success
+      # Observability: Assert that the output is defined and contains data.
+      # This prevents silent failures where an empty configuration might be misinterpreted as success.
       ansible.builtin.assert:
         that:
-          - policy_output.stdout[0] is defined
-          - policy_output.stdout[0] | length > 0
-        fail_msg: "Failed to retrieve group policies or the configuration is empty on {{ inventory_hostname }}."
-        success_msg: "Successfully retrieved group policies for {{ inventory_hostname }}."
+          - group_policy_output.stdout is defined
+          - group_policy_output.stdout | length > 0
+        fail_msg: "Failed to retrieve any group policy configuration from {{ inventory_hostname }}."
+        success_msg: "Group policy configuration successfully retrieved and validated."
 
-    - name: Display Group Policies
-      # Why: Documentation and visibility - providing the operator with the raw configuration state.
+    - name: Display audited group policies
+      # Provides immediate visibility into the configuration state during the automation run.
       ansible.builtin.debug:
         msg: |
           ======================= GROUP POLICIES: {{ inventory_hostname }} =======================
-          {{ policy_output.stdout[0] }}
+          {{ group_policy_output.stdout }}

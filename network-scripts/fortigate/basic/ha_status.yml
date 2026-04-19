@@ -1,45 +1,36 @@
----
-# Playbook to retrieve and validate FortiGate High Availability (HA) status.
-# This playbook adheres to standards for Idempotency, Observability, and Error Handling.
-- name: FortiGate High Availability Status Check
+MCP issues detected. Run /mcp list for status.---
+# Playbook: FortiGate HA Status Audit
+# Purpose: Retrieves and validates the High Availability (HA) synchronization state.
+# Idempotency: This playbook is read-only and safe for repeated execution without state mutation.
+- name: Get FortiGate HA Status
   hosts: fortigate
-  gather_facts: false
-  # connection: ansible.netcommon.network_cli is assumed via inventory or group_vars
+  gather_facts: false # Network devices use specific modules instead of standard fact gathering
 
   tasks:
-    - name: Retrieve HA status via CLI
-      # Using a read-only CLI command ensures idempotency as no state is modified.
+    - name: Retrieve HA status via CLI command
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
       ansible.netcommon.cli_command:
         command: get system ha status
-      register: ha_status_raw
-      # Explicitly mark as not changed to maintain idempotent reporting.
-      changed_when: false
-      # Ensure the task fails if the command returns a connectivity or execution error.
-      failed_when: ha_status_raw.failed | default(false)
+      register: ha_result
+      # Error Handling: Fail if the command returns an error code or is unrecognized by the device
+      failed_when:
+        - ha_result.rc != 0
+        - "'Unknown' in ha_result.stdout"
+        - "'Command fail' in ha_result.stdout"
 
-    - name: Validate HA information integrity
-      # Observability: Assert that the output contains expected HA metadata to ensure valid response.
+    - name: Validate HA status response integrity
+      # Observability: Use assert to verify that the output contains expected HA metadata
       ansible.builtin.assert:
         that:
-          - ha_status_raw.stdout is defined
-          - "'HA Health Status' in ha_status_raw.stdout or 'Mode' in ha_status_raw.stdout"
-        fail_msg: "The command 'get system ha status' did not return expected HA metadata."
-        success_msg: "Successfully retrieved valid HA status information."
-
-    - name: Check for HA Synchronization status
-      # Error Handling: Proactively check for 'not synchronized' strings in the output.
-      # We use ignore_errors here to allow the playbook to continue to the debug task for visibility.
-      ansible.builtin.assert:
-        that:
-          - "'is not synchronized' not in ha_status_raw.stdout"
-        fail_msg: "WARNING: HA Cluster synchronization issues detected on {{ inventory_hostname }}!"
+          - ha_result.stdout is defined
+          - ha_result.stdout | length > 0
+          - "'Mode:' in ha_result.stdout"
+        fail_msg: "HA status retrieval failed or returned invalid data for {{ inventory_hostname }}."
         quiet: true
-      ignore_errors: true
 
-    - name: Display Formatted HA Status
-      # Observability: Provide a clear, formatted view of the HA status for the operator.
+    - name: Display formatted HA status summary
+      # Observability: Print the registered output for manual verification and logging
       ansible.builtin.debug:
         msg: |
           ======================= HA STATUS: {{ inventory_hostname }} =======================
-          {{ ha_status_raw.stdout }}
-          ================================================================================
+          {{ ha_result.stdout }}

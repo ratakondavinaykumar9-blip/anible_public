@@ -1,35 +1,38 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: FortiGate SD-WAN Member Audit
-# Description: Retrieves and validates the configuration of SD-WAN members.
-# Standards: Idempotency (Read-only), Observability (Assert), FQCN, Error Handling.
-- name: Get SD-WAN Members
+# FortiGate SD-WAN Configuration Audit
+# Purpose: Retrieves and validates SD-WAN member status using idempotent read operations.
+- name: Audit FortiGate SD-WAN Members
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: "AUDIT | Retrieve SD-WAN members configuration"
-      # Using FQCN for module reliability. Read-only commands are inherently idempotent.
+    - name: Retrieve SD-WAN member status via CLI
+      # Use Fully Qualified Collection Names (FQCN) for better portability and consistency
       ansible.netcommon.cli_command:
-        command: "get system sdwan member"
-      register: members_output
-      # Error Handling: Fail if the command is unrecognized or execution fails on the device.
-      failed_when:
-        - members_output.failed or "'Unknown action' in members_output.stdout"
-        - "'Command fail' in members_output.stdout"
+        command: get system sdwan member
+      register: sdwan_members
+      # Error Handling: Catch specific FortiOS CLI error strings that don't trigger non-zero exit codes
+      failed_when: >
+        sdwan_members.failed or 
+        "Command fail" in sdwan_members.stdout or 
+        "Unknown action" in sdwan_members.stdout
 
-    - name: "ASSERT | Verify SD-WAN data integrity"
-      # Observability: Ensure the device returned valid data before proceeding.
+    - name: Validate SD-WAN output integrity
+      # Observability: Assert that the command returned a meaningful and non-empty response
       ansible.builtin.assert:
         that:
-          - "members_output.stdout is defined"
-          - "members_output.stdout | length > 0"
-          - "'member' in members_output.stdout"
-        fail_msg: "Validation Failed: No SD-WAN members found or output was malformed."
-        success_msg: "Validation Passed: SD-WAN member data retrieved successfully."
+          - sdwan_members.stdout is defined
+          - sdwan_members.stdout | length > 0
+        fail_msg: "No SD-WAN member data found or the device returned an empty response."
+        success_msg: "SD-WAN member status successfully retrieved and validated."
 
-    - name: "DISPLAY | Format and show SD-WAN status"
-      # Documentation: Provides human-readable output for auditing purposes.
+    - name: Display SD-WAN Member Information
+      # Provide formatted output for operational logging and visibility
       ansible.builtin.debug:
         msg: |
-          ======================= SD-WAN MEMBERS =======================
-          {{ members_output.stdout }}
+          ======================= SD-WAN MEMBERS REPORT =======================
+          Target Host: {{ inventory_hostname }}
+          
+          {{ sdwan_members.stdout }}
+```

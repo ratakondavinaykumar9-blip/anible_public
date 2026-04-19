@@ -1,40 +1,36 @@
----
-# NetLearner Architect Standard: HTTP Server Status Retrieval
-# This playbook retrieves the HTTP server configuration from ASA/Firepower devices.
-# It ensures observability through assertions and maintains idempotent behavior.
-- name: Get HTTP Server Status
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect - ASA/Firepower HTTP Status Audit
+# Purpose: To verify administrative HTTP server status across the security fleet.
+# This ensures that management access is consistent with defined security policies.
+- name: Get and Validate HTTP Server Status
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute 'show http server' command
-      # Use Fully Qualified Collection Name (FQCN) for the network command module.
-      # This operation is inherently idempotent as it is a read-only configuration check.
+    - name: Query device for HTTP server configuration
+      # Best Practice: Use Fully Qualified Collection Names (FQCN) for reliability.
+      # The cli_command module provides a generic transport for non-stateful queries.
       ansible.netcommon.cli_command:
         command: show http server
-      register: http_output
-      # Error Handling: Fail if the device returns an error or if the command is unsupported.
-      failed_when: 
-        - "'Invalid input' in http_output.stdout"
-        - "'ERROR:' in http_output.stdout"
+      register: http_raw
+      # Error Handling: Detect if the command is unsupported or if the session fails.
+      # 'failed_when' prevents false positives if the device returns an 'Invalid input' string.
+      failed_when:
+        - http_raw.failed or "Invalid input" in http_raw.stdout
 
-    - name: Assert HTTP server data was retrieved
-      # Observability: Validate that the command returned meaningful output for subsequent tasks.
+    - name: Assert output integrity and observability
+      # Observability: Validate that the response is non-empty to ensure high-fidelity reporting.
+      # Using 'assert' provides an explicit checkpoint for the automation pipeline.
       ansible.builtin.assert:
         that:
-          - "http_output.stdout | length > 0"
-        fail_msg: "Failed to retrieve HTTP server status or received empty output from the device."
-        success_msg: "HTTP server status successfully captured."
+          - http_raw.stdout is defined
+          - http_raw.stdout | length > 0
+        fail_msg: "Data retrieval failure on {{ inventory_hostname }}. Verify connectivity and credentials."
+        quiet: true
 
-    - name: Display formatted HTTP server status
-      # Documentation: Provide structured visibility for operators and audit logs.
+    - name: Output formatted HTTP server state
+      # Documentation: Clear headers and variable-driven output for operational visibility.
       ansible.builtin.debug:
         msg: |
-          ======================= HTTP SERVER STATUS =======================
-          {{ http_output.stdout }}
-          ==================================================================
-
-    - name: Set fact for server state
-      # Best Practice: Store state in a structured variable for potential downstream logic.
-      ansible.builtin.set_fact:
-        http_server_enabled: "{{ 'enabled' in http_output.stdout | lower }}"
+          ======================= [ {{ inventory_hostname }} ] HTTP SERVER =======================
+          {{ http_raw.stdout }}

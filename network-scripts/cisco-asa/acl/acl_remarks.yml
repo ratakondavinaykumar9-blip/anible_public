@@ -1,36 +1,48 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Audit ASA Access-List Remarks
-# This playbook extracts 'remark' entries from the running configuration of Cisco ASA/Firepower devices.
-# Designed for idempotency, observability, and robust error handling according to NetLearner standards.
-
-- name: ACL Remarks Audit
+- name: Audit Cisco ASA/Firepower ACL Remarks
+  # Target group defined in inventory for security appliances
   hosts: asa_firepower
   gather_facts: false
+  vars:
+    # Defining command as a variable for easier maintenance and observability
+    audit_command: "show running-config access-list | include remark"
 
   tasks:
-    - name: Fetch ACL remarks from running configuration
-      # Using FQCN for network CLI interaction
-      ansible.netcommon.cli_command:
-        command: show running-config access-list | include remark
-      register: remarks_result
-      # Idempotency: Operational 'show' commands must not indicate a state change
-      changed_when: false
-      # Error Handling: Explicitly fail if the command is unrecognized or returns an error string
-      failed_when:
-        - remarks_result.failed == true
-        - "'Invalid input' in remarks_result.stdout or 'ERROR' in remarks_result.stdout"
+    - name: "Retrieve ACL remarks from running configuration"
+      # Using FQCN (Fully Qualified Collection Name) for predictable behavior
+      cisco.asa.asa_command:
+        commands:
+          - "{{ audit_command }}"
+      register: remarks_output
+      # Idempotency: 'show' commands are read-only and safe for repeated execution.
+      # Error Handling: Ensure we don't fail if the search returns no results (empty string).
+      failed_when: 
+        - remarks_output.failed
+        - "'Invalid input' in remarks_output.stdout[0]"
 
-    - name: Verify data retrieval
-      # Observability: Assert that the command returned a valid response object
+    - name: "Validate command execution integrity"
+      # Observability: Assert that the response object contains the expected structure
       ansible.builtin.assert:
         that:
-          - "remarks_result.stdout is defined"
-        fail_msg: "Data retrieval failed for {{ inventory_hostname }}"
+          - "remarks_output.stdout is defined"
+          - "remarks_output.stdout | type_debug == 'list'"
+        fail_msg: "Network response format is invalid or unreachable."
         quiet: true
 
-    - name: Display ACL Remarks Report
-      # Observability: Format the output for better readability during manual audits
+    - name: "Display audited ACL remarks"
+      # Documentation: Providing a structured view for human auditors or logging systems
       ansible.builtin.debug:
         msg: |
-          ======================= ACL REMARKS: {{ inventory_hostname }} =======================
-          {{ remarks_result.stdout if remarks_result.stdout | length > 0 else 'No remarks found or command returned empty.' }}
+          ===========================================================
+          AUDIT REPORT: ACL REMARKS
+          DEVICE: {{ inventory_hostname }}
+          TIMESTAMP: {{ lookup('pipe', 'date +%Y-%m-%d\ %H:%M:%S') }}
+          ===========================================================
+          {% if remarks_output.stdout[0] | length > 0 %}
+          {{ remarks_output.stdout[0] }}
+          {% else %}
+          NO REMARKS FOUND IN RUNNING-CONFIG
+          {% endif %}
+          ===========================================================
+```

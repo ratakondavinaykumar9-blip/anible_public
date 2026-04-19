@@ -1,35 +1,43 @@
----
-# NetLearner Architect Improved Playbook: Get Process Info
-# This playbook retrieves real-time process utilization from Cisco ASA/Firepower devices.
-# It adheres to enterprise standards for observability, idempotency, and robust error handling.
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect - Process Information Audit
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
+#
+# This playbook retrieves the current process list from Cisco ASA/Firepower devices.
+# It is designed to be safe for repeated execution (Read-Only) and provides 
+# verification checks to ensure data integrity during automated audits.
 
-- name: Get Process Info
+- name: Retrieve and Validate Device Process State
   hosts: asa_firepower
-  gather_facts: false # Fact gathering is disabled to minimize execution time and overhead
+  gather_facts: false # Performance optimization: Device-specific facts are not required for this task.
 
   tasks:
-    - name: Execute 'show process' on the target device
-      # FQCN is used to ensure predictable behavior across different Ansible environments.
-      # Status retrieval is inherently idempotent as it does not modify device configuration.
+    - name: Fetch process list via CLI
+      # Use Fully Qualified Collection Name (FQCN) for consistent behavior.
+      # This task is idempotent as it performs a read-only operation.
       ansible.netcommon.cli_command:
         command: show process
       register: proc_result
-      # Error Handling: Explicitly catching CLI-specific error strings that might not trigger a task failure
-      failed_when: 
-        - "'Invalid input' in proc_result.stdout or '% Error' in proc_result.stdout"
+      # Identify failures where the device might return a success code but an error message in stdout.
+      failed_when:
+        - proc_result.failed or "Invalid input" in proc_result.stdout
+        - "error" in proc_result.stdout | lower
 
-    - name: Validate process data integrity
-      # Observability: Using assertions to verify that the command returned usable data
+    - name: Assert output validity for observability
+      # Verifies that the command returned actionable data before proceeding to display.
+      # This ensures the playbook fails early if the management plane is unresponsive.
       ansible.builtin.assert:
         that:
           - proc_result.stdout is defined
           - proc_result.stdout | length > 0
-        fail_msg: "Critical failure: The 'show process' command returned empty or undefined output."
-        success_msg: "Verification successful: Process data captured and validated."
+          - "'Process' in proc_result.stdout or 'CPU' in proc_result.stdout"
+        fail_msg: "The 'show process' command failed to return valid telemetry from {{ inventory_hostname }}."
+        success_msg: "Process information successfully captured and validated."
 
-    - name: Display retrieved process information
-      # Observability: Providing a clear, formatted view of the device state for the operator
+    - name: Display formatted process telemetry
+      # Provides human-readable visibility into the device's operational state.
       ansible.builtin.debug:
         msg: |
-          ======================= PROCESSES =======================
+          ======================= DEVICE: {{ inventory_hostname }} =======================
+          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          ======================= PROCESS TELEMETRY =======================
           {{ proc_result.stdout }}

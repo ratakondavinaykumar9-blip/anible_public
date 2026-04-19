@@ -1,36 +1,42 @@
----
-# FortiGate Zone List Retrieval
-# This playbook retrieves the security zone configuration from FortiGate devices.
-# Standards: Idempotent (Read-only), Observably verified, FQCN compliant.
-- name: Get Zone List
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect Standard: FortiGate Zone List
+# This playbook retrieves the security zone configuration from a FortiGate device.
+# It ensures idempotency by executing a read-only command that does not alter device state.
+
+- name: Get FortiGate Zone List
   hosts: fortigate
-  gather_facts: false # Performance optimization: Device facts are not required for CLI tasks
+  gather_facts: false
 
   tasks:
-    - name: Retrieve system zone information via CLI
-      # Use FQCN for the network common CLI module
+    - name: Retrieve security zone configuration via CLI
+      # FQCN: ansible.netcommon.cli_command
+      # Why: Obtains a comprehensive list of security zones and their member interfaces.
       ansible.netcommon.cli_command:
-        command: get system zone
-      register: zone_result
-      # Idempotency: 'get' is a read-only operation and safe for repeated execution.
-      # Error Handling: Fail if the output indicates a command error or is undefined.
-      failed_when: 
-        - zone_result.stdout is not defined
-        - "'Unknown' in zone_result.stdout"
-        - "'Command fail' in zone_result.stdout"
+        command: "get system zone"
+      register: zone_output
+      # Error Handling: Fail if the output is undefined, empty, or contains FortiOS error strings.
+      failed_when: >
+        zone_output.stdout is not defined or 
+        zone_output.stdout == "" or 
+        "Command fail" in zone_output.stdout or
+        "Unknown action" in zone_output.stdout
 
-    - name: Validate zone data integrity
-      # Observability: Assert that the output contains expected data patterns
+    - name: Validate zone configuration data integrity
+      # Observability: Assertions verify the output contains valid zone definition syntax.
+      # Why: Ensures the automation can reliably process the retrieved configuration data.
       ansible.builtin.assert:
         that:
-          - "zone_result.stdout | length > 0"
-          - "'name' in zone_result.stdout"
-        fail_msg: "The retrieved zone data is empty or invalid."
-        success_msg: "Zone data successfully retrieved and verified."
+          - "'name' in zone_output.stdout"
+          - "'interface' in zone_output.stdout"
+        fail_msg: "The retrieved zone configuration appears incomplete or improperly formatted."
+        quiet: true
 
-    - name: Display formatted zone list
-      # Observability: Provide clear output of the current state for the operator
+    - name: Display formatted security zone report
+      # FQCN: ansible.builtin.debug
+      # Why: Provides operator visibility into configured security domains and interface mapping.
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE ZONES =======================
-          {{ zone_result.stdout }}
+          ======================= SECURITY ZONES =======================
+          DEVICE: {{ inventory_hostname }}
+          {{ zone_output.stdout }}
+          ==============================================================

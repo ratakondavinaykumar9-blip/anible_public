@@ -1,10 +1,8 @@
----
-# OSPF Status Monitoring Playbook
-# This playbook retrieves and validates OSPF neighbor states and database information
-# to ensure routing adjacency and topology visibility on Cisco ASA/Firepower devices.
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
-# Updated: 2026-03-15
-# Author: NetLearner Architect
+MCP issues detected. Run /mcp list for status.---
+# OSPF Operational State Verification
+# This playbook retrieves and validates OSPF neighbor and database information
+# from Cisco ASA/Firepower devices. It is designed for observability and
+# automated verification of routing protocol health.
 
 - name: Get OSPF Status
   hosts: asa_firepower
@@ -12,44 +10,42 @@
 
   tasks:
     - name: Retrieve OSPF neighbor status
-      # Utilizing FQCN for cross-platform network command execution
+      # Fetches the current adjacency table. Idempotent as it is a read-only operation.
       ansible.netcommon.cli_command:
         command: show ospf neighbor
-      register: ospf_neighbor_result
-      # Error Handling: Catch cases where the command is unsupported or fails
+      register: ospf_neighbor_output
+      # Ensure the command execution was successful at the transport layer
+      # and that the device didn't return a CLI syntax error.
       failed_when: 
-        - ospf_neighbor_result.stdout is not defined
-        - "'Invalid' in ospf_neighbor_result.stdout"
-      
-    - name: Verify OSPF neighbor connectivity
-      # Observability: Assert that the command returned data, indicating OSPF is active
-      ansible.builtin.assert:
-        that:
-          - ospf_neighbor_result.stdout | length > 0
-        fail_msg: "OSPF neighbor output is empty. Verify OSPF process configuration."
-        success_msg: "OSPF neighbor data successfully retrieved."
+        - ospf_neighbor_output.failed or "Invalid input" in ospf_neighbor_output.stdout
 
     - name: Retrieve OSPF database information
+      # Fetches the Link State Database (LSDB) to verify topology synchronization.
       ansible.netcommon.cli_command:
         command: show ospf database
-      register: ospf_db_result
-      failed_when:
-        - ospf_db_result.stdout is not defined
-        - "'Invalid' in ospf_db_result.stdout"
+      register: ospf_db_output
+      failed_when: 
+        - ospf_db_output.failed or "Invalid input" in ospf_db_output.stdout
 
-    - name: Verify OSPF database integrity
+    - name: Verify OSPF operational data integrity
+      # Validates that the output contains expected OSPF headers, 
+      # ensuring the process is active and returning data.
       ansible.builtin.assert:
         that:
-          - ospf_db_result.stdout | length > 0
-        fail_msg: "OSPF database output is empty."
-        success_msg: "OSPF database data successfully retrieved."
+          - "'Neighbor ID' in ospf_neighbor_output.stdout"
+          - "'OSPF Router with ID' in ospf_db_output.stdout"
+        fail_msg: "OSPF validation failed: Neighbor table or Database output is missing expected headers."
+        success_msg: "OSPF operational state successfully verified."
 
-    - name: Display OSPF Operational Status
-      # Documentation: Formatted output for human-readable operational verification
+    - name: Display OSPF status summary
+      # Aggregates retrieved data into a single visibility task for auditing.
       ansible.builtin.debug:
         msg: |
-          ======================= OSPF NEIGHBOR STATUS =======================
-          {{ ospf_neighbor_result.stdout }}
-
-          ======================= OSPF DATABASE SUMMARY ======================
-          {{ ospf_db_result.stdout }}
+          ======================= OSPF OPERATIONAL STATUS =======================
+          DEVICE: {{ inventory_hostname }}
+          
+          [ NEIGHBOR ADJACENCIES ]
+          {{ ospf_neighbor_output.stdout }}
+          
+          [ LINK STATE DATABASE ]
+          {{ ospf_db_output.stdout }}

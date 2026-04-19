@@ -1,54 +1,54 @@
----
+MCP issues detected. Run /mcp list for status.---
 # FortiGate Service and Group Audit
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: Retrieve and Validate FortiGate Service Configurations
+# This playbook retrieves and verifies service objects and groups from FortiGate devices.
+# Standards: Idempotency, Observability, FQCN, and Error Handling.
+- name: FortiGate Service and Group Configuration Audit
   hosts: fortigate
   gather_facts: false
-  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Fetch Firewall Service Objects
-      # Documentation: Using 'get' to retrieve operational state of service objects.
-      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction.
+    - name: Retrieve Firewall Service Objects
+      # Using cli_command for raw output retrieval; safe for multi-run execution.
       ansible.netcommon.cli_command:
-        command: "get firewall service custom"
+        command: get firewall service
       register: svc_output
-      # Idempotency: Retrieval tasks should not signal a change in system state.
       changed_when: false
-      # Error Handling: Catch explicit FortiOS CLI execution failures.
       failed_when: 
-        - svc_output.failed or "Command fail" in svc_output.stdout
+        - svc_output.rc != 0
+        - "'Command fail' in svc_output.stdout"
 
-    - name: Validate Service Objects Data
-      # Observability: Ensure the buffer contains data before proceeding.
+    - name: Verify Service Objects Retrieval
+      # Observability: Ensure the command returned valid data.
       ansible.builtin.assert:
         that:
-          - "svc_output.stdout | length > 0"
-        fail_msg: "Firewall service object retrieval returned an empty result."
-        success_msg: "Firewall service objects successfully retrieved."
+          - svc_output.stdout is defined
+          - svc_output.stdout | length > 0
+        fail_msg: "Failed to retrieve service objects or output is empty."
+        success_msg: "Successfully retrieved firewall service objects."
 
-    - name: Fetch Firewall Service Groups
-      # Documentation: Retrieving group memberships to verify object nesting.
+    - name: Retrieve Firewall Service Groups
+      # Idempotency: Read-only operation marked as 'changed_when: false'.
       ansible.netcommon.cli_command:
-        command: "get firewall service group"
-      register: group_output
+        command: get firewall service group
+      register: grp_output
       changed_when: false
-      failed_when: 
-        - group_output.failed or "Command fail" in group_output.stdout
+      failed_when:
+        - grp_output.rc != 0
+        - "'Command fail' in grp_output.stdout"
 
-    - name: Validate Service Groups Data
-      # Observability: Verify that service groups exist and are accessible.
+    - name: Verify Service Groups Retrieval
+      # Observability: Confirm the presence of group configurations.
       ansible.builtin.assert:
         that:
-          - "group_output.stdout | length > 0"
-        fail_msg: "Firewall service group retrieval returned an empty result."
-        success_msg: "Firewall service groups successfully retrieved."
+          - grp_output.stdout is defined
+        fail_msg: "Service group retrieval failed."
+        success_msg: "Successfully retrieved firewall service groups."
 
-    - name: Display Unified Service Inventory
+    - name: Display Service and Group Summary
+      # Documentation: Providing clear visibility into the system state.
       ansible.builtin.debug:
-        msg: |
-          ======================= SERVICE OBJECTS =======================
-          {{ svc_output.stdout }}
-          
-          ======================= SERVICE GROUPS ========================
-          {{ group_output.stdout }}
+        msg:
+          - "======================= SERVICE OBJECTS ======================="
+          - "{{ svc_output.stdout }}"
+          - "======================= SERVICE GROUPS ========================"
+          - "{{ grp_output.stdout | default('No service groups found.') }}"

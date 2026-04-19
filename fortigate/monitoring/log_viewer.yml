@@ -1,39 +1,59 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Log Viewer
-# Improved version following NetLearner Architect standards for Idempotency, Observability, and Error Handling.
+# FortiGate Log Viewer - Production Grade
+# This playbook retrieves and displays logs from FortiGate devices.
+# Optimized for NetLearner Staging: Ensures idempotency, observability, and robust error handling.
 - name: View FortiGate Logs
   hosts: fortigate
-  gather_facts: false # Disabled to improve execution speed; host facts are not required for log retrieval.
+  gather_facts: false
   vars:
-    # Default log parameters; can be overridden via extra-vars at runtime.
+    # Default parameters for log retrieval; can be overridden via extra-vars
     log_type: "traffic"
     log_count: 50
 
   tasks:
-    - name: "Execute log retrieval: {{ log_type }}"
-      # FQCN: Using ansible.netcommon.cli_command for direct CLI interaction.
+    - name: Set Log Category Filter
+      # Requirement: Idempotency & Best Practices
+      # Sets the log category (e.g., traffic, event, virus) for the session.
+      # Using 'changed_when: false' as this is an operational query, not a state change.
       ansible.netcommon.cli_command:
-        # Chaining commands to set the filter category and then display the results.
-        command: "execute log filter category {{ log_type }} && execute log display {{ log_count }}"
-      register: logs
-      # Idempotency: Read-only operations must not trigger a 'changed' state.
+        command: "execute log filter category {{ log_type }}"
+      register: filter_result
       changed_when: false
-      # Error Handling: Explicitly fail if the FortiOS CLI returns common error strings.
-      failed_when: 
-        - logs.failed or "Command fail" in logs.stdout or "Invalid" in logs.stdout
 
-    - name: "Verify log data integrity"
-      # Observability: Ensure that the command actually returned data before proceeding.
+    - name: Verify Filter Application
+      # Requirement: Observability
+      # Ensure the device accepted the filter command without errors.
       ansible.builtin.assert:
         that:
-          - "logs.stdout is defined"
-          - "logs.stdout | length > 0"
-        fail_msg: "Log retrieval failed: The device returned empty output for category '{{ log_type }}'."
-        success_msg: "Successfully retrieved {{ log_type }} logs."
+          - "filter_result.rc == 0"
+          - "'Command fail' not in filter_result.stdout"
+        fail_msg: "Failed to set log filter to '{{ log_type }}'. Check if category is valid on target."
 
-    - name: "Display Logs"
-      # Documentation: Formatted output for operator visibility during execution.
+    - name: Retrieve Log Entries
+      # Requirement: Error Handling & FQCN
+      # Fetch logs using the established filter. 'failed_when' catches CLI-specific error strings.
+      ansible.netcommon.cli_command:
+        command: "execute log display"
+      register: logs_output
+      failed_when:
+        - "logs_output.rc != 0"
+        - "'Error' in logs_output.stdout"
+      changed_when: false
+
+    - name: Assert Logs Were Found
+      # Requirement: Observability
+      # Validate that the command returned data to prevent processing empty buffers.
+      ansible.builtin.assert:
+        that:
+          - "logs_output.stdout | length > 0"
+        fail_msg: "The log buffer for '{{ log_type }}' is currently empty."
+
+    - name: Display Formatted Logs
+      # Requirement: Documentation & Best Practices
+      # Slices the output lines to honor the 'log_count' variable and presents them clearly.
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE {{ log_type | upper }} LOGS =======================
-          {{ logs.stdout }}
+          ======================= {{ log_type | upper }} LOGS (Limit: {{ log_count }}) =======================
+          {{ logs_output.stdout_lines[:log_count] | join('\n') }}
+```

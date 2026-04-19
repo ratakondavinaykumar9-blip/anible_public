@@ -1,39 +1,41 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 # NetLearner Architect Improved Playbook
-# Purpose: Monitor Cisco ASA/Firepower interface health by auditing for errors, CRCs, and collisions.
-# Standards: Idempotency (Read-only), Observability (Assert), FQCN (Fully Qualified Collection Names).
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Purpose: Proactively detect physical and data-link layer issues (CRC, collisions) on Cisco ASA/Firepower appliances.
 
-- name: Get Interface Errors
+- name: Cisco ASA/Firepower Interface Error Audit
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute command to retrieve interface error statistics
-      # Use FQCN for the specific Cisco ASA command module
-      cisco.asa.asa_command:
-        commands:
-          - "show interface | include (error|CRC|collision)"
+    - name: Fetch interface error statistics
+      # Why: Monitoring CRC, collisions, and input/output errors identifies bad cabling and duplex mismatches.
+      ansible.netcommon.cli_command:
+        command: "show interface | include (error|CRC|collision)"
       register: interface_errors
-      # Task is idempotent as it performs no configuration changes.
-      # Error Handling: Ensure the task fails if the connection is dropped or command syntax is rejected.
-      failed_when: interface_errors.failed | default(false)
+      # Idempotency: Reading device state is a non-mutating operation and must not report 'changed'.
+      changed_when: false
+      # Error Handling: Ensure the task fails explicitly if the CLI execution encounters a transport or syntax error.
+      failed_when: 
+        - interface_errors.rc is defined
+        - interface_errors.rc != 0
 
-    - name: Validate successful command execution and output
-      # Observability: Assert that we received a valid response structure from the device
+    - name: Validate diagnostic output integrity
+      # Observability: Use assertions to verify that the telemetry gathered is in the expected format.
       ansible.builtin.assert:
         that:
-          - "interface_errors.stdout is defined"
-          - "interface_errors.stdout | length > 0"
-        fail_msg: "Error: No valid response received from the device for interface statistics."
-        success_msg: "Successfully retrieved interface health data."
+          - interface_errors.stdout is defined
+          - interface_errors.stdout is string
+        fail_msg: "Failed to retrieve valid interface telemetry from {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display Interface Error Report
-      # Documentation: Provide operational visibility with a formatted report
+    - name: Display Interface Health Report
+      # Documentation: Clear, human-readable output for network operations and troubleshooting.
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACE ERRORS =======================
-          {% if interface_errors.stdout[0] | length > 0 %}
-          {{ interface_errors.stdout[0] }}
-          {% else %}
-          Status: No interface errors, CRCs, or collisions detected.
-          {% endif %}
+          ======================= INTERFACE ERRORS: {{ inventory_hostname }} =======================
+          {{ interface_errors.stdout | default('No matching error patterns detected in the current interface statistics.') }}
+      # Observability: Only execute display if the data fetch was successful to prevent noisy failures.
+      when: interface_errors.stdout is defined
+```

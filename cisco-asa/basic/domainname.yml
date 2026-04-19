@@ -1,39 +1,41 @@
----
-# Name: Improve Cisco ASA/FTD Domain and DNS observability
-# Description: Retrieves and validates the configured domain-name on Cisco devices using FQCN.
-# Standards: Idempotency, Observability, Documentation, Best Practices.
-# Updated: 2026-03-15
-# Author: NetLearner Architect
-
-- name: Get Domain and DNS Configuration
+MCP issues detected. Run /mcp list for status.---
+# Cisco ASA Domain Name Audit - NetLearner Architect Improved
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Author: NetLearner Architect (Improved from original by Arjun)
+- name: Audit Cisco ASA Domain Name Configuration
   hosts: asa_firepower
   gather_facts: false
-  # Using FQCN for collections is a best practice for clarity and future-proofing.
-  collections:
-    - ansible.netcommon
-    - cisco.asa
-    - ansible.builtin
 
   tasks:
-    - name: Retrieve running-config domain-name
-      # ansible.netcommon.cli_command is idempotent as it is a read-only operation.
+    - name: Retrieve current domain-name configuration via CLI
+      # Using FQCN for cross-platform network command execution.
+      # This operation is read-only and inherently idempotent.
       ansible.netcommon.cli_command:
         command: show running-config domain-name
-      register: domain_output
-      # Ensure we don't fail the whole play if a single device is unreachable or command fails,
-      # but we will handle the validation in the next step.
-      ignore_errors: false
+      register: domain_result
+      # Idempotency: Read-only 'show' commands must never report a 'changed' status.
+      changed_when: false
+      # Error Handling: Ensure the command was recognized and executed successfully.
+      # Catches Cisco-specific error patterns and non-zero return codes.
+      failed_when: >
+        domain_result.failed or 
+        domain_result.rc != 0 or
+        "Invalid input" in domain_result.stdout or
+        "ERROR" in domain_result.stdout
 
-    - name: Validate domain-name retrieval
-      # Observability: Assert that the command returned successfully and contains expected data.
+    - name: Verify domain name retrieval and configuration state
+      # Observability: Assert ensures the device returned a valid configuration string.
+      # Verifies success by checking for the 'domain-name' keyword in the registered output.
       ansible.builtin.assert:
         that:
-          - domain_output.stdout is defined
-          - '"domain-name" in domain_output.stdout or domain_output.stdout == ""'
-        fail_msg: "Failed to retrieve domain-name configuration or unexpected output format."
-        success_msg: "Successfully retrieved domain-name configuration."
+          - domain_result.stdout is defined
+          - domain_result.stdout | length > 0
+          - "'domain-name' in domain_result.stdout"
+        fail_msg: "Domain name is not configured or could not be retrieved from {{ inventory_hostname }}."
+        success_msg: "Successfully validated domain name configuration for {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display configured domain-name
-      # Providing clear feedback for human operators.
+    - name: Display retrieved domain name configuration
+      # Observability: Provides clear visibility into the results for administrative audit.
       ansible.builtin.debug:
-        msg: "Configured Domain: {{ domain_output.stdout | default('None') }}"
+        msg: "The configured domain name on {{ inventory_hostname }} is: {{ domain_result.stdout | trim }}"

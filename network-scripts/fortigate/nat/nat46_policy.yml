@@ -1,38 +1,34 @@
----
+MCP issues detected. Run /mcp list for status.---
 # FortiGate NAT46 Policy Audit
-# Standards Followed:
-# 1. Idempotency: Read-only 'get' command ensures state is unchanged.
-# 2. Observability: Registered result with assertions to verify data capture.
-# 3. Documentation: Inline comments explaining task rationale and choices.
-# 4. Error Handling: 'failed_when' logic to catch CLI-specific errors.
-# 5. Best Practices: Full utilization of FQCN (Fully Qualified Collection Names).
-- name: FortiGate NAT46 Policies
+# Purpose: Idempotently retrieve and validate NAT46 policies to ensure network compliance and observability.
+- name: Get NAT46 Policies
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: Facts are not required for direct CLI-based retrieval
 
   tasks:
     - name: Retrieve NAT46 configuration via CLI
-      # Use FQCN (ansible.netcommon) for module consistency.
-      # This task is inherently idempotent as it performs a state query.
+      # Use FQCN for standardized network-agnostic CLI command execution
       ansible.netcommon.cli_command:
         command: get firewall nat46
-      register: nat46_result
-      # Error Handling: Fail if command is unrecognized or terminal reports error.
-      failed_when: 
-        - nat46_result.rc != 0 or "Unknown action" in nat46_result.stdout
-      ignore_errors: false
+      register: nat46_data
+      # Error Handling: Fail explicitly if the command is unsupported or the device returns a failure string
+      failed_when:
+        - nat46_data.rc != 0
+        - "'Command fail' in nat46_data.stdout"
+        - "'unknown command' in nat46_data.stdout"
 
-    - name: Validate NAT46 data integrity
-      # Observability: Assert that output was captured before proceeding.
+    - name: Verify NAT46 response integrity
+      # Observability: Assert that the command output is populated to prevent processing empty results
       ansible.builtin.assert:
         that:
-          - nat46_result.stdout is defined
-        fail_msg: "Data capture failed on {{ inventory_hostname }}. Verify network connectivity."
-        success_msg: "NAT46 configuration successfully registered for analysis."
+          - nat46_data.stdout is defined
+          - nat46_data.stdout | length > 0
+        fail_msg: "The NAT46 configuration could not be retrieved or the table is empty."
+        success_msg: "NAT46 configuration successfully captured and verified for audit."
 
-    - name: Display formatted NAT46 policy state
-      # Documentation: Provide clear visibility into the current operational state.
+    - name: Display captured NAT46 policies
+      # Observability: Output the operational state to the console for real-time verification
       ansible.builtin.debug:
         msg: |
-          ======================= NAT46 - {{ inventory_hostname }} =======================
-          {{ nat46_result.stdout if nat46_result.stdout | length > 0 else 'No NAT46 policies found or feature disabled.' }}
+          ======================= NAT46 CONFIGURATION =======================
+          {{ nat46_data.stdout }}

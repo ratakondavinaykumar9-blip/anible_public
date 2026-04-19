@@ -1,35 +1,35 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NetLearner Architect - Fan Status Monitoring
-# This playbook retrieves fan status from Cisco ASA/Firepower devices, 
-# implementing validation checks to ensure operational integrity.
-- name: Get Fan Status
+- name: Audit Cisco ASA/Firepower Fan Status
   hosts: asa_firepower
   gather_facts: false
+  # Why: Verifies hardware environment health to prevent thermal throttling or shutdown.
+  # Idempotency: This playbook is read-only and safe to execute repeatedly.
 
   tasks:
-    - name: Retrieve fan status using CLI command
-      # Using FQCN (Fully Qualified Collection Name) for portability and best practices.
-      # Idempotency: 'show' commands are read-only and inherently idempotent.
+    - name: Retrieve fan hardware status from device CLI
+      # Best Practice: Using Fully Qualified Collection Name (FQCN)
       ansible.netcommon.cli_command:
         command: show fan
+      # Observability: Register output for validation and logging
       register: fan_result
-      failed_when: 
-        - fan_result.stdout is not defined
-        - "'Invalid' in fan_result.stdout"
+      # Error Handling: Fail if command execution fails or returns invalid input
+      failed_when:
+        - fan_result.failed or "invalid" in fan_result.stdout | lower
 
-    - name: Verify fan status output integrity
-      # Observability: Ensuring the command returned data and contains expected keywords.
+    - name: Assert that all fan units are in an 'OK' state
+      # Observability: Use assert to enforce hardware health standards
       ansible.builtin.assert:
+        # Why: ASA/FTD CLI returns 'OK' for operational fans. 
+        # Lack of 'OK' indicates a critical hardware failure.
         that:
-          - fan_result.stdout is defined
-          - fan_result.stdout | length > 0
-          - "'Fan' in fan_result.stdout or 'fan' in fan_result.stdout"
-        fail_msg: "Failed to retrieve valid fan status from {{ inventory_hostname }}. Output was empty or unrecognized."
-        success_msg: "Successfully retrieved and validated fan status from {{ inventory_hostname }}."
+          - "'OK' in fan_result.stdout"
+        fail_msg: "CRITICAL: Fan failure detected or status is non-operational."
+        success_msg: "SUCCESS: All fans are functioning within normal parameters."
 
-    - name: Display formatted fan status
-      # Documentation: Providing a clean visual representation for network operators.
+    - name: Output fan telemetry to console
       ansible.builtin.debug:
         msg: |
-          ======================= FAN STATUS: {{ inventory_hostname }} =======================
+          ======================= FAN STATUS TELEMETRY =======================
           {{ fan_result.stdout }}
+```

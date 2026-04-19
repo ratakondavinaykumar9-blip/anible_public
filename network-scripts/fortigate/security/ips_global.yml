@@ -1,36 +1,37 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate IPS Global Configuration Retrieval
-# Standards: Idempotent (Read-only), Observable (Assertions), Documented
-- name: Retrieve and Verify FortiGate IPS Global State
+# NetLearner Architect Standard: FortiGate IPS Global Retrieval
+# Purpose: Securely fetch and validate IPS Global configuration for audit and state verification.
+# Idempotency: This is a read-only operation and is safe to execute repeatedly.
+- name: FortiGate IPS Global Configuration Audit
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Fetch IPS global settings from FortiGate
-      # Using FQCN (Fully Qualified Collection Name) for consistency and portability
+    - name: Retrieve IPS Global status via CLI
+      # Best Practice: Use Fully Qualified Collection Name (FQCN) for network command execution.
       ansible.netcommon.cli_command:
         command: get global firewall ipsglobal
       register: ips_global_raw
-      # Error Handling: Catch FortiOS-specific command execution failures that return 0 but indicate error in stdout
+      # Error Handling: Fail explicitly if FortiOS returns a command error or unknown action.
       failed_when:
         - ips_global_raw.failed
-        - "'Unknown action' in ips_global_raw.stdout"
-        - "'Command fail' in ips_global_raw.stdout"
-      # Idempotency: Explicitly mark read-only commands as 'changed: false'
-      changed_when: false
+        - "'Unknown action' in ips_global_raw.stdout or 'Command fail' in ips_global_raw.stdout"
 
-    - name: Validate retrieval of IPS configuration
-      # Observability: Assert that the command returned data to ensure state visibility
+    - name: Verify IPS Global data integrity
+      # Observability: Use assert to ensure the returned data is not empty before proceeding.
       ansible.builtin.assert:
         that:
-          - ips_global_raw.stdout is defined
-          - ips_global_raw.stdout | length > 0
-        fail_msg: "IPS Global configuration could not be retrieved or the output is empty."
-        success_msg: "Successfully validated IPS Global configuration retrieval."
+          - "ips_global_raw.stdout is defined"
+          - "ips_global_raw.stdout | length > 0"
+        fail_msg: "Data retrieval failed: IPS Global output is empty or undefined."
+        success_msg: "IPS Global configuration successfully retrieved and validated."
+        quiet: true
 
-    - name: Display retrieved IPS Global configuration
-      # Documentation: Format output for clear operational audit and troubleshooting
+    - name: Display formatted IPS Global configuration
+      # Observability: Enhanced debug output for clear log analysis and human-readable audits.
       ansible.builtin.debug:
         msg: |
-          ======================= IPS GLOBAL STATE =======================
+          ======================= IPS GLOBAL CONFIGURATION =======================
           {{ ips_global_raw.stdout }}
+```

@@ -1,6 +1,7 @@
----
-# FortiGate Selective Backup - Improved Version
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Selective Backup
+# Optimized for NetLearner Staging Environment
+# This playbook extracts specific configuration blocks for modular disaster recovery.
 - name: Selective Backup
   hosts: fortigate
   gather_facts: false
@@ -8,74 +9,77 @@
     backup_path: "/tmp/fgt_backups"
 
   tasks:
-    - name: Collect local timestamp for file naming
-      # Observability: Ensure ansible_date_time is available even with gather_facts: false
+    - name: Gather facts from localhost for timestamping
+      # Why: Network devices don't support standard fact gathering; we use the controller's clock.
       ansible.builtin.setup:
         filter: "ansible_date_time"
       delegate_to: localhost
       run_once: true
 
-    - name: Ensure backup directory exists with secure permissions
-      # Idempotency: Ensures the directory is present with defined state on every run
-      ansible.builtin.file:
-        path: "{{ backup_path }}"
-        state: directory
-        mode: '0755'
-      delegate_to: localhost
-      run_once: true
-
     - name: Get firewall configuration
-      # FQCN: Using fully qualified name for network command execution
       ansible.netcommon.cli_command:
         command: show firewall
       register: fw
-      # Error Handling: Fail if output is empty or if the device returns a command error
-      failed_when: 
-        - fw.stdout == ""
-        - "'Command fail' in fw.stdout"
+      # Error Handling: Detect CLI execution failures or empty responses.
+      failed_when: fw.stdout == "" or "Unknown" in fw.stdout
 
-    - name: Verify firewall configuration capture
-      # Observability: Assert that critical configuration data was actually retrieved
+    - name: Verify firewall config data
+      # Observability: Assert that the received data is valid before proceeding.
       ansible.builtin.assert:
-        that:
-          - fw.stdout | length > 0
-        fail_msg: "Firewall configuration retrieval failed or returned empty output."
+        that: fw.stdout | length > 0
+        fail_msg: "Firewall config extraction returned no data for {{ inventory_hostname }}."
 
     - name: Get router configuration
       ansible.netcommon.cli_command:
         command: show router
       register: router
-      # Error Handling: Continue if router config is missing on specific VDOMs/devices
-      ignore_errors: true
+      failed_when: router.stdout == "" or "Unknown" in router.stdout
+
+    - name: Verify router config data
+      ansible.builtin.assert:
+        that: router.stdout | length > 0
+        fail_msg: "Router config extraction returned no data for {{ inventory_hostname }}."
 
     - name: Get VPN configuration
       ansible.netcommon.cli_command:
         command: show vpn
       register: vpn
-      ignore_errors: true
+      failed_when: vpn.stdout == "" or "Unknown" in vpn.stdout
 
-    - name: Save selective configuration to local controller
-      # Idempotency: Managed via the 'dest' parameter and 'force' (default: yes)
+    - name: Verify VPN config data
+      ansible.builtin.assert:
+        that: vpn.stdout | length > 0
+        fail_msg: "VPN config extraction returned no data for {{ inventory_hostname }}."
+
+    - name: Ensure local backup directory exists
+      # Idempotency: 'state: directory' ensures the path exists with correct permissions without recreation.
+      ansible.builtin.file:
+        path: "{{ backup_path }}"
+        state: directory
+        mode: '0755'
+      run_once: true
+      delegate_to: localhost
+
+    - name: Save selective configuration to controller
+      # Documentation: Concatenates output into a single file with a sanitized ISO8601 timestamp.
+      # Best Practice: Use FQCN and explicit mode for file security.
       ansible.builtin.copy:
         content: |
-          # FortiGate Selective Backup - {{ inventory_hostname }}
-          # Captured on: {{ ansible_date_time.iso8601 }}
+          # FortiGate Selective Backup: {{ inventory_hostname }}
+          # Date: {{ hostvars['localhost']['ansible_date_time']['iso8601'] }}
           
-          # --- FIREWALL SECTION ---
+          # --- FIREWALL CONFIG ---
           {{ fw.stdout }}
           
-          # --- ROUTER SECTION ---
-          {{ router.stdout | default('Not available or error during retrieval') }}
+          # --- ROUTER CONFIG ---
+          {{ router.stdout }}
           
-          # --- VPN SECTION ---
-          {{ vpn.stdout | default('Not available or error during retrieval') }}
-        dest: "{{ backup_path }}/{{ inventory_hostname }}_selective_{{ ansible_date_time.iso8601 | regex_replace(':', '-') }}.conf"
-        mode: '0600' # Documentation: Restrict access to sensitive config files
+          # --- VPN CONFIG ---
+          {{ vpn.stdout }}
+        dest: "{{ backup_path }}/{{ inventory_hostname }}_selective_{{ hostvars['localhost']['ansible_date_time']['iso8601'] | regex_replace(':', '-') }}.conf"
+        mode: '0644'
       delegate_to: localhost
-      register: backup_output
 
-    - name: Confirm backup completion and path
-      # Observability: Provide clear feedback on the task outcome
+    - name: Log selective backup result
       ansible.builtin.debug:
-        msg: "Selective backup for {{ inventory_hostname }} saved to {{ backup_output.dest }}"
-      when: not backup_output.failed
+        msg: "Selective backup for {{ inventory_hostname }} successfully archived in {{ backup_path }}/"

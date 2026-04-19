@@ -1,45 +1,48 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: "Enterprise FTD Site-to-Site VPN via FMC API"
-  hosts: all
+- name: "Enterprise FTD Site-to-Site VPN Deployment"
+  hosts: localhost
   connection: local
-  gather_facts: false
-
+  gather_facts: true # Required for ansible_date_time used in deployment versioning
+  
   vars:
-    # FMC Connection Details (Should be stored in Ansible Vault)
+    # FMC Connection Details (Sensitive data should be encrypted via ansible-vault)
     fmc_host: "fmc.enterprise.local"
     fmc_user: "api_admin"
     fmc_password: "SecurePassword123"
     
     # VPN Topology Metadata
     vpn_topology_name: "S2S-VPN-DC01-TO-BRANCH01"
-    topology_type: "POINT_TO_POINT" # HUB_AND_SPOKE also supported
+    topology_type: "POINT_TO_POINT"
     ike_version: "2"
     
-    # Local Peer (Data Center FTD)
+    # Peer Configuration
     local_device_name: "DC01-FTD-HA"
     local_interface_name: "Outside"
     local_protected_networks: ["Internal-Server-Subnet", "DMZ-Subnet"]
     
-    # Remote Peer (Branch FTD or Generic Device)
     remote_device_name: "BR01-FTD"
     remote_interface_name: "Outside"
     remote_protected_networks: ["Branch01-Users"]
     
-    # Security Parameters
+    # Crypto Policy Names (Must pre-exist on FMC)
     ike_policy_name: "AES256-SHA512-G21"
     ipsec_proposal_name: "AES256-GCM-ESP"
     preshared_key: "VaultedKeyVariable"
     
-    # Deployment Settings
+    # Automation Control
     wait_for_deployment: true
-    deployment_timeout: 600
+    deployment_timeout: 900 # Seconds
 
   tasks:
-    - name: "VPN CONFIGURATION BLOCK"
+    - name: "VPN CONFIGURATION PIPELINE"
       block:
-        # STEP 1: RESOLVE UUIDS FOR OBJECTS AND DEVICES
-        # FMC API requires UUIDs for most operations. We fetch them via names to maintain playbook readability.
-        - name: "Fetch UUIDs for Local and Remote Devices"
+        # ----------------------------------------------------------------------
+        # STEP 1: OBJECT RESOLUTION (NAME TO UUID)
+        # FMC API operations require UUIDs. We resolve them dynamically to 
+        # allow the use of human-readable names in variables.
+        # ----------------------------------------------------------------------
+        - name: "Fetch Device UUIDs from FMC"
           cisco.fmcansible.fmc_configuration:
             fmc_host: "{{ fmc_host }}"
             fmc_user: "{{ fmc_user }}"
@@ -51,22 +54,12 @@
             - "{{ local_device_name }}"
             - "{{ remote_device_name }}"
           register: device_facts
-          # Ensure the API returned valid data for both devices
-          failed_when: 
-            - device_facts is failed 
-            - device_facts.results | selectattr('response.id', 'defined') | list | length != 2
+          failed_when: "device_facts.results | map(attribute='response.id') | list | length != 2"
 
-        - name: "Assert Device UUIDs were successfully retrieved"
-          ansible.builtin.assert:
-            that:
-              - "device_facts.results[0].response.id is defined"
-              - "device_facts.results[1].response.id is defined"
-            fail_msg: "Could not resolve UUIDs for provided device names. Check FMC inventory."
-
-        - name: "Extract Device UUIDs"
+        - name: "Register Device UUID Facts"
           ansible.builtin.set_fact:
-            local_device_uuid: "{{ device_facts.results[0].response.id }}"
-            remote_device_uuid: "{{ device_facts.results[1].response.id }}"
+            local_device_uuid: "{{ (device_facts.results | selectattr('item', 'equalto', local_device_name) | first).response.id }}"
+            remote_device_uuid: "{{ (device_facts.results | selectattr('item', 'equalto', remote_device_name) | first).response.id }}"
 
         - name: "Fetch Network Object UUIDs"
           cisco.fmcansible.fmc_configuration:
@@ -78,19 +71,22 @@
               filter: "name:{{ item }}"
           loop: "{{ local_protected_networks + remote_protected_networks }}"
           register: network_facts
-          # Verify all network objects requested exist in FMC
-          failed_when: 
-            - network_facts is failed 
-            - network_facts.results | selectattr('response.id', 'defined') | list | length != (local_protected_networks + remote_protected_networks) | length
 
-        - name: "Map Network Names to UUIDs and format for API"
+        - name: "Validate All Network Objects Exist"
+          ansible.builtin.assert:
+            that: "network_facts.results | map(attribute='response.id') | list | length == (local_protected_networks | length + remote_protected_networks | length)"
+            fail_msg: "One or more network objects could not be found on FMC."
+
+        - name: "Map Network Names to UUID Dictionaries"
           ansible.builtin.set_fact:
-            local_net_payload: "{{ network_facts.results | selectattr('item', 'in', local_protected_networks) | map(attribute='response.id') | map('regex_replace', '^(.*)$', '{\"id\": \"\\1\"}') | map('from_json') | list }}"
-            remote_net_payload: "{{ network_facts.results | selectattr('item', 'in', remote_protected_networks) | map(attribute='response.id') | map('regex_replace', '^(.*)$', '{\"id\": \"\\1\"}') | map('from_json') | list }}"
+            local_net_objs: "{{ network_facts.results | selectattr('item', 'in', local_protected_networks) | map(attribute='response.id') | map('regex_replace', '^(.*)$', '{\"id\": \"\\1\"}') | map('from_json') | list }}"
+            remote_net_objs: "{{ network_facts.results | selectattr('item', 'in', remote_protected_networks) | map(attribute='response.id') | map('regex_replace', '^(.*)$', '{\"id\": \"\\1\"}') | map('from_json') | list }}"
 
-        # STEP 2: CONFIGURE VPN TOPOLOGY
-        # 'upsertFTDS2SVpnModel' ensures idempotency by updating an existing topology or creating a new one.
-        - name: "Create or Update FTD Site-to-Site VPN Topology"
+        # ----------------------------------------------------------------------
+        # STEP 2: VPN TOPOLOGY DEFINITION
+        # 'upsert' ensures idempotency by checking for existing topology by name.
+        # ----------------------------------------------------------------------
+        - name: "Synchronize FTD Site-to-Site VPN Topology"
           cisco.fmcansible.fmc_configuration:
             fmc_host: "{{ fmc_host }}"
             fmc_user: "{{ fmc_user }}"
@@ -107,26 +103,25 @@
               endpoints:
                 - device: { "id": "{{ local_device_uuid }}" }
                   interface: { "name": "{{ local_interface_name }}" }
-                  networks: "{{ local_net_payload }}"
+                  networks: "{{ local_net_objs }}"
                   connectionType: "BIDIRECTIONAL"
                 - device: { "id": "{{ remote_device_uuid }}" }
                   interface: { "name": "{{ remote_interface_name }}" }
-                  networks: "{{ remote_net_payload }}"
+                  networks: "{{ remote_net_objs }}"
                   connectionType: "BIDIRECTIONAL"
               sharedKey: "{{ preshared_key }}"
           register: vpn_config_result
-          # Capture API level errors even if HTTP status is 200
-          failed_when: "vpn_config_result is failed or (vpn_config_result.response is defined and vpn_config_result.response.error is defined)"
 
-        - name: "Verify VPN Topology Configuration"
+        - name: "Verify VPN Configuration Success"
           ansible.builtin.assert:
-            that:
-              - "vpn_config_result.response.id is defined"
-            fail_msg: "FMC failed to return a UUID for the VPN topology."
+            that: "vpn_config_result.response is defined"
+            fail_msg: "FMC failed to return a valid response for VPN configuration."
 
-        # STEP 3: TRIGGER POLICY DEPLOYMENT
-        # Only trigger deployment if changes were detected to minimize impact.
-        - name: "Initiate Policy Deployment to FTD Sensors"
+        # ----------------------------------------------------------------------
+        # STEP 3: DEPLOYMENT (DATABASE TO SENSOR)
+        # Changes are staged in FMC DB until a deployment request is created.
+        # ----------------------------------------------------------------------
+        - name: "Trigger Policy Deployment to Devices"
           cisco.fmcansible.fmc_configuration:
             fmc_host: "{{ fmc_host }}"
             fmc_user: "{{ fmc_user }}"
@@ -140,11 +135,13 @@
               forceDeploy: false
           register: deployment_job
           when: vpn_config_result.changed
-          failed_when: "deployment_job is failed or (deployment_job.response.id is not defined)"
+          failed_when: "deployment_job.response.id is not defined"
 
-        # STEP 4: MONITOR DEPLOYMENT STATUS
-        # Wait for actual sensor synchronization to ensure the VPN is live.
-        - name: "Wait for Deployment Completion"
+        # ----------------------------------------------------------------------
+        # STEP 4: POST-CHANGE VERIFICATION
+        # Monitor the asynchronous deployment task until completion or timeout.
+        # ----------------------------------------------------------------------
+        - name: "Monitor Deployment Progress"
           cisco.fmcansible.fmc_configuration:
             fmc_host: "{{ fmc_host }}"
             fmc_user: "{{ fmc_user }}"
@@ -153,30 +150,33 @@
             path_params:
               objId: "{{ deployment_job.response.id }}"
           register: deploy_status
-          until: deploy_status.response.status == "DEPLOYED"
-          retries: "{{ (deployment_timeout / 20) | int }}"
-          delay: 20
-          when: wait_for_deployment and deployment_job is defined and deployment_job.changed
-          # Fail if deployment enters an error state
-          failed_when: "deploy_status.response.status in ['FAILED', 'CANCELLED']"
+          until: "deploy_status.response.status in ['DEPLOYED', 'FAILED']"
+          retries: "{{ (deployment_timeout / 30) | int }}"
+          delay: 30
+          when: 
+            - wait_for_deployment 
+            - deployment_job is not skipped
+          failed_when: "deploy_status.response.status != 'DEPLOYED'"
 
       rescue:
-        - name: "Failure Diagnostics"
+        - name: "Error Diagnostics"
           ansible.builtin.debug:
             msg: |
-              CRITICAL: VPN deployment failed at task: {{ ansible_failed_task.name }}
-              Reason: {{ ansible_failed_result.msg | default('Check FMC Task Monitor for overlapping subnets or license issues.') }}
-          
-        - name: "Stop Execution on Failure"
+              VPN CONFIGURATION FAILED.
+              Reason: {{ ansible_failed_result.msg | default('API Error') }}
+              Check FMC 'Task Status' or 'Policy Analysis' for detailed validation errors.
+
+        - name: "Terminate Playbook with Failure State"
           ansible.builtin.fail:
-            msg: "Playbook halted due to FTD configuration failure. Manual intervention required."
+            msg: "Mission-critical VPN deployment failed verification."
 
       always:
-        - name: "Operational Summary"
+        - name: "Execution Summary"
           ansible.builtin.debug:
             msg:
-              topology_name: "{{ vpn_topology_name }}"
-              config_status: "{{ 'CHANGED' if vpn_config_result.changed else 'NO_CHANGE_REQUIRED' }}"
-              deployment_status: "{{ deploy_status.response.status | default('SKIPPED') }}"
-              deployment_job_id: "{{ deployment_job.response.id | default('N/A') }}"
----
+              topology: "{{ vpn_topology_name }}"
+              configuration_changed: "{{ vpn_config_result.changed | default(false) }}"
+              deployment_triggered: "{{ not deployment_job.skipped | default(false) }}"
+              deployment_id: "{{ deployment_job.response.id | default('N/A') }}"
+              final_status: "{{ 'SUCCESS' if not ansible_failed_any else 'FAILURE' }}"
+```

@@ -1,37 +1,58 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Group Policies Configuration Audit
-# Improved: 2026-03-15
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-#
-- name: Audit Cisco ASA Group Policies
+# Group Policies Management Playbook
+# This playbook retrieves and validates Cisco ASA/Firepower group policy configurations.
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
+# Date: 2026-04-12
+# Author: NetLearner Architect
+
+- name: Audit and Observe Group Policies
   hosts: asa_firepower
   gather_facts: false
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve group-policy configuration from running-config
-      # Using FQCN for ansible.netcommon.cli_command.
-      # This task is read-only and inherently idempotent.
+    - name: Retrieve running-config group-policy
+      # Using FQCN for consistent collection mapping.
+      # This task is inherently idempotent as it is a read-only operation.
       ansible.netcommon.cli_command:
         command: show running-config group-policy
-      register: policies_result
-      # Error Handling: Catch ASA-specific error strings that may not trigger a CLI return code failure.
+      register: group_policy_output
+      # Ensure we fail gracefully if the command is unrecognized or the session times out.
       failed_when: 
-        - policies_result.failed or "% Invalid input" in policies_result.stdout or "ERROR:" in policies_result.stdout
-      # Idempotency: Ensure this read-only task does not report a 'changed' status in the play recap.
-      changed_when: false
+        - group_policy_output.rc != 0
+        - "'Invalid input' in group_policy_output.stdout"
 
-    - name: Validate that group policy configuration was retrieved successfully
-      # Observability: Assert that the command returned content to ensure device state is accessible.
+    - name: Verify policy retrieval success
+      # Observability: Assert that the output is not null and contains expected configuration headers.
+      # This ensures the rest of the automation has a valid state to work with.
       ansible.builtin.assert:
         that:
-          - policies_result.stdout is defined
-          - policies_result.stdout | length > 0
-        fail_msg: "Failed to retrieve Group Policies or no Group Policies are configured on {{ inventory_hostname }}."
-        success_msg: "Group Policy configuration successfully retrieved."
+          - group_policy_output.stdout is defined
+          - group_policy_output.stdout | length > 0
+        fail_msg: "Failed to retrieve Group Policy configuration or the configuration is empty."
+        success_msg: "Group Policy configuration successfully captured for {{ inventory_hostname }}."
 
-    - name: Display Group Policy configuration for audit purposes
-      # Documentation: Providing a structured output for human review and logging.
+    - name: Log group policy details
+      # Enhanced Observability: Providing structured feedback for audit trails.
       ansible.builtin.debug:
-        msg: |
-          ======================= GROUP POLICIES: {{ inventory_hostname }} =======================
-          {{ policies_result.stdout }}
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Status: Configuration Captured"
+          - "Output Summary: {{ group_policy_output.stdout_lines | length }} lines retrieved"
+          - "Full Configuration:"
+          - "{{ group_policy_output.stdout }}"
+
+    - name: Check for existence of 'DfltGrpPolicy'
+      # Example of specific state verification to ensure critical default objects exist.
+      ansible.builtin.set_fact:
+        default_policy_exists: "{{ 'group-policy DfltGrpPolicy' in group_policy_output.stdout }}"
+
+    - name: Assert critical policy presence
+      # Strict validation: Ensure the firewall has not been wiped of its default group policy.
+      ansible.builtin.assert:
+        that:
+          - default_policy_exists
+        fail_msg: "CRITICAL: DfltGrpPolicy is missing from the running configuration!"
+        quiet: true
+```

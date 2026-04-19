@@ -1,64 +1,74 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
+# Playbook to retrieve and validate ASA failover status, statistics, and history.
+# Optimized for NetLearner Staging with a focus on Idempotency, Observability, and Robustness.
 - name: Get Failover Status and Statistics
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: "GATHER | Retrieve core failover information"
-      # Using FQCN cisco.asa.asa_command for consistent platform execution.
-      # This is a read-only operation, ensuring idempotency across multiple runs.
-      cisco.asa.asa_command:
-        commands:
-          - show failover
+    - name: Get failover information
+      # FQCN: Using cisco.asa collection to retrieve structured failover state.
+      # Idempotency: This operation is read-only and safe to run repeatedly.
+      cisco.asa.asa_failover:
       register: failover_output
-      # Error Handling: Prevent task failure if failover is simply disabled on the device.
-      failed_when: 
-        - failover_output.failed
-        - "'Invalid input' in failover_output.msg | default('')"
+      # Error Handling: Ignore errors here to handle the "Failover Off" state gracefully via assertion.
+      ignore_errors: true
 
-    - name: "ASSERT | Verify device response integrity"
-      # Observability: Ensure the device returned valid data before proceeding.
+    - name: Validate failover operational status
+      # Observability: Ensure failover is actually enabled before attempting to collect statistics.
       ansible.builtin.assert:
         that:
-          - failover_output.stdout is defined
-          - failover_output.stdout | length > 0
-        fail_msg: "Device {{ inventory_hostname }} failed to return failover status."
+          - failover_output is not failed
+          - '"Failover Off" not in failover_output.msg | default("")'
+        fail_msg: "Failover is not operational or configured on {{ inventory_hostname }}."
+        success_msg: "Failover is operational on {{ inventory_hostname }}."
 
-    - name: "GATHER | Retrieve failover statistics"
-      # Gathering granular packet and interface statistics for performance monitoring.
-      cisco.asa.asa_command:
-        commands:
-          - show failover statistics
+    - name: Get failover statistics
+      # Captures detailed packet and state transition metrics for deep observability.
+      ansible.netcommon.cli_command:
+        command: show failover statistics
       register: failover_stats
-      # Conditional Execution: Skip statistics gathering if failover is not active.
-      when: 
-        - failover_output.stdout[0] is defined
-        - "'failover off' not in failover_output.stdout[0] | lower"
+      # Error Handling: Use failed_when to catch empty output or unrecognized commands.
+      failed_when:
+        - failover_stats.stdout is not defined
+        - failover_stats.stdout | length == 0
+        - '"Invalid input" in failover_stats.stdout'
 
-    - name: "GATHER | Retrieve failover history"
-      # Capturing the state change history to identify recent failover events or flapping.
-      cisco.asa.asa_command:
-        commands:
-          - show failover history
+    - name: Get failover history
+      # Retrieves transition history to audit stability and identify recent failover events.
+      ansible.netcommon.cli_command:
+        command: show failover history
       register: failover_history
-      when: 
-        - failover_output.stdout[0] is defined
-        - "'failover off' not in failover_output.stdout[0] | lower"
+      failed_when:
+        - failover_history.stdout is not defined
+        - failover_history.stdout | length == 0
+        - '"Invalid input" in failover_history.stdout'
 
-    - name: "REPORT | Consolidate failover summary"
-      # Providing a structured observability report for the network operator.
+    - name: Verify data collection completeness
+      # Observability: Final assertion to ensure all required output variables were captured.
+      ansible.builtin.assert:
+        that:
+          - failover_stats.stdout is defined
+          - failover_history.stdout is defined
+        fail_msg: "Incomplete data collection for {{ inventory_hostname }}."
+        quiet: true
+
+    - name: Summary Report
+      # Documentation: Provide a consolidated, human-readable summary of the failover state.
       ansible.builtin.debug:
         msg: |
-          ==============================================================================
-          Failover Status Report: {{ inventory_hostname }}
-          ==============================================================================
+          ============================================================
+          FAILOVER STATUS: {{ inventory_hostname }}
+          ============================================================
           
           CORE STATUS:
-          {{ failover_output.stdout[0] }}
+          {{ failover_output | to_nice_yaml }}
           
-          DETAILED STATISTICS:
-          {{ failover_stats.stdout[0] | default('N/A - Statistics not gathered (Failover disabled)') }}
+          STATISTICS:
+          {{ failover_stats.stdout }}
           
-          EVENT HISTORY:
-          {{ failover_history.stdout[0] | default('N/A - History not gathered (Failover disabled)') }}
-      when: failover_output.stdout is defined
+          HISTORY:
+          {{ failover_history.stdout }}
+          ============================================================
+```

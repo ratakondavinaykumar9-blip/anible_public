@@ -1,40 +1,34 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NetLearner Architect Standard: FortiGate Firmware Information Retrieval
-# This playbook is designed for high observability, idempotency, and production safety.
-- name: Get FortiGate Firmware Information
+# FortiGate Firmware Information Audit
+# This playbook retrieves and validates the current firmware version of FortiGate devices.
+- name: Get FortiGate Firmware Status
   hosts: fortigate
-  gather_facts: false # Fact gathering disabled to optimize performance for CLI-based tasks
+  gather_facts: false # FortiOS does not support standard Linux fact gathering
 
   tasks:
-    - name: Retrieve system firmware status via CLI
-      # Use FQCN for standardized network interaction. 
-      # This task is idempotent as it performs a read-only operation.
+    - name: Retrieve firmware status via CLI
+      # FQCN: Using fully qualified collection names for portability and clarity
       ansible.netcommon.cli_command:
         command: get system firmware
-      register: fw_info
-      # Error Handling: Explicitly check for command failures or error signatures in output
-      failed_when: 
-        - fw_info.failed | default(false)
-        - "'Command fail' in fw_info.stdout or 'Unknown action' in fw_info.stdout"
+      register: fw_result
+      # Error Handling: Fail if the command returns empty output
+      failed_when: fw_result.stdout | length == 0
+      # Idempotency: Read-only command is inherently safe to run multiple times
 
-    - name: Validate firmware data integrity
-      # Observability: Use assertions to verify that the returned data contains expected keys
+    - name: Verify firmware data integrity
+      # Observability: Assert that the output contains expected FortiOS versioning strings
       ansible.builtin.assert:
         that:
-          - fw_info.stdout is defined
-          - fw_info.stdout | length > 0
-          - "'Version' in fw_info.stdout or 'firmware' in fw_info.stdout"
-        fail_msg: "Firmware information retrieval failed or returned unexpected format on {{ inventory_hostname }}"
-        success_msg: "Firmware data successfully validated for {{ inventory_hostname }}"
-        quiet: true
+          - "'Version' in fw_result.stdout"
+        fail_msg: "Retrieved data does not appear to be valid FortiGate firmware information."
+        success_msg: "Firmware information successfully validated."
 
-    - name: Display formatted firmware summary
-      # Documentation: Provide a structured and human-readable output for audit logs
+    - name: Display formatted firmware details
+      # Observability: Structured output for operational visibility
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE FIRMWARE STATUS =======================
-          Node: {{ inventory_hostname }}
-          Timestamp: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
-          
-          {{ fw_info.stdout }}
-          =========================================================================
+          ======================= FIRMWARE AUDIT =======================
+          {{ fw_result.stdout }}
+          ==============================================================
+```

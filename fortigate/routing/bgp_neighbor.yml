@@ -1,35 +1,48 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate BGP Neighbors Inspection
-# This playbook retrieves operational BGP state for monitoring and audit purposes.
-# Idempotency: This playbook is inherently idempotent as it uses read-only operational commands.
-- name: Get BGP Neighbors
+# FortiGate BGP Neighbors - Production Ready
+# Purpose: Retrieves and validates BGP neighbor status on FortiGate firewalls.
+# Adheres to NetLearner Staging standards for observability and reliability.
+# Author: NetLearner Architect
+#
+- name: FortiGate BGP Neighbor Status Verification
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve BGP neighbor status from CLI
-      # Using Fully Qualified Collection Name (FQCN) for reliability.
-      # This task captures the raw output of the BGP neighbor status command.
+    - name: Fetch BGP Neighbor Summary from Device
+      # Using FQCN for cross-platform network command execution.
+      # Idempotency: Set changed_when to false as this is a read-only operational check.
       ansible.netcommon.cli_command:
         command: get router info bgp neighbors
-      register: neighbors
-      # Error Handling: Ensure the task fails if the output contains common FortiOS CLI error strings.
+      register: bgp_raw_output
+      # Error Handling: Fail if the command is invalid or the device returns a parse error.
       failed_when:
-        - "'command parse error' in neighbors.stdout"
-        - "'Unknown action' in neighbors.stdout"
+        - bgp_raw_output.rc | default(0) != 0
+        - "'command parse error' in bgp_raw_output.stdout"
+      changed_when: false
 
-    - name: Validate BGP neighbor output integrity
-      # Observability: Assert that the command returned data to prevent silent failures in automation pipelines.
+    - name: Verify Response Integrity
+      # Observability: Ensure the device responded with valid BGP information or a known "not enabled" state.
+      # This prevents the playbook from proceeding with null or corrupted data.
       ansible.builtin.assert:
         that:
-          - "neighbors.stdout is defined"
-          - "neighbors.stdout | length > 0"
-        fail_msg: "The BGP neighbor status command returned no data. Check device connectivity or BGP configuration."
-        success_msg: "BGP neighbor data successfully retrieved."
+          - "bgp_raw_output.stdout is defined"
+          - "bgp_raw_output.stdout | length > 0"
+          - "'BGP neighbor' in bgp_raw_output.stdout or 'BGP is not enabled' in bgp_raw_output.stdout"
+        fail_msg: "The device returned an unexpected or empty response for BGP neighbors."
+        quiet: true
 
-    - name: Display BGP Neighbors Report
-      # Documentation: Provides human-readable observability for the network operator.
+    - name: Display Structured BGP Neighbor Information
+      # Documentation: Provides a human-readable output of the BGP state and device context.
       ansible.builtin.debug:
         msg: |
-          ======================= BGP NEIGHBORS =======================
-          {{ neighbors.stdout }}
+          ============================================================
+          FORTIGATE BGP NEIGHBOR AUDIT
+          ============================================================
+          Device:   {{ inventory_hostname }}
+          Status:   {{ 'OPERATIONAL' if 'BGP neighbor' in bgp_raw_output.stdout else 'BGP NOT ENABLED' }}
+          Time:     {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S"') }}
+          ------------------------------------------------------------
+          {{ bgp_raw_output.stdout }}
+```

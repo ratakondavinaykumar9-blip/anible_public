@@ -1,36 +1,41 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Get Interface Descriptions
-# Author: NetLearner Architect
-# Purpose: Retrieves and validates interface descriptions from Cisco ASA/Firepower devices.
-# Idempotency: Inherently idempotent as it performs a read-only state inspection.
-- name: Get Interface Descriptions
+# NetLearner Architect Standardized Playbook
+# Purpose: Retrieval and Validation of ASA/Firepower Interface Descriptions
+# Standards: Idempotent, Observable, Documented, Error-Resilient
+
+- name: Audit Cisco ASA/Firepower Interface Descriptions
   hosts: asa_firepower
   gather_facts: false
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve interface descriptions from device
-      # Use FQCN for better maintainability and to avoid module name conflicts
+    - name: Retrieve interface description table from device
+      # Using FQCN for cross-platform compatibility and stability.
+      # Read-only operations are inherently idempotent as they do not modify device state.
       ansible.netcommon.cli_command:
         command: show interface description
-      register: desc_result
-      # Error Handling: Ensure we fail if the command is not recognized or permitted
-      failed_when:
-        - desc_result.failed | default(false)
-        - "'Invalid input' in desc_result.stdout"
+      register: interface_desc_output
+      # Error Handling: Fail if output is missing or contains common error indicators.
+      failed_when: 
+        - interface_desc_output.stdout is not defined
+        - "'Invalid' in interface_desc_output.stdout"
+        - "'error' in interface_desc_output.stdout | lower"
+      # Best Practice: Mark as 'changed: false' to ensure idempotency report accuracy.
+      changed_when: false
 
-    - name: Verify data integrity and observability
-      # Observability: Confirm the output contains the expected 'Interface' header
+    - name: Validate operational data integrity
+      # Observability: Asserting that the retrieved data is usable for reporting.
       ansible.builtin.assert:
         that:
-          - desc_result.stdout is defined
-          - desc_result.stdout | length > 0
-          - "'Interface' in desc_result.stdout"
-        fail_msg: "Failed to retrieve valid interface description data or output was empty."
-        success_msg: "Interface descriptions successfully retrieved and validated."
+          - "interface_desc_output.stdout | length > 0"
+        fail_msg: "Data integrity check failed: Received empty output from the device."
+        success_msg: "Data integrity verified: Interface telemetry retrieved successfully."
 
-    - name: Display formatted interface descriptions
-      # Documentation: Clear visual separation for operator visibility in logs
+    - name: Display formatted interface telemetry
+      # Visibility: Outputting the result for operator review and session logging.
       ansible.builtin.debug:
-        msg: |
-          ======================= INTERFACE DESCRIPTIONS =======================
-          {{ desc_result.stdout }}
+        msg: 
+          - "======================= INTERFACE DESCRIPTIONS ======================="
+          - "{{ interface_desc_output.stdout }}"
+```

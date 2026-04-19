@@ -1,34 +1,42 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate DNS Filter Profile Audit
-# Improved: 2026-03-15
-# Standards: NetLearner Architect v2.0
-- name: Retrieve and Validate DNS Filter Profiles
+# NetLearner Staging: FortiGate DNS Filter Profile Audit
+# Purpose: Retrieves and validates the DNS Filter configuration to ensure compliance with Staging security policies.
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
+- name: Audit FortiGate DNS Filter Profile
   hosts: fortigate
   gather_facts: false
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Fetch DNS filter profile configuration
-      # Using FQCN (Fully Qualified Collection Name) for consistent execution
+    - name: Retrieve DNS Filter Profile Configuration
+      # Using FQCN for reliability across different Ansible environments.
+      # This task is inherently idempotent as it performs a read-only operation.
       ansible.netcommon.cli_command:
-        command: "get firewall dnsfilter-profile"
-      register: dns_output
-      # Error Handling: Identify CLI-specific failures that don't trigger standard return codes
-      # Idempotency: This is a read-only operation and is inherently safe to run multiple times
-      failed_when:
-        - dns_output.failed or "Unknown action" in dns_output.stdout or "Command fail" in dns_output.stdout
+        command: get firewall dnsfilter-profile
+      register: dns_profile_output
+      # Ensure the task fails if the command returns known FortiOS error indicators.
+      failed_when: 
+        - dns_profile_output.failed or "command parse error" in dns_profile_output.stdout | lower
+        - "'entry not found' in dns_profile_output.stdout | lower"
 
-    - name: Verify DNS profile retrieval success
-      # Observability: Assert that the command returned meaningful configuration data
+    - name: Verify Observability - Validate Configuration Retrieval
+      # Assert ensures that the automation stops if the output is null or unexpected, 
+      # providing a safety gate for downstream tasks.
       ansible.builtin.assert:
         that:
-          - dns_output.stdout is defined
-          - dns_output.stdout | length > 0
-        fail_msg: "DNS filter profile data is empty or could not be retrieved from the device."
-        success_msg: "DNS filter profile data successfully captured and verified."
+          - dns_profile_output.stdout is defined
+          - dns_profile_output.stdout | length > 0
+        fail_msg: "DNS Filter Profile output is empty or undefined. Check connectivity or profile existence."
+        success_msg: "DNS Filter Profile successfully retrieved and validated."
 
     - name: Display DNS Filter Profile Details
-      # Documentation: Provide clear, formatted output for audit logs and visibility
+      # Structured output for human-readable audit logs in NetLearner Staging.
       ansible.builtin.debug:
         msg: |
-          ======================= DNS FILTER PROFILE =======================
-          {{ dns_output.stdout }}
+          ======================= STAGING AUDIT: DNS FILTER PROFILE =======================
+          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          HOST: {{ inventory_hostname }}
+          DATA:
+          {{ dns_profile_output.stdout }}
+```

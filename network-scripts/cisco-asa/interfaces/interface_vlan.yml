@@ -1,41 +1,35 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# ==============================================================================
-# PLAYBOOK: Cisco ASA VLAN Interface Retrieval
-# DESCRIPTION: Fetches and displays VLAN interface status from Cisco ASA/Firepower.
-# STANDARDS: Idempotent, Observable, Documented, and uses FQCN.
-# ==============================================================================
-- name: Retrieve and Validate VLAN Interfaces
+- name: Audit VLAN Interface Configurations
   hosts: asa_firepower
   gather_facts: false
+  # This playbook is inherently idempotent as it performs read-only operations.
+  # It provides observability into the network state and validates device responses.
 
   tasks:
-    - name: Execute 'show interface VLAN' command
-      # Using FQCN (ansible.netcommon) for cross-version compatibility.
-      # Read-only commands are inherently idempotent.
-      ansible.netcommon.cli_command:
-        command: show interface VLAN
+    - name: Retrieve VLAN interface status from Cisco ASA
+      # Using FQCN for platform-specific execution and better performance
+      cisco.asa.asa_command:
+        commands:
+          - show interface VLAN
       register: vlan_result
-      # Error Handling: Fail if the device returns an error message or command is unrecognized.
-      failed_when:
-        - vlan_result.failed or "Invalid input" in vlan_result.stdout
+      # Identify failures if the command is unrecognized or the session times out
+      failed_when: 
+        - vlan_result.failed or "Invalid input" in vlan_result.stdout[0]
 
-    - name: Validate command output content
-      # Observability: Ensure that the command returned data before proceeding.
+    - name: Validate VLAN output integrity
+      # Observability: Ensure we received a non-empty response before proceeding
       ansible.builtin.assert:
         that:
-          - vlan_result.stdout is defined
-          - vlan_result.stdout | length > 0
-        fail_msg: "VLAN interface data could not be retrieved or is empty."
-        success_msg: "Successfully captured VLAN interface configuration."
+          - vlan_result.stdout[0] | length > 0
+          - "'VLAN' in vlan_result.stdout[0]"
+        fail_msg: "Device {{ inventory_hostname }} returned invalid or empty VLAN data."
+        success_msg: "VLAN interface data successfully validated for {{ inventory_hostname }}."
 
-    - name: Display VLAN interface details
-      # Providing a structured view for better observability in automation logs.
+    - name: Display formatted VLAN interface status
+      # Observability: Structured output for logging and manual verification
       ansible.builtin.debug:
         msg: |
-          ======================================================================
-          DEVICE: {{ inventory_hostname }}
-          COMMAND: show interface VLAN
-          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
-          ======================================================================
-          {{ vlan_result.stdout }}
-          ======================================================================
+          ======================= VLAN INTERFACES: {{ inventory_hostname }} =======================
+          {{ vlan_result.stdout[0] }}
+```

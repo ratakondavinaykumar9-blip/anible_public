@@ -1,36 +1,40 @@
----
-# Playbook: FortiGate Email Filter Configuration Retrieval
-# Purpose: Safely fetches the email filter profile for state verification and auditing.
-# Standards: Idempotency (Read-only), Observability (Assert), FQCN, and Robust Error Handling.
-
-- name: Retrieve and Validate FortiGate Email Filter
+MCP issues detected. Run /mcp list for status.---
+# Playbook: FortiGate Email Filter Profile Inspection
+# Description: Safely retrieves and validates email filter configuration via CLI.
+# Standards: Idempotency (Read-only), Observability (Assert), Documentation (Comments), Error Handling, FQCN.
+- name: FortiGate Email Filter Management
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Fetch email filter profile configuration via CLI
-      # Best Practice: Use Fully Qualified Collection Names (FQCN) for consistency
+    - name: Retrieve email filter profiles from FortiGate
+      # Using cli_command is idempotent as it is a read-only operation.
+      # FQCN used: ansible.netcommon.cli_command
       ansible.netcommon.cli_command:
-        command: get firewall emailfilter-profile
-      register: email_output
-      # Idempotency: This is a read-only command and does not modify device state.
-      # Error Handling: Fail explicitly if the CLI returns an error or unknown command message.
+        command: "get emailfilter profile"
+      register: email_filter_output
+      # Error Handling: Fail if 'Command fail' or other FortiOS errors appear in stdout.
       failed_when: 
-        - email_output.failed | default(false)
-        - "'unknown' in email_output.stdout | lower or 'error' in email_output.stdout | lower"
+        - email_filter_output.failed or "Command fail" in email_filter_output.stdout
+        - "'Unknown action' in email_filter_output.stdout"
 
-    - name: Validate successful retrieval of configuration
-      # Observability: Use assertions to verify that the response contains valid data.
+    - name: Verify email filter profile retrieval success
+      # Observability: Assert that we received non-empty output to ensure state visibility.
       ansible.builtin.assert:
         that:
-          - "email_output.stdout is defined"
-          - "email_output.stdout | length > 0"
-        fail_msg: "The email filter profile could not be retrieved or the output is empty."
-        success_msg: "Email filter profile successfully retrieved and validated."
+          - "email_filter_output.stdout is defined"
+          - "email_filter_output.stdout | length > 0"
+        fail_msg: "Failed to retrieve valid email filter profile configuration. Output was empty or invalid."
+        success_msg: "Successfully retrieved email filter profile configuration."
 
-    - name: Display formatted Email Filter Details
-      # Documentation: Provide a clear, human-readable view of the retrieved state.
+    - name: Display formatted email filter configuration
+      # Documentation: Providing clear visibility into the state for audit trails.
+      # FQCN used: ansible.builtin.debug
       ansible.builtin.debug:
         msg: |
-          ======================= EMAIL FILTER PROFILE =======================
-          {{ email_output.stdout }}
+          ======================= FORTIGATE EMAIL FILTER =======================
+          HOST: {{ inventory_hostname }}
+          STATE: Operational
+          ----------------------- CONFIGURATION START -----------------------
+          {{ email_filter_output.stdout }}
+          ------------------------ CONFIGURATION END ------------------------

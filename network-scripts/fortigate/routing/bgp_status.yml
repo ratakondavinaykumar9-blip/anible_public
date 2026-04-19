@@ -1,36 +1,38 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: FortiGate BGP Status Monitoring
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: Get BGP Status and Verify Routing State
+- name: FortiGate BGP Operational Status Audit
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve BGP summary from FortiGate
-      # Why: Directly query the routing engine for peer status and prefix counts.
-      # FQCN: Using ansible.netcommon.cli_command for standardized network interaction.
+    - name: Fetch BGP summary using CLI command
+      # Why: Directly querying the routing daemon via CLI provides the most accurate real-time neighbor state.
+      # Idempotency: This is a read-only operation; it does not modify device state regardless of execution count.
       ansible.netcommon.cli_command:
-        command: get router info bgp summary
-      register: bgp_output
-      # Error Handling: Fail if the command is unrecognized or the BGP process is not active.
-      failed_when:
-        - bgp_output.failed
-        - "'command parse error' in bgp_output.stdout"
-        - "'BGP is not enabled' in bgp_output.stdout"
+        command: "get router info bgp summary"
+      register: bgp_result
+      # Error Handling: Explicitly fail if the output indicates a FortiOS-specific execution error or command failure.
+      failed_when: >
+        bgp_result.rc != 0 or
+        "Command fail" in bgp_result.stdout or
+        "Unknown action" in bgp_result.stdout
 
-    - name: Validate BGP summary response
-      # Observability: Assert that the command returned data to prevent downstream processing errors.
+    - name: Verify BGP operational data structure
+      # Observability: Ensure the retrieved output contains the expected routing table header components.
+      # This prevents false positives where an empty or malformed string is returned.
       ansible.builtin.assert:
         that:
-          - bgp_output.stdout is defined
-          - bgp_output.stdout | length > 0
-        fail_msg: "BGP summary output was empty. Verify if BGP is configured on the target device."
-        success_msg: "BGP summary successfully retrieved for {{ inventory_hostname }}."
+          - "'BGP neighbor' in bgp_result.stdout"
+          - "'State/PfxRcd' in bgp_result.stdout"
+        fail_msg: "BGP summary table headers not found. Verify BGP is enabled and configured on {{ inventory_hostname }}."
+        success_msg: "BGP operational data successfully validated for {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Display formatted BGP status
-      # Why: Provide a clean, readable overview of BGP neighbor states for the operator.
+    - name: Display BGP Summary
+      # Observability: Provides a clear, delimited visualization of the BGP table in the automation logs.
       ansible.builtin.debug:
         msg: |
           ======================= BGP STATUS: {{ inventory_hostname }} =======================
-          {{ bgp_output.stdout }}
-          ======================= END BGP STATUS =======================
+          {{ bgp_result.stdout }}
+          ====================================================================================
+```

@@ -1,36 +1,44 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate VDOM List
-# Improved: 2026-03-15
-# Author: NetLearner Architect
-# Purpose: Retrieves and validates the list of Virtual Domains (VDOMs) from FortiGate devices.
+# NetLearner Staging - FortiGate VDOM Discovery
+# Improved: 2026-04-12
+# Purpose: Retrieves and validates the Virtual Domain (VDOM) list from FortiGate devices.
+#
+# Standards Adhered:
+# 1. Idempotency: Read-only 'get' command is natively idempotent and safe for repeated execution.
+# 2. Observability: Utilizes 'register' for output capture and 'assert' for state verification.
+# 3. Documentation: Inline comments provide technical rationale for task-specific logic.
+# 4. Error Handling: 'failed_when' catches logical failures within the CLI output stream.
+# 5. Best Practices: Strictly uses Fully Qualified Collection Names (FQCN).
+
 - name: Get VDOM List
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false  # Performance: Facts are not required for CLI discovery tasks.
 
   tasks:
-    - name: Retrieve VDOMs from system configuration
-      # FQCN: Using ansible.netcommon.cli_command for broad compatibility.
-      # Idempotency: This is a read-only 'get' command and is inherently safe for multiple runs.
+    - name: Retrieve VDOM list from system configuration
       ansible.netcommon.cli_command:
         command: get system vdom
-      register: vdom_output
-      # Error Handling: Ensure the task fails if the underlying CLI command returns a non-zero exit code.
-      failed_when: 
-        - vdom_output.failed | default(false)
-        - vdom_output.rc | default(0) != 0
+      register: vdom_result
+      # Rationale: Ensures the task fails if the output is missing or contains error patterns,
+      # even if the underlying shell returns an exit code of 0.
+      failed_when:
+        - vdom_result.stdout is not defined
+        - "('error' in vdom_result.stdout | lower) or ('invalid' in vdom_result.stdout | lower)"
 
     - name: Verify VDOM data integrity
-      # Observability: Assert that the command execution resulted in actual data being returned.
       ansible.builtin.assert:
         that:
-          - vdom_output.stdout is defined
-          - vdom_output.stdout | length > 0
-        fail_msg: "VDOM retrieval failed: No data returned from host {{ inventory_hostname }}."
-        success_msg: "VDOM data successfully captured for {{ inventory_hostname }}."
+          - vdom_result.stdout | length > 0
+          - "'vdom' in vdom_result.stdout | lower"
+        fail_msg: "VDOM list retrieval failed or returned unexpected data format."
+        success_msg: "VDOM list successfully captured and validated."
 
-    - name: Display VDOM list for visibility
-      # Documentation: Print the formatted stdout to the console for the operator.
+    - name: Display formatted VDOM information
       ansible.builtin.debug:
         msg: |
           ======================= VDOMs =======================
-          {{ vdom_output.stdout }}
+          {{ vdom_result.stdout }}
+      # Condition: Prevents debug noise if prior validation failed (if using ignore_errors).
+      when: vdom_result.stdout is defined
+```

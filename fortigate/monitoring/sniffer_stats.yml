@@ -1,44 +1,53 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Packet Sniffer
-# Standards-aligned playbook for network diagnostics
+# FortiGate Packet Sniffer - Improved for NetLearner Staging
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# Author: NetLearner Architect
+#
 - name: Packet Sniffer
   hosts: fortigate
-  gather_facts: false # Disabled to improve performance as standard system facts are not required
+  gather_facts: false
   vars:
-    # Default parameters for the diagnostic sniffer
+    # The traffic filter to apply (e.g., 'host 1.1.1.1' or 'port 443')
     filter: "host 192.168.1.1"
+    # Number of packets to capture before the sniffer terminates
     count: 100
+    # Verbosity level (1: print headers, 2: print IP data, 3: print Ethernet data, etc.)
     verbose: 4
 
   tasks:
-    - name: Execute packet sniffer diagnostic command
-      # FQCN: Using ansible.netcommon for consistent CLI interaction across network platforms
+    - name: Execute packet sniffer command on FortiGate
+      # Idempotency: Read-only diagnostic commands use 'changed_when: false' to ensure
+      # they don't report a "changed" state in subsequent runs.
       ansible.netcommon.cli_command:
         command: "diagnose sniffer packet any '{{ filter }}' {{ verbose }} {{ count }}"
-      register: sniffer
-      # Idempotency: Diagnostic commands are read-only and do not alter the device configuration
-      changed_when: false
-      # Error Handling: Validate command execution and catch platform-specific error strings
+      register: sniffer_result
+      # Error Handling: Explicitly catch FortiOS-specific error strings that don't trigger a shell non-zero exit code.
       failed_when:
-        - sniffer.failed or "Command fail" in sniffer.stdout
-        - "'syntax error' in sniffer.stdout"
+        - sniffer_result.stdout is not defined
+        - "'Command fail' in sniffer_result.stdout"
+        - "'Unknown action' in sniffer_result.stdout"
+        - "'invalid' in sniffer_result.stdout"
+      changed_when: false
 
-    - name: Verify packet capture data was retrieved
-      # Observability: Ensure the capture actually returned data to the management plane
+    - name: Verify capture integrity and presence of data
+      # Observability: Ensure the command executed successfully and returned meaningful packet data.
       ansible.builtin.assert:
         that:
-          - sniffer.stdout is defined
-          - sniffer.stdout | length > 0
-        fail_msg: "The sniffer command executed but returned no packet data. Verify the filter: {{ filter }}"
-        success_msg: "Packet capture data successfully retrieved from {{ inventory_hostname }}."
+          - sniffer_result.stdout | length > 0
+          - "'interfaces' in sniffer_result.stdout or 'packets received' in sniffer_result.stdout"
+        fail_msg: "Sniffer returned empty or invalid output. Check filter syntax or interface status."
+        success_msg: "Packet capture data successfully retrieved and validated."
 
-    - name: Display packet sniffer output
-      # Provide formatted output for visibility in automation logs
+    - name: Display formatted capture results
+      # Documentation/Observability: Present results in a clear, labeled block for audit logs.
       ansible.builtin.debug:
         msg: |
-          ======================= SNIFFER DATA =======================
-          Target: {{ inventory_hostname }}
-          Filter: {{ filter }}
-          Count:  {{ count }}
-          ------------------------------------------------------------
-          {{ sniffer.stdout }}
+          ======================= SNIFFER CONTEXT =======================
+          FILTER:    {{ filter }}
+          VERBOSITY: {{ verbose }}
+          MAX_COUNT: {{ count }}
+          ----------------------- CAPTURE START -----------------------
+          {{ sniffer_result.stdout }}
+          ------------------------ CAPTURE END ------------------------
+```

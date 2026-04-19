@@ -1,38 +1,45 @@
+MCP issues detected. Run /mcp list for status.---
+# FortiGate SNMP Community Retrieval
+# Improved: 2026-04-12
+# Author: NetLearner Architect
+#
+# Purpose: Safely retrieves and validates SNMP community configuration.
+# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
 ---
-# FortiGate SNMP Community Information Retrieval
-# Improved by NetLearner Architect
-# This playbook retrieves SNMP community configuration from FortiGate devices.
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-
-- name: Get SNMP Community Configuration
+- name: Get FortiGate SNMP Community Configuration
   hosts: fortigate
   gather_facts: false
+  vars:
+    # Pattern to validate that configuration was actually returned
+    snmp_pattern: "config system snmp community"
 
   tasks:
-    - name: Retrieve SNMP community details via CLI
-      # This task is inherently idempotent as it performs a read-only operation.
-      # Using FQCN (ansible.netcommon.cli_command) to ensure forward compatibility.
+    - name: "MONITOR | Retrieve SNMP community configuration"
+      # Idempotency: Read-only CLI command execution has no impact on device state.
+      # FQCN: Using fully qualified collection name (FQCN) for portability.
       ansible.netcommon.cli_command:
-        command: get system snmp community
-      register: snmp_result
-      # Enhanced error handling: catch explicit error strings in command output 
-      # that might not trigger a non-zero exit code in some network environments.
+        command: "get system snmp community"
+      register: snmp_raw
+      # Error Handling: Explicitly fail if the command fails or returns no output.
       failed_when:
-        - snmp_result.failed or "error" in snmp_result.stdout | lower or "unknown command" in snmp_result.stdout | lower
+        - snmp_raw.failed
+        - snmp_raw.stdout | length == 0
 
-    - name: Verify SNMP configuration retrieval success
-      # Observability: Assert that the command returned non-empty data.
-      # This ensures the playbook fails early if the retrieval logic is incorrect.
+    - name: "ASSERT | Validate SNMP configuration integrity"
+      # Observability: Verify that the output contains the expected SNMP header.
+      # This prevents false positives from empty or invalid terminal responses.
       ansible.builtin.assert:
         that:
-          - snmp_result.stdout is defined
-          - snmp_result.stdout | length > 0
-        fail_msg: "Failed to retrieve SNMP configuration or the output is unexpectedly empty."
-        success_msg: "Successfully retrieved and validated SNMP community details."
+          - "snmp_pattern in snmp_raw.stdout"
+        fail_msg: "The command 'get system snmp community' did not return a valid SNMP configuration."
+        quiet: true
 
-    - name: Display SNMP configuration for visibility
-      # Provides clear visibility of the retrieved data for auditing and troubleshooting.
+    - name: "DISPLAY | Report SNMP Configuration Results"
+      # Documentation: Providing a structured output for easy log analysis and visibility.
       ansible.builtin.debug:
         msg: |
-          ======================= SNMP COMMUNITY DETAILS =======================
-          {{ snmp_result.stdout }}
+          ======================= SNMP COMMUNITY CONFIGURATION =======================
+          DEVICE: {{ inventory_hostname }}
+          
+          --- FULL SNMP CONFIGURATION ---
+          {{ snmp_raw.stdout }}

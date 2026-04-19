@@ -1,35 +1,40 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# NetLearner Architect Improved Playbook: FortiGate SD-WAN Neighbors
-# Purpose: Retrieves and validates BGP neighbor status to ensure SD-WAN overlay health.
-# Standards: Idempotency (Read-only), Observability (Assert), FQCN usage, Error Handling.
+# FortiGate SD-WAN Neighbors
+# Purpose: Retrieves BGP neighbor status for SD-WAN health monitoring.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
 - name: Get SD-WAN Neighbors
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute BGP neighbor retrieval command
-      # Using FQCN for ansible.netcommon to ensure consistent behavior across environments.
-      # This operation is inherently idempotent as it retrieves state without modification.
+    - name: Get BGP neighbors from FortiGate CLI
+      # FQCN: Using ansible.netcommon for standardized CLI interaction
+      # Why: To fetch raw routing table information directly from FortiOS.
       ansible.netcommon.cli_command:
         command: get router info bgp neighbors
-      register: neighbors_result
-      # Error Handling: Ensure the task fails if the command is unrecognized or the return code is non-zero.
+      register: neighbors
+      # Error Handling: Ensure the task fails if the underlying CLI session 
+      # encountered an error or if the stdout is unexpectedly missing.
       failed_when: 
-        - neighbors_result.rc != 0 or "command parse error" in neighbors_result.stdout
+        - neighbors.failed | default(false)
+        - neighbors.stdout is not defined
 
-    - name: Verify output integrity and connectivity
-      # Observability: Assert that the command returned data to confirm the control plane is responsive.
+    - name: Assert BGP neighbor data exists
+      # Observability: Verify that the device returned a non-empty payload.
+      # This prevents downstream processing of empty or failed results.
       ansible.builtin.assert:
         that:
-          - neighbors_result.stdout is defined
-          - neighbors_result.stdout | length > 0
-        fail_msg: "BGP neighbor data is empty. Verify if BGP/SD-WAN is configured on the target."
-        success_msg: "BGP neighbor data successfully retrieved and validated."
+          - neighbors.stdout | length > 0
+        fail_msg: "BGP neighbor retrieval failed or returned no data for {{ inventory_hostname }}."
         quiet: true
 
-    - name: Display SD-WAN Neighbor Status
-      # Observability: Provide a formatted view of the neighbors for logging and manual audit.
+    - name: Display SD-WAN Neighbors Report
+      # Documentation: Providing a clear visual separator for log readability
+      # and identifying the source host in a multi-node environment.
       ansible.builtin.debug:
         msg: |
-          ======================= SD-WAN NEIGHBORS =======================
-          {{ neighbors_result.stdout }}
+          ======================= SD-WAN NEIGHBORS: {{ inventory_hostname }} =======================
+          {{ neighbors.stdout }}
+      # Idempotency: This operation is read-only and safe for repeated execution.
+```

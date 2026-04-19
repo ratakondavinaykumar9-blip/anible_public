@@ -1,34 +1,52 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate IPS Profile Retrieval and Validation
-# This playbook retrieves IPS profile information from FortiGate devices.
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
-
-- name: FortiGate IPS Profile
+# FortiGate IPS Profile Retrieval
+# Auto-improved: 2026-04-12 (NetLearner Architect Refinement)
+# Author: Arjun (OpenClaw) | Refined by: NetLearner Architect
+#
+# This playbook retrieves IPS profile configuration with strict observability
+# and error-handling standards to ensure reliable network automation.
+#
+# Standards Applied:
+# 1. Idempotency: Read-only 'get' command is inherently safe for repeated execution.
+# 2. Observability: Registered output and explicit assertions for state verification.
+# 3. Documentation: Clear comments explaining task logic and error handling.
+# 4. Error Handling: 'failed_when' logic to catch CLI-specific errors.
+# 5. Best Practices: Use of Fully Qualified Collection Names (FQCN).
+#
+---
+- name: Get IPS Profile
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Retrieve IPS Profile information via CLI
-      # Using FQCN for network command execution. 
-      # This operation is idempotent as it is a read-only 'get' command.
+    - name: Fetch IPS Profile from device
+      # Utilizing FQCN for the netcommon collection to ensure portability.
+      # The 'get' command retrieves the operational status of firewall IPS profiles.
       ansible.netcommon.cli_command:
         command: get firewall ipsprofile
       register: ips_output
-      # Error Handling: Ensure the task fails explicitly if the command execution fails.
-      failed_when: ips_output.failed or "Unknown action" in ips_output.stdout
+      # Prevent silent failures by checking for common FortiOS CLI error strings.
+      failed_when:
+        - ips_output.stdout == ""
+        - "'Command fail' in ips_output.stdout"
+        - "'Unknown command' in ips_output.stdout"
 
-    - name: Validate IPS Profile data retrieval
-      # Observability: Verifying that the command returned non-empty content.
+    - name: Validate retrieval success
+      # Assertions provide immediate feedback if the device returns null or invalid data.
+      # This ensures downstream tasks do not process empty configurations.
       ansible.builtin.assert:
         that:
-          - ips_output.stdout is defined
           - ips_output.stdout | length > 0
-        fail_msg: "Failed to retrieve IPS profile data or the device returned an empty response."
-        success_msg: "IPS profile data successfully retrieved and validated."
+        fail_msg: "IPS Profile retrieval failed: Output is empty or command was rejected."
+        success_msg: "IPS Profile data successfully captured from {{ inventory_hostname }}."
 
     - name: Display IPS Profile details
-      # Documentation: Providing clear visibility of the operational state for the operator.
+      # Providing a formatted view of the output for audit logs and troubleshooting.
       ansible.builtin.debug:
         msg: |
-          ======================= IPS PROFILE =======================
+          ======================= IPS PROFILE AUDIT =======================
+          DEVICE: {{ inventory_hostname }}
+          RESULT:
           {{ ips_output.stdout }}
+```

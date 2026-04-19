@@ -1,41 +1,35 @@
----
-# ==============================================================================
-# Playbook: FortiGate Policy List Retrieval
-# Description: Safely fetches and validates the firewall policy configuration
-#              from Fortinet devices.
-# Standards: Idempotency, Observability, FQCN, and Robust Error Handling.
-# ==============================================================================
-- name: Get Policy List
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Policy List - Optimized for NetLearner Architect Standards
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Get FortiGate Policy List
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Execute CLI command to fetch firewall policies
-      # Use Fully Qualified Collection Name (FQCN) for reliability.
-      # 'get' provides status/summary; 'show' provides configuration.
+    - name: Retrieve firewall policy configuration via CLI
+      # Using Fully Qualified Collection Name (FQCN) for reliability
       ansible.netcommon.cli_command:
-        command: get firewall policy
-      register: policy_result
-      # Error Handling: Identify failure if the command returns an error string 
-      # even if the exit code is technically 0.
-      failed_when:
-        - policy_result.failed or "Command fail" in policy_result.stdout
-      # Idempotency: Read-only operations are inherently idempotent.
-      changed_when: false
+        command: show firewall policy
+      register: policy_output
+      # Error Handling: Catch execution failures or invalid command responses
+      failed_when: 
+        - policy_output.failed
+        - "'Unknown command' in policy_output.stdout"
+      # Documentation: 'show' is preferred for configuration retrieval as it returns 
+      # the raw config structure, which is more predictable for parsing than 'get'.
 
-    - name: Verify policy data integrity
-      # Observability: Assert that the output is not empty to ensure 
-      # the data is valid for downstream processing.
+    - name: Verify policy data integrity (Observability)
+      # Assert that we received valid configuration data to prevent silent failures
       ansible.builtin.assert:
         that:
-          - policy_result.stdout is defined
-          - policy_result.stdout | length > 0
-        fail_msg: "Firewall policy retrieval returned no data. Check connectivity or permissions."
-        success_msg: "Firewall policies successfully retrieved and validated."
+          - policy_output.stdout | length > 0
+          - "'config firewall policy' in policy_output.stdout or 'edit' in policy_output.stdout"
+        fail_msg: "Vulnerability: Policy retrieval returned empty or invalid data."
+        success_msg: "Policy configuration successfully retrieved and validated."
 
-    - name: Display retrieved policies
-      # Documentation: Provide a clear, formatted view for the operator.
+    - name: Display policy configuration audit trail
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE POLICIES =======================
-          {{ policy_result.stdout }}
+          ======================= FIREWALL POLICIES =======================
+          {{ policy_output.stdout }}
+      # Idempotency: This operation is read-only, making it inherently safe to run multiple times.

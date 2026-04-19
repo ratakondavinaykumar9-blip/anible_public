@@ -1,74 +1,64 @@
----
-# FortiGate Backup Configuration - Production Standard
-# This playbook performs a full configuration backup of FortiGate devices.
-# It adheres to standards for idempotency, observability, and error handling.
-
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Backup Configuration
+# Purpose: Securely retrieve and archive FortiGate configurations with integrity checks.
+# This playbook adheres to standards for Idempotency, Observability, and Error Handling.
 - name: Backup FortiGate Config
   hosts: fortigate
   gather_facts: false
   vars:
-    # Define the local filesystem path for backup storage
     backup_path: "/tmp/fgt_backups"
 
   tasks:
-    - name: Gather minimal system facts for timestamping
-      # Required to populate 'ansible_date_time' when gather_facts is disabled
+    - name: Gather timestamp facts from the control node
+      # Requirement: Observability - Ensures precise timestamping for versioned backups.
       ansible.builtin.setup:
         gather_subset:
-          - "!all"
-          - "min"
+          - 'date_time'
+      delegate_to: localhost
+      run_once: true
 
-    - name: Ensure local backup directory exists
-      # Idempotency: Ensures the directory exists without modifying it if already present
+    - name: Ensure the local backup directory exists
+      # Requirement: Idempotency - 'state: directory' ensures the path exists without modifying it on subsequent runs.
       ansible.builtin.file:
         path: "{{ backup_path }}"
         state: directory
         mode: '0755'
-      delegate_to: localhost
       run_once: true
-      register: dir_creation
+      register: directory_status
 
-    - name: Verify backup directory state
-      # Observability: Explicitly assert that the directory is ready
+    - name: Verify backup directory accessibility
+      # Requirement: Observability - Validates that the filesystem is ready for write operations.
       ansible.builtin.assert:
         that:
-          - dir_creation.state == 'directory'
-        fail_msg: "Backup directory {{ backup_path }} could not be verified."
+          - directory_status is successful
+        fail_msg: "Cannot access or create the backup directory at {{ backup_path }}."
 
-    - name: Retrieve full configuration from FortiGate
-      # Best Practices: Using Fully Qualified Collection Name (FQCN)
+    - name: Retrieve full configuration from the FortiGate device
+      # Requirement: Best Practice - Using FQCN (ansible.netcommon).
       ansible.netcommon.cli_command:
-        command: "show full-configuration"
-      register: config_output
-      # Error Handling: Catch empty responses or failed CLI execution
-      failed_when: 
-        - config_output.stdout is not defined
-        - config_output.stdout | length == 0
+        command: show full-configuration
+      register: config_data
+      # Requirement: Error Handling - Prevents silent failures or saving empty configuration strings.
+      failed_when:
+        - config_data.stdout == ""
+        - "'Error' in config_data.stdout"
 
-    - name: Validate configuration data integrity
-      # Observability: Check for core config markers to ensure a complete stream
+    - name: Validate configuration integrity
+      # Requirement: Observability - Asserts that the output contains expected FortiOS markers.
       ansible.builtin.assert:
         that:
-          - "'config system global' in config_output.stdout"
-        fail_msg: "Retrieved configuration from {{ inventory_hostname }} appears incomplete."
+          - "'config system global' in config_data.stdout"
+        fail_msg: "The configuration retrieved from {{ inventory_hostname }} appears to be truncated or invalid."
 
-    - name: Save configuration to timestamped file
-      # Idempotency: Creates a unique file; delegate to localhost for centralized storage
+    - name: Save configuration to a timestamped file on the control node
+      # Requirement: Best Practice - Ensures restrictive file permissions (0600) for sensitive data.
       ansible.builtin.copy:
-        content: "{{ config_output.stdout }}"
-        dest: "{{ backup_path }}/{{ inventory_hostname }}_{{ ansible_date_time.iso8601 | regex_replace(':', '-') }}.conf"
-        mode: '0640'
-      delegate_to: localhost
-      register: file_save_result
+        content: "{{ config_data.stdout }}"
+        dest: "{{ backup_path }}/{{ inventory_hostname }}_{{ hostvars['localhost']['ansible_date_time']['iso8601'] | regex_replace(':', '-') }}.conf"
+        mode: '0600'
+      register: save_result
 
-    - name: Verify backup file persistence
-      # Observability: Confirm the write operation was successful
-      ansible.builtin.assert:
-        that:
-          - file_save_result.dest is defined
-        success_msg: "Backup for {{ inventory_hostname }} saved to {{ file_save_result.dest }}"
-        fail_msg: "Failed to persist configuration to {{ backup_path }}."
-
-    - name: Final status report
+    - name: Finalize and report backup status
+      # Requirement: Observability - Provides the operator with the specific path of the created artifact.
       ansible.builtin.debug:
-        msg: "Configuration backup successful for {{ inventory_hostname }}. File: {{ file_save_result.dest }}"
+        msg: "Backup successful for {{ inventory_hostname }}. Saved to: {{ save_result.dest }}"

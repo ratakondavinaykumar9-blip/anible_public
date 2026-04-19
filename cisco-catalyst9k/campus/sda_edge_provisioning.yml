@@ -1,53 +1,66 @@
----
-- name: Cisco SDA Edge Node Configuration
+MCP issues detected. Run /mcp list for status.---
+- name: Cisco SDA Edge Node Configuration - Fabric Site Provisioning
   hosts: sda_edge
   gather_facts: false
+  # Best Practice: Use Fully Qualified Connection Name (FQCN) for connectivity.
   connection: cisco.ios.network_cli
 
   tasks:
-    - name: Gather initial device state
+    - name: Gather initial device operational facts
       # FQCN: cisco.ios.ios_facts
-      # Purpose: Collects baseline facts to ensure device reachability and support idempotency checks.
+      # Idempotency: Establishes baseline state to avoid redundant configuration.
       cisco.ios.ios_facts:
         gather_subset:
           - min
-      register: initial_state
+      register: initial_facts
+      # Error Handling: Ensures playbook stops immediately if the device is unreachable.
+      failed_when: initial_facts.failed | default(false)
 
-    - name: Verify device connectivity
-      # Observability: Ensures the device is responsive before attempting configuration.
+    - name: Verify device reachability and support
+      # Observability: Explicit assertion for health-check before applying changes.
       ansible.builtin.assert:
         that:
-          - initial_state.ansible_facts is defined
-        fail_msg: "Failed to gather facts from {{ inventory_hostname }}. Connectivity check failed."
-        success_msg: "Connectivity to {{ inventory_hostname }} verified."
+          - initial_facts.ansible_facts is defined
+        fail_msg: "FATAL: Connectivity to {{ inventory_hostname }} failed. Aborting SDA provisioning."
+        success_msg: "SUCCESS: {{ inventory_hostname }} is reachable and ready for SDA configuration."
 
-    - name: Configure SDA RLOC Loopback interface
-      # Idempotency: Using 'state: merged' ensures the configuration is only applied if the current state differs.
+    - name: Provision SDA RLOC Loopback Interface
       # FQCN: cisco.ios.ios_l3_interfaces
-      # Documentation: The Loopback0 interface serves as the Routing Locator (RLOC) for the SDA Fabric.
+      # Idempotency: 'state: merged' ensures config is only applied if current state differs.
+      # Documentation: The Loopback0 serves as the Routing Locator (RLOC) for the SDA Fabric.
       cisco.ios.ios_l3_interfaces:
         config:
           - name: Loopback0
-            description: "SDA RLOC Loopback - Managed by NetLearner"
+            description: "SDA RLOC Loopback - Managed by NetLearner Architect"
             ipv4:
               - address: 10.255.255.1/32
         state: merged
       register: loopback_config
-      # Error Handling: Explicitly fails if the configuration cannot be applied or the module fails.
-      failed_when: loopback_config.failed | default(false)
 
-    - name: Validate Loopback configuration success
-      # Observability: Verifying the success of the previous task to prevent configuration drift.
+    - name: Validate Loopback configuration state
+      # Observability: Verifies that the interface was correctly provisioned.
       ansible.builtin.assert:
         that:
           - not loopback_config.failed
-        fail_msg: "SDA Loopback0 configuration failed on {{ inventory_hostname }}."
-        success_msg: "SDA Loopback0 configuration is verified and idempotent."
+        fail_msg: "ERROR: Failed to provision SDA Loopback0 on {{ inventory_hostname }}."
+        success_msg: "SUCCESS: SDA Loopback0 is provisioned and idempotent."
 
-    - name: Configure Global LISP for SDA Fabric
+    - name: Enable Cisco TrustSec (CTS) Role-Based Enforcement
       # FQCN: cisco.ios.ios_config
-      # Idempotency: 'match: line' prevents redundant entries in the running configuration.
-      # Documentation: LISP (Locator/ID Separation Protocol) is the control plane for the SDA fabric.
+      # Documentation: Required for Scalable Group Tag (SGT) enforcement in the SDA Fabric.
+      # Idempotency: 'match: line' prevents duplicate command entries.
+      cisco.ios.ios_config:
+        lines:
+          - cts role-based enforcement
+        match: line
+        save_when: changed
+      register: cts_status
+      # Error Handling: Critical policy enforcement should not fail silently.
+      failed_when: cts_status.failed | default(false)
+
+    - name: Configure SDA LISP Control Plane
+      # FQCN: cisco.ios.ios_config
+      # Documentation: LISP (Locator/ID Separation Protocol) is the mapping system for SDA.
       cisco.ios.ios_config:
         lines:
           - instance-id 0
@@ -57,28 +70,40 @@
         match: line
       register: lisp_config
 
-    - name: Verify LISP configuration application
-      # Observability: Registering results and asserting success ensures the playbook stops on configuration errors.
+    - name: Verify LISP Fabric configuration application
+      # Observability: Confirming LISP state before proceeding to port configuration.
       ansible.builtin.assert:
         that:
           - not lisp_config.failed
-        fail_msg: "SDA LISP configuration failed on {{ inventory_hostname }}."
-        success_msg: "SDA LISP configuration successfully applied/verified."
+        fail_msg: "ERROR: LISP Fabric configuration failed on {{ inventory_hostname }}."
+        success_msg: "SUCCESS: LISP Control Plane successfully verified."
 
-    - name: Enable TrustSec (CTS) Role-Based Enforcement
-      # FQCN: cisco.ios.ios_config
-      # Documentation: CTS enforcement is required for SGT-based security policies within the SDA fabric.
+    - name: Provision SDA Fabric Edge Ports
+      # FQCN: cisco.ios.ios_l2_interfaces
+      # Documentation: Configures access ports for fabric host connectivity.
+      # Idempotency: 'state: merged' preserves existing config while updating delta.
+      cisco.ios.ios_l2_interfaces:
+        config:
+          - name: GigabitEthernet1/0/1
+            description: "SDA Host Edge Port - Managed"
+            mode: access
+        state: merged
+      register: edge_port_config
+
+    - name: Finalize and Save Running Configuration
+      # Documentation: Ensures persistence across reboots after successful verification.
+      # Idempotency: Only saves if changes were registered during the play.
       cisco.ios.ios_config:
-        lines:
-          - cts role-based enforcement
-        match: line
         save_when: changed
-      register: cts_config
-      # Error Handling: Explicitly handling potential failure of policy-critical enforcement commands.
-      failed_when: cts_config.failed | default(false)
+      when: 
+        - loopback_config.changed or 
+          cts_status.changed or 
+          lisp_config.changed or 
+          edge_port_config.changed
+      register: save_result
 
-    - name: Validate TrustSec enforcement status
+    - name: Validate Final Deployment Status
       ansible.builtin.assert:
         that:
-          - not cts_config.failed
-        success_msg: "SDA Policy Enforcement (CTS) successfully enabled and verified."
+          - not save_result.failed | default(false)
+        success_msg: "SUCCESS: Cisco SDA Edge Node configuration is complete and verified."

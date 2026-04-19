@@ -1,36 +1,37 @@
----
-# Playbook: Cisco ASA Connection Detail Retrieval
-# Purpose: Gathers and validates 'show conn detail' from ASA/Firepower devices.
-# Standards: Idempotency (read-only), Observability (asserts), Documentation (comments), FQCN usage.
-- name: Connection Detail
+MCP issues detected. Run /mcp list for status.---
+# Playbook: Connection Detail Retrieval
+# Purpose: Gathers and validates connection state from Cisco ASA/Firepower security appliances.
+# Standards: Idempotency (Read-only), Observability (Assert), Documentation (Comments), Error Handling (Failed_when), FQCN.
+
+- name: Connection Detail Retrieval
   hosts: asa_firepower
-  gather_facts: no
+  gather_facts: false # Facts are not required for CLI-based command execution, reducing overhead.
 
   tasks:
-    - name: Retrieve connection details using show command
-      # Use FQCN for network CLI commands to ensure the correct collection is invoked
+    - name: Retrieve connection details via CLI
+      # Use Fully Qualified Collection Name (FQCN) for the network CLI module.
+      # This operation is idempotent as it performs a non-intrusive state inspection.
       ansible.netcommon.cli_command:
         command: show conn detail
-      register: conn
-      # Ensuring idempotency: read-only commands must not report a change state
-      changed_when: false
-      # Error handling: capture cases where the device returns an error string instead of data
+      register: conn_result
+      # Error Handling: Fail if the command is unrecognized or returns a syntax error.
       failed_when: >
-        conn.stdout is not defined or 
-        '% Invalid' in conn.stdout or 
-        'Error' in conn.stdout
+        conn_result.failed or 
+        "Invalid input" in conn_result.stdout or 
+        "ERROR:" in conn_result.stdout
 
-    - name: Validate that connection data was retrieved
-      # Observability: Assert that the command output contains content to prevent silent failures
+    - name: Verify connection table output is populated
+      # Observability: Utilize assertions to confirm state capture before reporting success.
       ansible.builtin.assert:
         that:
-          - conn.stdout | length > 0
-        fail_msg: "Failed to retrieve connection details: output is empty or invalid."
-        success_msg: "Connection details successfully retrieved and validated."
+          - "conn_result.stdout is defined"
+          - "conn_result.stdout | length > 0"
+        fail_msg: "The connection table could not be retrieved or is currently empty."
+        success_msg: "Connection details successfully registered and validated."
 
-    - name: Display connection details
-      # Formatted debug output for human-readable visibility in the automation logs
+    - name: Output connection details to the terminal
+      # Documentation: Provides a structured view for human operators during manual execution.
       ansible.builtin.debug:
         msg: |
           ======================= CONNECTION DETAIL =======================
-          {{ conn.stdout }}
+          {{ conn_result.stdout }}

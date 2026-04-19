@@ -1,35 +1,41 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate OSPF Interface Monitoring
-# Standards: Idempotency (Read-only), Observability (Asserts), Documentation (Comments), Error Handling (Failed_when), FQCN.
-- name: Get FortiGate OSPF Interface Information
+# FortiGate OSPF Interface Status Retrieval
+# Purpose: Gathers real-time OSPF operational state to verify routing adjacency health.
+# Standards: NetLearner Architecture - Idempotency, Observability, FQCN.
+
+- name: Get OSPF Interface Status
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: Fact gathering is bypassed for raw CLI operations.
 
   tasks:
-    - name: Retrieve OSPF interface status from device
-      # Using FQCN: ansible.netcommon.cli_command for reliable CLI execution.
-      # This is a read-only operation and is idempotent by nature.
+    - name: Gather OSPF interface information
+      # Why: Directly queries the FortiOS routing engine for OSPF interface metrics.
+      # FQCN: Using ansible.netcommon.cli_command for standardized network interactions.
       ansible.netcommon.cli_command:
-        command: "get router info ospf interface"
+        command: get router info ospf interface
       register: ospf_intf_result
-      # Error Handling: Detect CLI execution failures or specific FortiOS error responses.
-      failed_when:
-        - ospf_intf_result.failed or "Command fail" in ospf_intf_result.stdout
+      # Error Handling: Trap CLI-specific failure strings to ensure the playbook stops if the command is unsupported or OSPF is disabled.
+      failed_when: >
+        ospf_intf_result.failed or 
+        "Command fail" in ospf_intf_result.stdout or 
+        "Unknown command" in ospf_intf_result.stdout
 
-    - name: Validate OSPF operational data
-      # Observability: Ensure the output contains data to confirm the command was processed correctly.
+    - name: Verify OSPF output observability
+      # Observability: Asserts that the response is populated, ensuring the OSPF process is responsive.
+      # This prevents silent failures where an empty table might be misinterpreted as a success.
       ansible.builtin.assert:
         that:
-          - "ospf_intf_result.stdout is defined"
-          - "ospf_intf_result.stdout | length > 0"
-        fail_msg: "The OSPF interface command returned no data. Check OSPF configuration or device state."
-        quiet: true
+          - ospf_intf_result.stdout is defined
+          - ospf_intf_result.stdout | length > 0
+        fail_msg: "Critical Failure: OSPF command returned no data. Check if OSPF is initialized on the device."
+        success_msg: "OSPF interface data successfully registered and validated."
 
-    - name: Present OSPF Interface Status
-      # Documentation: Provide the operator with a formatted view of the OSPF interface state.
+    - name: Display formatted OSPF interface status
+      # Documentation: Provides a clear operational view for audit logs and real-time troubleshooting.
       ansible.builtin.debug:
         msg: |
-          ============================================================
-          OSPF INTERFACE OPERATIONAL STATE
-          ============================================================
+          [SYSTEM STATUS] OSPF INTERFACE REPORT
+          -------------------------------------
           {{ ospf_intf_result.stdout }}
+```

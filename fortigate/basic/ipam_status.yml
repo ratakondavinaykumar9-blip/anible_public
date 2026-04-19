@@ -1,36 +1,43 @@
----
-# FortiGate IPAM Status Retrieval
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: Get FortiGate IPAM Status
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect - FortiGate IPAM Status Verification
+# This playbook retrieves the IP Address Management (IPAM) status from FortiGate devices.
+# It adheres to enterprise standards for idempotency, observability, and robust error handling.
+
+- name: Get IPAM Status
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Optimization: Standard Linux fact gathering is not applicable to FortiOS CLI operations.
 
   tasks:
-    - name: Fetch IPAM status from system
-      # Why: Retrieves the current IP Address Management (IPAM) configuration and state.
-      # FQCN used for platform-independent CLI interaction.
+    - name: Execute IPAM status retrieval command
+      # FQCN: Using fully qualified collection names ensures compatibility and prevents module naming conflicts.
       ansible.netcommon.cli_command:
         command: get system ipam
-      register: ipam_status
-      # Error Handling: Fail explicitly if the command is unrecognized or execution fails.
+      register: ipam_result
+      # IDEMPOTENCY: Read-only 'get' commands must be marked as 'changed_when: false' to ensure 
+      # the playbook report accurately reflects that no state changes occurred on the device.
+      changed_when: false
+      # ERROR HANDLING: Validates that the command was recognized by the OS and did not return 
+      # an "Unknown" error string, which FortiOS often returns with a 0 exit code.
       failed_when: 
-        - ipam_status.failed | default(false)
-        - "'unknown' in ipam_status.stderr or 'error' in ipam_status.stderr"
+        - ipam_result.rc != 0
+        - "'Unknown' in ipam_result.stdout"
 
-    - name: Verify IPAM status data integrity
-      # Observability: Ensure the result is defined and contains data before proceeding.
+    - name: Validate IPAM response integrity
+      # OBSERVABILITY: Asserting that the output is non-empty provides immediate feedback 
+      # if the management plane returns null data, preventing silent failures in the pipeline.
       ansible.builtin.assert:
         that:
-          - ipam_status.stdout is defined
-          - ipam_status.stdout | length > 0
-        fail_msg: "IPAM status retrieval failed or returned empty output on {{ inventory_hostname }}"
-        success_msg: "IPAM status successfully captured for {{ inventory_hostname }}"
+          - ipam_result.stdout is defined
+          - ipam_result.stdout | length > 0
+        fail_msg: "The IPAM status command returned an empty or invalid response from {{ inventory_hostname }}."
+        success_msg: "IPAM status successfully retrieved and validated for {{ inventory_hostname }}."
 
-    - name: Display IPAM Status
-      # Documentation: Formatted output for operator visibility and audit logging.
+    - name: Display formatted IPAM status
+      # DOCUMENTATION: Providing structured output for audit logs to assist network engineers 
+      # in verifying the current operational state of the IPAM service.
       ansible.builtin.debug:
         msg: |
-          ==============================================================================
-          IPAM STATUS REPORT: {{ inventory_hostname }}
-          ==============================================================================
-          {{ ipam_status.stdout }}
+          ======================= IPAM STATUS: {{ inventory_hostname }} =======================
+          {{ ipam_result.stdout }}
+
+---

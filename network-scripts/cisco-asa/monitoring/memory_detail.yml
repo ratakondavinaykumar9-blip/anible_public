@@ -1,30 +1,32 @@
----
-- name: Cisco ASA/Firepower Memory Detail Analysis
+MCP issues detected. Run /mcp list for status.---
+# Memory Detail Playbook
+# Purpose: Retrieves and validates ASA/Firepower memory statistics for system health monitoring.
+- name: Memory Detail
   hosts: asa_firepower
-  gather_facts: false
-  # Standardizing on false for YAML consistency in network automation
+  gather_facts: false # Facts are not required for simple CLI command execution
 
   tasks:
-    - name: Retrieve detailed memory statistics from the security appliance
-      # FQCN: Using ansible.netcommon.cli_command for cross-platform network compatibility
+    - name: Execute 'show memory detail' command
+      # Using FQCN (Fully Qualified Collection Name) for consistent cross-platform behavior
       ansible.netcommon.cli_command:
         command: show memory detail
-      register: mem_output
-      # Error Handling: Ensure the playbook fails if the command returns an empty string or fails at the CLI level
-      failed_when: 
-        - mem_output.stdout is not defined or mem_output.stdout | length == 0
+      register: mem_detail
+      # Error Handling: Fail if the command returns no data or an 'Invalid input' error
+      failed_when:
+        - mem_detail.stdout | length == 0
+        - "'Invalid input' in mem_detail.stdout"
 
-    - name: Validate successful memory data acquisition
-      # Observability: Asserting that the output contains expected data to ensure the session was valid
+    - name: Verify command output integrity
+      # Observability: Assert that the output contains expected memory keywords to ensure validity
       ansible.builtin.assert:
         that:
-          - "'Free memory' in mem_output.stdout or 'Used memory' in mem_output.stdout"
-        fail_msg: "The 'show memory detail' command did not return the expected memory statistics."
-        success_msg: "Memory details successfully validated and parsed."
+          - "'Free memory' in mem_detail.stdout"
+        fail_msg: "Memory detail output is missing expected data markers or returned an error."
+        quiet: true
 
-    - name: Output memory detail for operational visibility
-      # Documentation: Providing a clear visual delimiter for log analysis and manual review
+    - name: Display formatted memory details
+      # Idempotency: This is a read-only display task and is safe to execute repeatedly
       ansible.builtin.debug:
         msg: |
           ======================= MEMORY DETAIL =======================
-          {{ mem_output.stdout }}
+          {{ mem_detail.stdout }}

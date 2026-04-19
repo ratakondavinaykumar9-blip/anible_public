@@ -1,38 +1,50 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Backup Cisco ASA/Firepower Configuration to TFTP
-# Improved by NetLearner Architect for Enterprise Standards
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+# NetLearner Architect Improved Playbook
+# Objective: Secure, idempotent, and observable configuration backup for ASA/Firepower
+# Improvements: FQCN usage, output validation, and explicit error trapping
+
 - name: Backup to TFTP
   hosts: asa_firepower
   gather_facts: false
   vars:
+    # Target TFTP server IP; centralized here for easy environment-specific overrides
     tftp_server: "10.0.0.1"
-    # Using a variable for the filename allows for better file management on the TFTP server
-    backup_filename: "{{ inventory_hostname }}_running_config.cfg"
+    # Filename includes hostname to prevent collisions in multi-device environments
+    tftp_filename: "{{ inventory_hostname }}_running_config.cfg"
 
   tasks:
-    - name: Copy running-config to TFTP server
-      # Why: Using /noconfirm avoids interactive prompts on Cisco ASA, ensuring automation flow.
-      # FQCN used: ansible.netcommon.cli_command
+    - name: Transfer Running Configuration to TFTP
+      # Use Fully Qualified Collection Name (FQCN) for platform independence
       ansible.netcommon.cli_command:
-        command: "copy /noconfirm running-config tftp://{{ tftp_server }}/{{ backup_filename }}"
+        # URI syntax provides all parameters in one command to ensure a deterministic execution path
+        command: "copy running-config tftp://{{ tftp_server }}/{{ tftp_filename }}"
       register: tftp_result
-      # Error Handling: Identify failure strings in the CLI output to trigger task failure
+      # Error Handling: Trap common ASA TFTP failures (e.g., timeouts, unreachable server, or disk full)
+      # CLI output analysis is the primary way to detect logical failures in network modules
       failed_when:
         - "'Error' in tftp_result.stdout"
+        - "'failed' in tftp_result.stdout"
+        - "'Timeout' in tftp_result.stdout"
         - "'Invalid' in tftp_result.stdout"
-        - "'Failed' in tftp_result.stdout"
-        - "'timeout' in tftp_result.stdout.lower()"
+      # Idempotency: Execution is safe to repeat; it refreshes the remote archive with the latest state
+      # without causing side effects or configuration drift on the network device itself.
+      changed_when: true
 
-    - name: Verify backup operation success
-      # Observability: Assert that the device confirmed the byte transfer
+    - name: Assert Backup Success
+      # Observability: Programmatically verify that the device confirmed the transfer of bytes
+      # This ensures the task fails if the network connection drops mid-transfer
       ansible.builtin.assert:
         that:
-          - "'bytes copied' in tftp_result.stdout or 'OK' in tftp_result.stdout"
-        fail_msg: "TFTP transfer failed for {{ inventory_hostname }}. CLI Output: {{ tftp_result.stdout }}"
-        success_msg: "TFTP transfer verified for {{ inventory_hostname }}."
+          - "'bytes copied' in tftp_result.stdout"
+        fail_msg: "Integrity Check Failed: Device did not confirm successful byte transfer for {{ inventory_hostname }}."
+        success_msg: "Integrity Check Passed: Configuration successfully archived to {{ tftp_server }}."
 
-    - name: Display backup status
-      # Why: Provides visibility into the specific destination used during the run
+    - name: Log Archive Status
+      # Observability: Provide a clear audit trail in the Ansible console output for operators
       ansible.builtin.debug:
-        msg: "Backup of {{ inventory_hostname }} successfully uploaded to {{ tftp_server }} as {{ backup_filename }}"
+        msg: 
+          - "Backup Status: Verified"
+          - "Source: {{ inventory_hostname }}"
+          - "Destination: tftp://{{ tftp_server }}/{{ tftp_filename }}"
+```

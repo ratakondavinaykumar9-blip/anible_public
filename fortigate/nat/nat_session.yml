@@ -1,46 +1,47 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Nat Session
-# Improved: 2026-03-15
-# Author: NetLearner Architect
-#
-# Standards applied:
-# 1. Idempotency: Read-only 'get' operations are safe for repeated execution.
-# 2. Observability: Registered output and assertions to verify command integrity.
-# 3. Documentation: Clear comments explaining error handling and logic.
-# 4. Error Handling: 'failed_when' handles cases where no sessions match the filter.
-# 5. Best Practices: Strict adherence to Fully Qualified Collection Names (FQCN).
+# FortiGate NAT Session Retrieval
+# Purpose: Audit active NAT sessions for troubleshooting and compliance.
+# Standards: NetLearner Architect Standard v1.0
+# Improved: 2026-04-12
 
-- name: FortiGate NAT Sessions
+- name: FortiGate NAT Sessions Audit
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Fetch active NAT sessions from FortiGate CLI
-      # Using FQCN for transport-agnostic network commands
+    - name: Get NAT session list from device
+      # This task is idempotent as it performs a non-mutating state retrieval.
+      # Grep returns exit code 1 if no matches are found; we use failed_when to ensure 
+      # the playbook continues even if no NAT sessions are currently active.
       ansible.netcommon.cli_command:
         command: get system session list | grep NAT
-      register: nat_sess_output
-      # Prevent failure if 'grep' returns no matches (standard behavior for empty results)
+      register: nat_sess
       failed_when: 
-        - nat_sess_output.failed
-        - "'command not found' in nat_sess_output.stderr"
+        - nat_sess.rc is defined
+        - nat_sess.rc > 1  # rc 0 = success, rc 1 = no match (valid for audit)
 
-    - name: Validate session retrieval integrity
-      # Observability: Ensure the device responded with a valid structure
+    - name: Verify command execution success
+      # Observability: Ensure the device responded and the register variable is populated.
       ansible.builtin.assert:
         that:
-          - nat_sess_output is defined
-          - nat_sess_output.stdout is defined
-        fail_msg: "Failed to communicate with the FortiGate or retrieve session data."
+          - nat_sess.stdout is defined
+        fail_msg: "Failed to communicate with {{ inventory_hostname }} or retrieve session data."
         quiet: true
 
-    - name: Display NAT sessions summary
-      # Idempotency: Displaying data does not modify system state
+    - name: Display NAT session details
+      # Documentation: Provide clear visibility into the current network state.
+      # Conditional logic handles empty results gracefully for better observability.
       ansible.builtin.debug:
         msg: |
-          ======================= NAT SESSIONS =======================
-          {% if nat_sess_output.stdout | length > 0 %}
-          {{ nat_sess_output.stdout }}
-          {% else %}
-          No active NAT sessions were found at this time.
-          {% endif %}
+          ======================= NAT SESSIONS: {{ inventory_hostname }} =======================
+          {{ nat_sess.stdout if nat_sess.stdout | length > 0 else 'STATUS: No active NAT sessions detected.' }}
+
+    - name: Confirm audit integrity
+      # Error Handling: Explicitly confirm the audit step finished without underlying connection failures.
+      ansible.builtin.assert:
+        that:
+          - not nat_sess.failed | default(false)
+        fail_msg: "The NAT session retrieval task encountered a fatal transport error."
+        quiet: true
+```

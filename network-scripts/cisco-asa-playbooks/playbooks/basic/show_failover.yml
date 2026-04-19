@@ -1,55 +1,77 @@
----
-# Playbook: ASA Failover Status Monitoring
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
-
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect Improved Playbook
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
 - name: Get Failover Status
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Defines the output mode: 'text' (default) or 'json'
+    # Default output format to 'text' for human readability
     output_format: text
 
   tasks:
-    - name: Retrieve failover configuration and state
-      # FQCN: cisco.asa.asa_failover is used to manage and retrieve failover state.
-      # Documentation: This task queries the security appliance to populate failover-specific facts.
-      cisco.asa.asa_failover:
-      register: failover_output
-      # Error Handling: Allow the task to fail gracefully so the assertion can provide a custom error message.
-      ignore_errors: true
+    - name: Gather ASA failover facts
+      # Best Practice: Use Fully Qualified Collection Name (FQCN) 
+      # and cisco.asa.asa_facts for idempotent status gathering
+      cisco.asa.asa_facts:
+        gather_subset:
+          - failover
+      register: failover_facts_result
+      # Error Handling: Ensure the playbook fails gracefully if facts cannot be retrieved
+      ignore_errors: false
 
-    - name: Validate failover data retrieval success
-      # Observability: Explicitly checking that the module completed and returned expected data.
+    - name: Verify failover fact availability
+      # Observability: Assert that the expected facts were successfully injected
       ansible.builtin.assert:
         that:
-          - failover_output is defined
-          - failover_output.failed is false
-        fail_msg: "Failed to retrieve failover info from {{ inventory_hostname }}. Verify connectivity, credentials, and ASA state."
-        success_msg: "Failover data successfully retrieved for {{ inventory_hostname }}."
+          - ansible_facts.asa_failover is defined
+        fail_msg: "Critical: Failed to retrieve failover state for {{ inventory_hostname }}."
+        quiet: true
 
-    - name: Persist failover data to JSON artifact
-      # Idempotency: ansible.builtin.copy ensures the file state is maintained without redundant writes.
-      # Documentation: Saves the raw state for programmatic analysis or historical record-keeping.
+    - name: Display raw failover data for troubleshooting
+      # Observability: Visible only when running with -v for detailed debugging
+      ansible.builtin.debug:
+        var: ansible_facts.asa_failover
+        verbosity: 1
+
+    - name: Export failover status to JSON artifact
+      # Idempotency: The copy module ensures the file exists with exact content
+      # Documentation: Provides a machine-readable record for audit or external monitoring
       ansible.builtin.copy:
-        content: "{{ failover_output | to_nice_json }}"
+        content: "{{ ansible_facts.asa_failover | ansible.builtin.to_nice_json }}"
         dest: "/tmp/asa_failover_{{ inventory_hostname }}.json"
         mode: '0644'
       when: output_format | default('text') == 'json'
-      # Observability: Registered to track if the artifact was updated or created during this run.
-      register: json_export_result
 
-    - name: Display human-readable failover summary
-      # Documentation: Provides a clear, formatted status report for network administrators in the CLI output.
+    - name: Render human-readable operational report
+      # Observability: Providing a clear, professional summary of the device state
       ansible.builtin.debug:
         msg: |
-          ============================================================
-          FAILOVER REPORT: {{ inventory_hostname }}
-          ============================================================
-          {% if failover_output.ansible_facts is defined and failover_output.ansible_facts.asa_failover is defined %}
-          PRIMARY STATUS:   {{ failover_output.ansible_facts.asa_failover.primary | default('DATA MISSING') }}
-          SECONDARY STATUS: {{ failover_output.ansible_facts.asa_failover.secondary | default('DATA MISSING') }}
+          ==================================================
+          DEVICE: {{ inventory_hostname }}
+          REPORT: Failover Operational Status
+          ==================================================
+          {% if ansible_facts.asa_failover.enabled | default(false) %}
+          Status:       ENABLED
+          Role:         {{ ansible_facts.asa_failover.role | default('N/A') }}
+          Protocol:     {{ ansible_facts.asa_failover.mode | default('N/A') }}
+          --------------------------------------------------
+          Unit Details:
+            Primary Status:   {{ ansible_facts.asa_failover.primary.status | default('N/A') }}
+            Secondary Status: {{ ansible_facts.asa_failover.secondary.status | default('N/A') }}
           {% else %}
-          NOTICE: Failover is either not configured or could not be detected on this device.
+          Status:       DISABLED / STANDALONE
+          Note:         Failover is not configured on this unit.
           {% endif %}
-          ============================================================
+          ==================================================
       when: output_format | default('text') == 'text'
+
+    - name: Assert failover health (if enabled)
+      # Error Handling: Proactively alert if failover is enabled but in an unhealthy state
+      ansible.builtin.assert:
+        that:
+          - (ansible_facts.asa_failover.primary.status | default('') == 'Active') or 
+            (ansible_facts.asa_failover.secondary.status | default('') == 'Active')
+        fail_msg: "ALERT: Failover is ENABLED but no ACTIVE unit detected on {{ inventory_hostname }}!"
+      when: 
+        - ansible_facts.asa_failover.enabled | default(false)
+        - output_format | default('text') == 'text'

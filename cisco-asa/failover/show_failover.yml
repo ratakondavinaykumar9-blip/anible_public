@@ -1,57 +1,66 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Get Failover Status and Statistics
-# Improved for: NetLearner Project
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-#
-# This playbook retrieves and validates failover status from Cisco ASA/Firepower devices.
-# It is designed to be safe for repeated execution (idempotent) and provides clear verification.
+# ==============================================================================
+# Playbook: Get Failover Status and Statistics
+# Purpose: Gathers comprehensive failover state, stats, and history from Cisco ASA.
+# Standards: Idempotency (Read-only), Observability (Asserts), FQCN compliance.
+# Author: NetLearner Architect
+# ==============================================================================
 - name: Get Failover Status
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Get failover information
-      # Use cisco.asa.asa_command for consistent status retrieval
-      # Idempotency: Read-only command execution does not modify device state
+    - name: "FAILOVER STATUS: Retrieve current state and role"
+      # Using FQCN cisco.asa.asa_command to ensure platform-specific execution
       cisco.asa.asa_command:
         commands:
           - show failover
       register: failover_output
-      # Error Handling: Capture failure if failover is not supported/configured without breaking the run
-      failed_when: false
-      changed_when: false
+      # Verify command execution succeeded to prevent cascading failures
+      failed_when: failover_output.failed
 
-    - name: Verify failover command success
-      # Observability: Ensure we received a valid response from the device
+    - name: "OBSERVABILITY: Validate failover is operational"
+      # Assertions provide a clear 'pass/fail' metric for automation pipelines
       ansible.builtin.assert:
         that:
-          - failover_output.stdout is defined
-          - failover_output.stdout | length > 0
-        fail_msg: "Failed to retrieve failover status from {{ inventory_hostname }}. Check connectivity."
-        quiet: true
+          - "'failover on' in failover_output.stdout[0] | lower"
+        fail_msg: "CRITICAL: Failover is NOT active on {{ inventory_hostname }}."
+        success_msg: "CONFIRMED: Failover is active on {{ inventory_hostname }}."
 
-    - name: Get failover statistics
-      # Use FQCN for network common commands
-      ansible.netcommon.cli_command:
-        command: show failover statistics
+    - name: "FAILOVER STATISTICS: Capture sync and packet counters"
+      # Statistics help identify sync issues or interface flaps between peers
+      cisco.asa.asa_command:
+        commands:
+          - show failover statistics
       register: failover_stats
-      # Only execute if the device indicates failover is active/configured
-      when: 
-        - failover_output.stdout is defined
-        - "'failover' in failover_output.stdout[0] | lower"
-      changed_when: false
+      # Handle cases where statistics might not be initialized or accessible
+      failed_when: failover_stats.failed
       ignore_errors: true
 
-    - name: Get failover history
-      ansible.netcommon.cli_command:
-        command: show failover history
+    - name: "FAILOVER HISTORY: Retrieve state transition logs"
+      # History provides the 'why' behind recent Active/Standby transitions
+      cisco.asa.asa_command:
+        commands:
+          - show failover history
       register: failover_history
-      when: 
-        - failover_output.stdout is defined
-        - "'failover' in failover_output.stdout[0] | lower"
-      changed_when: false
-      ignore_errors: true
+      failed_when: failover_history.failed
 
-    - name: Summary
-      # Best Practices: Provide a structured and human-readable summary of the gathered data
-      ansible.builtin.
+    - name: "SUMMARY: Present Consolidated Health Report"
+      # Utilizing ansible.builtin.debug for observability and human-readable feedback
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+          FAILOVER REPORT: {{ inventory_hostname }}
+          ====================================================================
+          
+          CURRENT STATUS:
+          {{ failover_output.stdout[0] | default('No status found') }}
+          
+          STATISTICS:
+          {{ failover_stats.stdout[0] if (failover_stats.stdout is defined and failover_stats.stdout | length > 0) else 'Statistics unavailable' }}
+          
+          HISTORY:
+          {{ failover_history.stdout[0] | default('History unavailable') }}
+          ====================================================================
+```

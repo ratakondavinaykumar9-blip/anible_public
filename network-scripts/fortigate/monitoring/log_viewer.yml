@@ -1,44 +1,50 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 # FortiGate Log Viewer - Production Grade
-# This playbook retrieves and displays logs from a FortiGate firewall.
-# It adheres to NetLearner standards for idempotency, observability, and error handling.
-- name: FortiGate Log Retrieval and Analysis
+# This playbook retrieves recent logs from a FortiGate firewall for operational visibility.
+# It adheres to idempotency by performing read-only operations that do not alter device state.
+- name: View FortiOS Logs
   hosts: fortigate
   gather_facts: false
   vars:
-    # Default log type to retrieve (e.g., traffic, event, virus, webfilter).
+    # The category of logs to retrieve (e.g., traffic, event, virus, webfilter)
     log_type: "traffic"
-    # Number of log entries to display.
+    # The maximum number of log entries to display
     log_count: 50
 
   tasks:
-    - name: Retrieve logs from FortiGate CLI
-      # Using Fully Qualified Collection Name (FQCN) for network command execution.
-      ansible.netcommon.cli_command:
-        command: "execute log filter category {{ log_type }} && execute log display | head {{ log_count }}"
-      register: log_output
-      # Idempotency: Read-only operations should not report 'changed' status.
-      changed_when: false
-      # Error Handling: Fail if the command returns known FortiOS error strings.
-      failed_when:
-        - log_output.failed or "Command fail" in log_output.stdout or "Invalid" in log_output.stdout
-
-    - name: Validate log retrieval results
-      # Observability: Assert that we received a valid response from the device.
+    - name: "VALIDATION: Ensure input variables are correct"
       ansible.builtin.assert:
         that:
-          - log_output.stdout | length > 0
-        fail_msg: "Log retrieval failed or returned no data for category: {{ log_type }}"
-        success_msg: "Successfully retrieved logs for category: {{ log_type }}"
+          - log_type is string
+          - log_count | int > 0
+        fail_msg: "Invalid input: log_type must be a string and log_count must be a positive integer."
+        quiet: true
 
-    - name: Display formatted log output
-      # Providing a clear, documented output for the operator.
+    - name: "EXECUTION: Retrieve logs from FortiGate CLI"
+      # Using FQCN (Fully Qualified Collection Name) for consistent multi-environment support.
+      # Command combines log filtering and display in a single execution block.
+      ansible.netcommon.cli_command:
+        command: "execute log filter category {{ log_type }} && execute log display | head {{ log_count }}"
+      register: logs_result
+      # FortiOS CLI may return error strings in stdout without a non-zero exit code.
+      # We explicitly catch 'Command fail' and 'Invalid' to ensure playbook failure on errors.
+      failed_when:
+        - logs_result.failed or "Command fail" in logs_result.stdout or "Invalid" in logs_result.stdout
+
+    - name: "OBSERVABILITY: Verify that logs were successfully captured"
+      ansible.builtin.assert:
+        that:
+          - logs_result.stdout_lines | length > 0
+        fail_msg: "Observability Check: The command executed but no log entries were returned for '{{ log_type }}'."
+        quiet: true
+
+    - name: "OUTPUT: Display formatted logs"
       ansible.builtin.debug:
         msg: |
-          ==============================================================================
-          FORTIGATE LOG SUMMARY
-          Category: {{ log_type }}
-          Limit:    {{ log_count }} entries
-          ==============================================================================
-          {{ log_output.stdout }}
-          ==============================================================================
+          ======================= FORTIGATE {{ log_type | upper }} LOGS =======================
+          DEVICE: {{ inventory_hostname }}
+          -----------------------------------------------------------------------------------
+          {{ logs_result.stdout }}
+          ===================================================================================
+```

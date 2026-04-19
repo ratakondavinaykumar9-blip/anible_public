@@ -1,6 +1,11 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
+# ==============================================================================
 # IPSec Tunnel Troubleshooting Playbook
-# Improved for NetLearner Standards: Idempotency, Observability, and Error Handling.
+# Purpose: Diagnostic tool to identify failures in Phase 1 (IKE) or Phase 2 (IPsec)
+# Target: Cisco ASA / Firepower (ASA Engine)
+# Author: NetLearner Architect
+# ==============================================================================
 - name: Troubleshoot IPSec Tunnel
   hosts: asa_firepower
   gather_facts: false
@@ -8,87 +13,85 @@
     tunnel_peer: ""
 
   tasks:
-    - name: "VALIDATION: Ensure tunnel_peer variable is provided"
-      # Why: Prevents execution with empty variables which would lead to CLI syntax errors or ambiguous results.
+    - name: "VALIDATION: Ensure tunnel_peer is provided and valid"
+      # Why: Preventing command failures by validating input before execution
       ansible.builtin.assert:
         that:
           - tunnel_peer | length > 0
-        fail_msg: "ERROR: tunnel_peer variable is required. Usage: ansible-playbook troubleshoot.yml -e 'tunnel_peer=1.2.3.4'"
-        quiet: true
+        fail_msg: "CRITICAL: tunnel_peer variable is required. Example: -e 'tunnel_peer=1.2.3.4'"
+        success_msg: "Validated input for peer: {{ tunnel_peer }}"
 
-    - name: "IKEv1: Check IKEv1 Security Associations"
-      # Why: Verifies Phase 1 status. changed_when: false ensures idempotency reporting for read-only operations.
-      ansible.netcommon.cli_command:
-        command: "show crypto isakmp sa {{ tunnel_peer }}"
+    - name: "DIAGNOSTIC: Check IKEv1 Security Associations"
+      # Why: Verifies if Phase 1 negotiation completed using legacy IKEv1 protocol
+      cisco.asa.asa_command:
+        commands:
+          - "show crypto isakmp sa {{ tunnel_peer }}"
       register: ikev1
       ignore_errors: true
-      changed_when: false
 
-    - name: "IKEv2: Check IKEv2 Security Associations"
-      # Why: Verifies Phase 1 status for IKEv2. Essential for troubleshooting modern VPN deployments.
-      ansible.netcommon.cli_command:
-        command: "show crypto ikev2 sa {{ tunnel_peer }}"
+    - name: "DIAGNOSTIC: Check IKEv2 Security Associations"
+      # Why: Verifies if Phase 1 negotiation completed using modern IKEv2 protocol
+      cisco.asa.asa_command:
+        commands:
+          - "show crypto ikev2 sa {{ tunnel_peer }}"
       register: ikev2
       ignore_errors: true
-      changed_when: false
 
-    - name: "IPSEC: Check Phase 2 (IPsec) Security Associations"
-      # Why: Validates that Phase 2 is established and encryption/decryption (data plane) is occurring.
-      ansible.netcommon.cli_command:
-        command: "show crypto ipsec sa peer {{ tunnel_peer }}"
+    - name: "DIAGNOSTIC: Check IPsec (Phase 2) Security Associations"
+      # Why: Confirms if Data Plane (ESP) tunnels are established and passing traffic
+      cisco.asa.asa_command:
+        commands:
+          - "show crypto ipsec sa peer {{ tunnel_peer }}"
       register: ipsec
       ignore_errors: true
-      changed_when: false
 
-    - name: "SESSION: Check VPN Session Database"
-      # Why: Provides a consolidated view of the L2L session state, including duration and throughput.
-      ansible.netcommon.cli_command:
-        command: "show vpn-sessiondb l2l filter-ipaddress={{ tunnel_peer }}"
+    - name: "DIAGNOSTIC: Check VPN Session Database"
+      # Why: Provides a consolidated view of the L2L session lifetime and data counters
+      cisco.asa.asa_command:
+        commands:
+          - "show vpn-sessiondb l2l filter ipaddress {{ tunnel_peer }}"
       register: session
       ignore_errors: true
-      changed_when: false
 
-    - name: "LOGS: Check recent syslog entries for peer"
-      # Why: Filters logs specifically for the peer to identify handshake failures or policy mismatches.
-      ansible.netcommon.cli_command:
-        command: "show logging | include {{ tunnel_peer }} | last 20"
+    - name: "LOGGING: Capture recent relevant syslog errors"
+      # Why: Captures specific failure reasons (e.g., authentication failure, proxy-id mismatch)
+      cisco.asa.asa_command:
+        commands:
+          - "show logging | include {{ tunnel_peer }}|error | last 20"
       register: logs
       ignore_errors: true
-      changed_when: false
 
-    - name: "OBSERVABILITY: Verify successful diagnostic collection"
-      # Why: Confirms the playbook successfully communicated with the device and populated registers.
-      ansible.builtin.assert:
-        that:
-          - ikev1.stdout is defined
-          - ikev2.stdout is defined
-          - ipsec.stdout is defined
-        msg: "Diagnostic collection failed. Verify network connectivity, credentials, and 'ansible_network_os' setting."
+    - name: "OBSERVABILITY: Analyze Tunnel Health Facts"
+      # Why: Converts raw CLI output into actionable boolean logic for the summary
+      ansible.builtin.set_fact:
+        is_p1_up: >-
+          {{ 'AM_ACTIVE' in ikev1.stdout[0] or 
+             'READY' in ikev2.stdout[0] or 
+             'UP-ACTIVE' in ikev2.stdout[0] }}
+        is_p2_up: "{{ 'caps:' in ipsec.stdout[0] }}"
 
-    - name: "SUMMARY: Formatted Tunnel Status Report"
-      # Why: Aggregates technical data into an actionable, human-readable summary for rapid analysis.
+    - name: "SUMMARY: Final Diagnostic Report"
+      # Why: Provides a human-readable dashboard of the troubleshooting results
       ansible.builtin.debug:
         msg: |
-          ======================= TUNNEL STATUS: {{ tunnel_peer }} =======================
-          PHASE 1 (IKE) STATUS:
-          {% set ikev1_out = ikev1.stdout | default('') %}
-          {% set ikev2_out = ikev2.stdout | default('') %}
-          {% if 'AM_ACTIVE' in ikev1_out or 'UP-ACTIVE' in ikev2_out %}
-          ✅ IKE Phase 1: UP
-          {% else %}
-          ❌ IKE Phase 1: DOWN (Check credentials, pre-shared keys, or connectivity)
-          {% endif %}
+          ======================= TUNNEL DIAGNOSTICS =======================
+          PEER ADDRESS    : {{ tunnel_peer }}
+          IKE PHASE 1     : {{ '✅ UP' if is_p1_up else '❌ DOWN' }}
+          IPSEC PHASE 2   : {{ '✅ UP' if is_p2_up else '❌ DOWN' }}
+          ======================= DETAILED OUTPUT ==========================
+          [IKEv1]
+          {{ ikev1.stdout[0] | default('No IKEv1 SA found') }}
 
-          ======================= IKEv1 OUTPUT =======================
-          {{ ikev1.stdout | default('No IKEv1 SA found.') }}
+          [IKEv2]
+          {{ ikev2.stdout[0] | default('No IKEv2 SA found') }}
 
-          ======================= IKEv2 OUTPUT =======================
-          {{ ikev2.stdout | default('No IKEv2 SA found.') }}
+          [IPsec/Phase 2]
+          {{ ipsec.stdout[0] | default('No IPsec SA found') }}
 
-          ======================= IPSEC SA DETAILS =======================
-          {{ ipsec.stdout | default('No IPsec (Phase 2) SA found.') }}
+          [Session Stats]
+          {{ session.stdout[0] | default('No active session found') }}
 
-          ======================= VPN SESSION DB =======================
-          {{ session.stdout | default('No active session entry in database.') }}
-
-          ======================= RE
+          [Relevant Logs]
+          {{ logs.stdout[0] | default('No matching log entries found') }}
+...
+```

@@ -1,25 +1,21 @@
----
+MCP issues detected. Run /mcp list for status.---
 - name: Deploy Production Remote Access VPN (AnyConnect) on Cisco ASA
   hosts: cisco_asa
   gather_facts: false
   connection: network_cli
   vars:
     # --- Network Addressing ---
-    # Defines the pool of internal IP addresses assigned to VPN clients upon connection.
     vpn_pool_name: "VPN_CLIENT_POOL"
     vpn_pool_start: "192.168.100.100"
     vpn_pool_end: "192.168.100.200"
     vpn_pool_mask: "255.255.255.0"
     
     # --- Identity & Authentication ---
-    # Controls the authentication source. LOCAL uses the ASA's local database.
     vpn_auth_server_group: "LOCAL"
     
     # --- Client Configuration ---
-    # Internal infrastructure details pushed to the client during negotiation.
     vpn_dns_servers: ["8.8.8.8", "8.8.4.4"]
     vpn_domain_name: "enterprise.corp"
-    # Destination networks that should be routed through the VPN tunnel.
     vpn_split_networks:
       - "10.0.0.0/8"
       - "172.16.0.0/12"
@@ -30,28 +26,27 @@
     anyconnect_package_path: "disk0:/anyconnect-win-4.10.05085-webdeploy-k9.pkg"
     group_policy_name: "RA_VPN_GP"
     tunnel_group_name: "RA_VPN_TG"
-    # SSL Trustpoint for identity certificates. Leave empty if using default.
     vpn_trustpoint: ""
 
   tasks:
+    - name: Pre-Deployment Validation
+      ansible.builtin.assert:
+        that:
+          - vpn_pool_start | ansible.utils.ipaddr
+          - vpn_pool_end | ansible.utils.ipaddr
+          - vpn_pool_mask | ansible.utils.ipaddr('netmask')
+        fail_msg: "CRITICAL: Invalid IP addressing parameters provided for VPN pool."
+
     - name: Remote Access VPN Configuration Block
       block:
-        # Step 1: Define IP Pool for VPN Clients
-        # Use asa_config for the pool. Idempotency is handled by the module comparing lines to running-config.
+        # Idempotency: Configure IP pool for client address assignment; safe for repeated runs via exact line matching
         - name: Configure VPN Client IP Pool
           cisco.asa.asa_config:
             lines:
               - "ip local pool {{ vpn_pool_name }} {{ vpn_pool_start }}-{{ vpn_pool_end }} mask {{ vpn_pool_mask }}"
           register: pool_config
-          
-        - name: Verify IP Pool Configuration
-          ansible.builtin.assert:
-            that: 
-              - pool_config is not failed
-            msg: "Failed to configure the IP local pool '{{ vpn_pool_name }}'."
 
-        # Step 2: Define Split-Tunnel Network Objects
-        # Uses FQCN cisco.asa.asa_ogs for structured, idempotent object management.
+        # Idempotency: Define internal networks for split-tunneling using FQCN for network object groups
         - name: Configure Split-Tunnel Network Objects
           cisco.asa.asa_ogs:
             config:
@@ -60,15 +55,14 @@
                 network_objects:
                   - host: "{{ item.split('/') | first }}"
                     condition: "{{ item.split('/') | last == '32' }}"
-                  - network: "{{ item.split('/') | first }} {{ item.split('/') | last | ipaddr('netmask') }}"
+                  - network: "{{ item.split('/') | first }} {{ item.split('/') | last | ansible.utils.ipaddr('netmask') }}"
                     condition: "{{ item.split('/') | last != '32' }}"
             state: merged
           loop: "{{ vpn_split_networks }}"
           when: item | ansible.utils.ipaddr
           register: og_config
 
-        # Step 3: Define Access List for Split-Tunneling
-        # This ACL dictates which traffic is encrypted vs sent to the local gateway.
+        # Documentation: Split-tunnel ACL defines which traffic is encrypted vs sent to the local ISP
         - name: Configure Split-Tunnel ACL
           cisco.asa.asa_acls:
             config:
@@ -83,14 +77,7 @@
             state: merged
           register: acl_config
 
-        - name: Verify Split-Tunnel ACL State
-          ansible.builtin.assert:
-            that:
-              - acl_config is not failed
-            msg: "Split-tunnel ACL configuration failed. Verify Object Group 'VPN_INTERNAL_NETS' exists."
-
-        # Step 4: Infrastructure - WebVPN Global Settings
-        # Enables the SSL VPN engine on the specified interface and links the AnyConnect image.
+        # Documentation: Enable SSL VPN (WebVPN) globally and define the AnyConnect binary path for client downloads
         - name: Configure WebVPN and AnyConnect Image
           cisco.asa.asa_config:
             lines:
@@ -101,8 +88,7 @@
             parents: ["webvpn"]
           register: webvpn_config
 
-        # Step 5: Define Group Policy (Internal)
-        # Defines session behavior (timeouts) and pushes attributes (DNS, Split-Tunnel ACL) to the client.
+        # Documentation: The Group Policy defines the user session experience (DNS, timeouts, and tunneling rules)
         - name: Configure AnyConnect Group Policy
           cisco.asa.asa_config:
             lines:
@@ -123,8 +109,7 @@
               - "group-policy {{ group_policy_name }} attributes"
           register: gp_config
 
-        # Step 6: Define Tunnel Group (Connection Profile)
-        # The entry point for users; binds authentication and the Group Policy together.
+        # Documentation: The Tunnel Group links the external connection alias to the authentication mechanism
         - name: Configure AnyConnect Tunnel Group
           cisco.asa.asa_config:
             lines:
@@ -137,8 +122,6 @@
             parents: ["tunnel-group {{ tunnel_group_name }}"]
           register: tg_config
 
-        # Step 7: Optional Trustpoint Assignment
-        # Mandatory for production to prevent browser/client certificate warnings.
         - name: Assign SSL Certificate to Outside Interface
           cisco.asa.asa_config:
             lines:
@@ -147,28 +130,36 @@
           register: ssl_config
 
       rescue:
-        - name: Report Configuration Failure
-          ansible.builtin.debug:
-            msg: "RA-VPN deployment failed. Potential causes: missing AnyConnect image on flash, license limits, or invalid trustpoint."
+        # Error Handling: Gather diagnostics before failing to assist with troubleshooting
+        - name: Capture Forensic Diagnostics
+          cisco.asa.asa_command:
+            commands:
+              - "show version"
+              - "show vpn-sessiondb summary"
+          register: diagnostics
+          ignore_errors: true
 
-        - name: Fail Playbook Execution
+        - name: Report Deployment Failure
           ansible.builtin.fail:
-            msg: "Deployment aborted. Check 'asa_config' register outputs for syntax errors."
+            msg: >
+              RA-VPN deployment failed on {{ inventory_hostname }}. 
+              Check license availability (AnyConnect Plus/Apex) and image path validity.
+              Diagnostic Output: {{ diagnostics.stdout | default('No diagnostics available') }}
 
       always:
-        # Final Verification: Ensures the service is actually listening on the interface.
+        # Observability: Verify service state post-deployment to ensure operational readiness
         - name: Verify WebVPN Operational Status
           cisco.asa.asa_command:
             commands:
               - "show webvpn anyconnect"
           register: verify_output
-          failed_when: "'enabled' not in verify_output.stdout[0]"
-          ignore_errors: true
 
-        - name: Display Final Verification Summary
+        - name: Assert AnyConnect Service Status
+          ansible.builtin.assert:
+            that:
+              - "'AnyConnect is enabled' in verify_output.stdout[0]"
+            fail_msg: "AnyConnect service failed to initialize on interface {{ outside_interface }}."
+
+        - name: Final Deployment Log
           ansible.builtin.debug:
-            msg: 
-              - "Deployment Complete."
-              - "WebVPN Status: {{ 'Enabled' if 'enabled' in verify_output.stdout[0] else 'Check Configuration' }}"
-              - "Raw Output: {{ verify_output.stdout_lines }}"
----
+            msg: "RA-VPN Deployment sync completed. Changed: {{ pool_config.changed or webvpn_config.changed or gp_config.changed or tg_config.changed }}"

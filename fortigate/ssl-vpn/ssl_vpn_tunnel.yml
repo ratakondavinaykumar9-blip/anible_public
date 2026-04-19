@@ -1,46 +1,46 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate SSL VPN Tunnel Status
-# Improved for Production-Grade Automation by NetLearner Architect
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: Monitor SSL VPN Tunnels
+# FortiGate SSL VPN Tunnel Status Retrieval
+# Purpose: This playbook retrieves and validates the operational state of SSL VPN tunnels.
+# Standards Compliance: Idempotency, Observability, and Error Handling (NetLearner Staging 2026).
+
+- name: Retrieve and Verify SSL VPN Tunnel Status
   hosts: fortigate
   gather_facts: false
+  # connection: network_cli is assumed for cli_command usage
 
   tasks:
-    - name: Fetch active SSL VPN tunnel statistics
-      # Why: Retrieves live tunnel data for monitoring. 
-      # Idempotency: Read-only 'get' commands do not modify state, making them safe for repeated runs.
-      # FQCN: Using fully qualified collection name for portability and clarity.
+    - name: "FETCH: Execute 'get sslvpn tunnel' command"
+      # Use FQCN for consistent plugin resolution across different environments.
+      # This task captures the raw CLI output for parsing and validation.
       ansible.netcommon.cli_command:
-        command: "get sslvpn tunnel"
-      register: tunnel_output
-      # Error Handling: Explicitly catch FortiOS "Command fail" or "Unknown action" messages 
-      # that might not trigger a standard shell non-zero exit code.
-      failed_when:
-        - tunnel_output.failed or "Command fail" in tunnel_output.stdout or "Unknown action" in tunnel_output.stdout
+        command: get sslvpn tunnel
+      register: tunnel_status
+      # Error Handling: Ensure we fail explicitly if the command is unrecognized or the device is unreachable.
+      failed_when: 
+        - tunnel_status.failed 
+        - "unknown command" in tunnel_status.stdout | lower
+      # Idempotency: 'get' commands are safe to run repeatedly as they do not change the system state.
 
-    - name: Verify successful data capture
-      # Observability: Assert that the command returned a valid response object.
-      # This ensures downstream tasks don't fail on undefined variables.
+    - name: "ASSERT: Validate retrieval success and data integrity"
+      # Observability: Confirm the output is not null and contains expected metadata.
+      # This prevents silent failures in automation pipelines.
       ansible.builtin.assert:
         that:
-          - "tunnel_output.stdout is defined"
-        fail_msg: "The SSL VPN tunnel command failed to return valid data from {{ inventory_hostname }}."
-        quiet: true
+          - "tunnel_status.stdout is defined"
+          - "tunnel_status.rc == 0"
+        fail_msg: "Data retrieval failed for {{ inventory_hostname }}. Check connectivity or credentials."
+        success_msg: "Successfully validated SSL VPN tunnel data for {{ inventory_hostname }}."
 
-    - name: Display formatted SSL VPN tunnel report
-      # Documentation: Provides a structured view of the tunnel state for audit logs.
+    - name: "DISPLAY: Format and present tunnel information"
+      # Observability: Provides human-readable output for troubleshooting logs.
       ansible.builtin.debug:
         msg: |
-          ======================= SSL VPN TUNNEL SUMMARY =======================
-          Host: {{ inventory_hostname }}
-          Status: {{ 'Active Tunnels Found' if tunnel_output.stdout | length > 0 else 'No Active Tunnels' }}
-          
-          Raw Output:
-          {{ tunnel_output.stdout if tunnel_output.stdout | length > 0 else 'N/A' }}
-          ======================================================================
-
-    - name: Register tunnel status for external reporting
-      # Observability: Storing state for potential use in multi-play orchestration.
-      ansible.builtin.set_fact:
-        ssl_vpn_active: "{{ tunnel_output.stdout | length > 0 }}"
+          ==============================================================
+          SSL VPN TUNNEL REPORT
+          DEVICE: {{ inventory_hostname }}
+          STATUS: {{ 'DATA_FOUND' if tunnel_status.stdout | length > 0 else 'NO_ACTIVE_TUNNELS' }}
+          --------------------------------------------------------------
+          {{ tunnel_status.stdout }}
+          ==============================================================
+```

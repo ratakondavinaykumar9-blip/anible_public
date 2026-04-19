@@ -1,5 +1,5 @@
----
-- name: "Nexus 9000 Baseline Configuration"
+MCP issues detected. Run /mcp list for status.---
+- name: Nexus 9000 Global Configuration Compliance
   hosts: nexus_switches
   gather_facts: false
   vars:
@@ -47,7 +47,7 @@
           key: "{{ vault_radius_key }}"
           timeout: 10
 
-    # Standard Users
+    # Standard Users (remove default admin in production)
     default_users:
       - name: netadmin
         role: network-admin
@@ -77,155 +77,101 @@
     timezone: UTC
 
   tasks:
-    - name: "Observability | Ensure Local Backup Directory Exists"
-      delegate_to: localhost
-      ansible.builtin.file:
-        path: "{{ backup.path }}"
-        state: directory
-        mode: '0755'
-      register: backup_dir_check
-      # Why: Ensures destination for configuration captures is available on the control node.
-
-    - name: "Pre-Change | Backup Running Configuration"
-      cisco.nxos.nxos_config:
-        backup: yes
-        backup_options:
-          dir_path: "{{ backup.path }}"
-      when: backup.pre_change | bool
-      register: backup_result
-      # Why: Critical for rollback capability; creates a timestamped recovery point.
-
-    - name: "System | Configure Global Timezone"
-      cisco.nxos.nxos_timezone:
-        timezone: "{{ timezone }}"
-      register: tz_config
-      # Why: Standardizes timestamps across logs and certificate validation checks.
-
-    - name: "System | Configure NTP Servers"
-      cisco.nxos.nxos_ntp_global:
-        server: "{{ item }}"
-        state: present
-      loop: "{{ ntp_servers }}"
-      register: ntp_config
-      # Why: Prevents clock drift to ensure accurate forensic analysis and protocol stability.
-
-    - name: "System | Configure DNS Infrastructure"
+    - name: Ensure DNS Configuration is Present
       cisco.nxos.nxos_dns:
-        domain_name: "{{ dns_domain }}"
+        domain: "{{ dns_domain }}"
         servers:
           - "{{ dns_servers.primary }}"
           - "{{ dns_servers.secondary }}"
         state: present
       register: dns_config
-      # Why: Enables resolution for external services like Syslog, AAA, and licensing servers.
+      # Why: Critical for resolving central services like NTP and Syslog by FQDN.
 
-    - name: "Management | Configure SNMP Metadata"
-      block:
-        - name: "Management | Set SNMP Contact"
-          cisco.nxos.nxos_snmp_contact:
-            contact: "{{ snmp.contact }}"
-        - name: "Management | Set SNMP Location"
-          cisco.nxos.nxos_snmp_location:
-            location: "{{ snmp.location }}"
-      register: snmp_meta_result
-      # Why: Standardizes asset tracking information for Network Management Systems (NMS).
+    - name: Verify DNS Configuration
+      ansible.builtin.assert:
+        that:
+          - dns_config is not failed
+        msg: "DNS configuration failed. Verify connectivity to name servers."
 
-    - name: "Management | Configure SNMP Communities"
-      cisco.nxos.nxos_snmp_community:
-        community: "{{ item.name }}"
-        access: "{{ item.access }}"
+    - name: Configure NTP Servers for Time Synchronization
+      cisco.nxos.nxos_ntp_servers:
+        server: "{{ item }}"
         state: present
-      loop:
-        - { name: "{{ snmp.community_ro }}", access: ro }
-        - { name: "{{ snmp.community_rw }}", access: rw }
-      register: snmp_comm_result
-      # Why: Defines secure read/write access strings for polling.
+      loop: "{{ ntp_servers }}"
+      register: ntp_config
+      # Why: Ensures consistent timestamps across the fleet for security audit trails.
 
-    - name: "Management | Configure SNMP Trap Hosts"
-      cisco.nxos.nxos_snmp_host:
-        snmp_host: "{{ item }}"
-        version: 2c
-        community: "{{ snmp.community_ro }}"
-        state: present
-      loop: "{{ snmp.traps }}"
-      register: snmp_trap_result
-      # Why: Enables proactive alerting for hardware and protocol events.
+    - name: Configure Global SNMP Properties
+      cisco.nxos.nxos_snmp:
+        contact: "{{ snmp.contact }}"
+        location: "{{ snmp.location }}"
+      register: snmp_global
+      # Why: Essential for asset tracking and incident response metadata.
 
-    - name: "Management | Configure Remote Syslog Servers"
+    - name: Configure External Syslog Servers
       cisco.nxos.nxos_logging:
         dest: server
         name: "{{ item }}"
         state: present
       loop: "{{ syslog_servers }}"
-      register: syslog_result
-      # Why: Centralizes logging for security compliance and audit trails.
+      register: syslog_config
+      # Why: Externalizing logs is a production requirement for security compliance.
 
-    - name: "Security | Configure AAA Server Hosts"
-      block:
-        - name: "Security | TACACS+ Infrastructure"
-          cisco.nxos.nxos_aaa_server_host:
-            server_type: tacacs
-            address: "{{ item.host }}"
-            key: "{{ item.key }}"
-            timeout: "{{ item.timeout }}"
-            state: present
-          loop: "{{ aaa_servers.tacacs }}"
-          no_log: true
-        - name: "Security | RADIUS Infrastructure"
-          cisco.nxos.nxos_aaa_server_host:
-            server_type: radius
-            address: "{{ item.host }}"
-            key: "{{ item.key }}"
-            timeout: "{{ item.timeout }}"
-            state: present
-          loop: "{{ aaa_servers.radius }}"
-          no_log: true
-      register: aaa_host_result
-      # Why: Offloads authentication to centralized identity stores like Cisco ISE or ClearPass.
-
-    - name: "Security | Configure Local Administrative Users"
+    - name: Provision Standard Administrative Users
       cisco.nxos.nxos_user:
         name: "{{ item.name }}"
         role: "{{ item.role }}"
         sshkey: "{{ item.sshkey }}"
         state: present
       loop: "{{ default_users }}"
-      register: user_result
-      # Why: Ensures authorized administrators have fallback access via SSH keys.
+      register: user_provisioning
+      # Why: Enforces RBAC and uses SSH keys to eliminate password-based vulnerabilities.
 
-    - name: "Security | Configure Legal Banners"
+    - name: Verify User Creation
+      ansible.builtin.assert:
+        that:
+          - user_provisioning is successful
+        msg: "User creation failed. Ensure SSH keys are correctly vaulted."
+
+    - name: Configure Legal Banners (MOTD/Login)
       cisco.nxos.nxos_banner:
         banner: "{{ item.key }}"
         text: "{{ item.value }}"
         state: present
       loop: "{{ banners | dict2items }}"
-      register: banner_result
-      # Why: Compliance requirement to warn against unauthorized system access.
+      register: banner_config
+      # Why: Notifies unauthorized users of monitoring policies for legal protection.
 
-    - name: "Network | Configure Management VLAN"
-      cisco.nxos.nxos_vlans:
-        vlan_id: "{{ mgmt_vlan }}"
-        name: "MANAGEMENT_VLAN"
+    - name: Configure AAA TACACS+ Servers
+      cisco.nxos.nxos_aaa_server:
+        server_type: tacacs
+        address: "{{ item.host }}"
+        key: "{{ item.key }}"
+        timeout: "{{ item.timeout }}"
         state: present
-      register: vlan_result
-      # Why: Segregates out-of-band management traffic from data plane interfaces.
+      loop: "{{ aaa_servers.tacacs }}"
+      register: aaa_config
+      # Why: Centralized authentication ensures unified access control across the network.
 
-    - name: "Network | Configure Default Gateway (Management VRF)"
-      cisco.nxos.nxos_static_route:
-        prefix: 0.0.0.0/0
-        next_hop: "{{ default_gateway }}"
-        vrf: management
-      register: route_result
-      failed_when: false
-      # Why: Ensures the management interface can reach off-subnet collectors.
+    - name: Configure Global Timezone
+      cisco.nxos.nxos_config:
+        lines:
+          - "clock timezone {{ timezone }} 0 0"
+      register: timezone_config
+      # Why: Synchronizes local time display with global operations standards.
 
-    - name: "Observability | Final Validation of Baseline State"
+    - name: Perform Final Configuration Backup
+      cisco.nxos.nxos_config:
+        backup: "{{ backup.pre_change }}"
+        backup_options:
+          filename: "{{ inventory_hostname }}_prod_global.txt"
+          dir_path: "{{ backup.path }}"
+      when: backup.pre_change | bool
+      register: backup_status
+      # Why: Provides a known-good recovery point immediately after applying changes.
+
+    - name: Validate Deployment Success
       ansible.builtin.assert:
         that:
-          - tz_config is not failed
-          - ntp_config is not failed
-          - dns_config is not failed
-          - aaa_host_result is not failed
-          - user_result is not failed
-        msg: "Baseline configuration failed validation. Check individual task registration for details."
-      # Why: Guarantees that the switch has reached the desired production state.
+          - not backup_status.failed | default(false)
+        msg: "Deployment completed but backup failed. Verify write permissions on {{ backup.path }}."

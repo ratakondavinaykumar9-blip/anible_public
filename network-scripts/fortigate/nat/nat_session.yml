@@ -1,33 +1,44 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate NAT Sessions Analysis
-# This playbook retrieves operational data from FortiGate devices using best practices.
-# It is designed to be safe, observable, and maintainable.
-
-- name: Get FortiGate NAT Sessions
+# FortiGate NAT Session Inspection Playbook
+# Designed by NetLearner Architect for high-reliability network automation.
+# Standards: Idempotency, Observability, and Robust Error Handling.
+- name: FortiGate NAT Session Monitoring
   hosts: fortigate
-  gather_facts: false # Operational tasks do not require host facts; disabled for efficiency
+  gather_facts: false
 
   tasks:
-    - name: Retrieve NAT session list via CLI
-      # Use Fully Qualified Collection Names (FQCN) for all tasks to ensure consistency
+    - name: Retrieve active NAT sessions from the system table
+      # Why: Performs a read-only inspection of the session table.
+      # Filtering for 'NAT' flag ensures only translated traffic is captured.
+      # cli_command is idempotent as it does not modify the device configuration.
       ansible.netcommon.cli_command:
         command: "get system session list | grep NAT"
-      register: nat_sess
-      # Idempotency: This is a read-only 'get' operation, inherently safe for repeated execution
-      # Error Handling: Use ignore_errors because grep returns a non-zero exit code if no matches are found
-      ignore_errors: true
+      register: nat_sess_output
+      # Error Handling: A non-zero return code from 'grep' (no matches found) is 
+      # treated as a valid operational state rather than a playbook failure.
+      failed_when: 
+        - nat_sess_output.failed
+        - "'Command fail' in nat_sess_output.stdout or 'Error' in nat_sess_output.stdout"
 
-    - name: Verify successful execution
-      # Observability: Ensure that the task produced a valid stdout response despite ignore_errors
+    - name: Verify data integrity of the session capture
+      # Observability: Confirms the register variable is populated correctly before processing.
+      # This prevents downstream failures if the device response is malformed.
       ansible.builtin.assert:
         that:
-          - "nat_sess.stdout is defined"
-        fail_msg: "Could not retrieve sessions. Verify device connectivity, SSH status, and permissions."
-        quiet: true
+          - nat_sess_output.stdout is defined
+        fail_msg: "Collection Failure: Output from {{ inventory_hostname }} is invalid or missing."
+        success_msg: "Data successfully collected from {{ inventory_hostname }}."
 
-    - name: Display NAT session information
-      # Result visualization: Provides formatted output and handles empty tables gracefully
+    - name: Structured Display of NAT Translation Table
+      # Documentation: Outputs the session table in a formatted block for operator visibility.
+      # Provides a clear message if no sessions are currently active.
       ansible.builtin.debug:
         msg: |
           ======================= NAT SESSIONS =======================
-          {{ nat_sess.stdout if nat_sess.stdout | length > 0 else 'No active NAT sessions found.' }}
+          DEVICE: {{ inventory_hostname }}
+          STATUS: {{ 'SESSIONS DETECTED' if nat_sess_output.stdout | length > 0 else 'EMPTY TABLE' }}
+          ------------------------------------------------------------
+          {{ nat_sess_output.stdout if nat_sess_output.stdout | length > 0 else 'No active NAT sessions detected.' }}
+          ============================================================
+```

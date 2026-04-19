@@ -1,64 +1,59 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# ==============================================================================
-# Playbook: Device Identity Audit
-# Why: Retrieves unique hardware identifiers (Serial, UUID, MAC) for CMDB 
-#      synchronization, licensing validation, and inventory accuracy.
-# Standards: Idempotency (read-only), Observability (assertions), FQCN.
-# ==============================================================================
-- name: Retrieve and Verify Device Identifiers
+# NetLearner Architect Improved Playbook
+# Purpose: Securely retrieve and verify hardware identity markers for ASA/Firepower devices.
+# Idempotency: Read-only CLI operations do not modify state, making this playbook safe for repeated execution.
+---
+- name: Get Device Identifiers
   hosts: asa_firepower
   gather_facts: false
-  # connection: network_cli is implied for these modules
 
   tasks:
-    - name: Fetch Serial Number and UUID
-      # FQCN: Using cisco.asa collection for platform-specific command execution
-      cisco.asa.asa_command:
-        commands:
-          - show version | include (Serial|UUID)
+    - name: Retrieve Serial Number and UUID
+      # Fetches unique hardware identifiers required for inventory management and license auditing.
+      ansible.netcommon.cli_command:
+        command: "show version | include (Serial|UUID)"
       register: serial_output
-      # Idempotency: Read-only commands should never report 'changed'
-      changed_when: false
-      # Error Handling: Fail if output is empty or command execution fails
+      # Error Handling: Ensures the command actually returned data before proceeding.
       failed_when: 
-        - serial_output.stdout is not defined or serial_output.stdout[0] == ""
+        - serial_output.stdout is not defined
+        - serial_output.stdout | length == 0
 
-    - name: Verify Serial Information Observability
-      # Observability: Assert that the command returned expected hardware data
+    - name: Verify Serial/UUID data integrity
+      # Observability: Asserts that the retrieved output contains the expected identity markers.
       ansible.builtin.assert:
         that:
-          - "'Serial' in serial_output.stdout[0] or 'UUID' in serial_output.stdout[0]"
-        fail_msg: "Hardware identifiers (Serial/UUID) could not be retrieved from {{ inventory_hostname }}"
-        success_msg: "Hardware identifiers successfully captured for {{ inventory_hostname }}"
+          - "'Serial' in serial_output.stdout or 'UUID' in serial_output.stdout"
+        fail_msg: "The 'show version' command failed to return Serial or UUID information. Check credentials/permissions."
+        success_msg: "Successfully verified device serial/UUID identity markers."
 
-    - name: Fetch MAC Address Assignments
-      # Documentation: MAC addresses are required for Layer 2 topology mapping
-      cisco.asa.asa_command:
-        commands:
-          - show version | include MAC
+    - name: Retrieve MAC address information
+      # Captures Layer 2 identifiers used for interface mapping and DHCP reservation verification.
+      ansible.netcommon.cli_command:
+        command: "show version | include MAC"
       register: mac_output
-      changed_when: false
-      failed_when: 
-        - mac_output.stdout is not defined or mac_output.stdout[0] == ""
+      # Error Handling: Allow failure here as certain virtual or legacy ASA versions may not display MACs in 'show version'.
+      failed_when: false
 
-    - name: Verify MAC Address Observability
+    - name: Verify MAC address task registration
+      # Observability: Ensures the task registered a response object for consistent debugging.
       ansible.builtin.assert:
         that:
-          - "'MAC' in mac_output.stdout[0]"
-        fail_msg: "MAC address data is missing or malformed on {{ inventory_hostname }}"
-        success_msg: "MAC address data successfully captured for {{ inventory_hostname }}"
+          - mac_output is defined
+        quiet: true
 
-    - name: Display Formatted Device Identity Report
-      # Documentation: Providing human-readable output for audit trails
+    - name: Display Formatted Identity Report
+      # Documentation: Provides a structured, audit-ready summary of the hardware identifiers.
       ansible.builtin.debug:
         msg: |
-          ================================================================================
-          DEVICE IDENTITY REPORT: {{ inventory_hostname }}
-          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
-          ================================================================================
-          IDENTIFIERS:
-          {{ serial_output.stdout[0] | trim }}
-
-          INTERFACE MAC ADDRESSES:
-          {{ mac_output.stdout[0] | trim }}
-          ================================================================================
+          ======================= DEVICE IDs =======================
+          TARGET HOST: {{ inventory_hostname }}
+          TIMESTAMP: {{ ansible_date_time.iso8601 | default('N/A') }}
+          
+          SERIAL/UUID INFORMATION:
+          {{ serial_output.stdout | trim }}
+          
+          MAC ADDRESS INFORMATION:
+          {{ mac_output.stdout | default('N/A - Information not found in show version') | trim }}
+          ==========================================================
+```

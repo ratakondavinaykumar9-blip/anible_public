@@ -1,32 +1,39 @@
+MCP issues detected. Run /mcp list for status.---
+# Interface Status
+# Auto-improved: 2026-04-12 18:30
+# Author: Arjun (OpenClaw)
+# Modified by: NetLearner Architect
+#
 ---
-# FortiGate Interface Status - Standardized for Production
-# This playbook retrieves low-level hardware NIC information from a FortiGate device.
-# Idempotency: The 'diagnose' command is read-only, making this playbook safe for repeated execution.
-- name: Get Interface Status
+# FortiGate Interface Status
+- name: Get FortiGate Interface Hardware Status
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Facts are not required for this low-level diagnostic command.
 
   tasks:
     - name: Execute hardware NIC diagnostic command
-      # FQCN: Using the standard netcommon collection for CLI-based status retrieval
+      # FQCN: Using the standard netcommon collection for CLI-based status retrieval.
+      # Idempotency: Read-only 'diagnose' commands are safe for repeated execution across environments.
       ansible.netcommon.cli_command:
         command: diagnose hardware deviceinfo nic
       register: interface_status
-      # Error Handling: Ensure we fail if the command is unrecognized or execution fails
+      # Error Handling: Ensure we fail if the command is unrecognized or execution fails on the device.
       failed_when: 
         - interface_status.failed or "Command fail" in interface_status.stdout or "Unknown action" in interface_status.stdout
 
     - name: Verify interface data integrity
-      # Observability: Use assert to validate that the device returned meaningful data
+      # Observability: Use assert to validate that the device returned meaningful data.
+      # This prevents silent failures where the command runs but returns no output.
       ansible.builtin.assert:
         that:
           - "interface_status.stdout is defined"
           - "interface_status.stdout | length > 0"
         fail_msg: "Diagnostic output is empty. Verify connectivity and administrative privileges."
+        success_msg: "Interface status successfully retrieved and verified."
         quiet: true
 
     - name: Display formatted Interface Status
-      # Documentation: Present the captured hardware state in a readable format
+      # Documentation: Present the captured hardware state in a readable format for the operator.
       ansible.builtin.debug:
         msg: |
           ======================= INTERFACE STATUS =======================

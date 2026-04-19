@@ -1,36 +1,43 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate RIP Status (Improved)
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-# Target: Retrieve and verify RIP routing table information from FortiGate devices.
-
-- name: FortiGate RIP Status
+# FortiGate RIP Status - Enhanced Production Version
+# Standards Applied: Idempotency, Observability, FQCN, Error Handling
+# Author: NetLearner Architect
+#
+- name: Retrieve and Validate FortiGate RIP Routing Status
   hosts: fortigate
   gather_facts: false
-  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve RIP routing information
-      # FQCN: ansible.netcommon.cli_command is used for direct CLI interaction.
-      # Idempotency: This is a read-only operation and does not change state.
+    - name: Execute RIP status command on FortiOS CLI
+      # Using FQCN for portable execution; changed_when: false ensures idempotency reporting for read-only tasks
       ansible.netcommon.cli_command:
         command: get router info rip
       register: rip_output
-      # Error Handling: Fail if the command explicitly returns an error message or if the task fails.
-      failed_when: 
-        - rip_output.failed or "Unknown action" in rip_output.stdout or "Command fail" in rip_output.stdout
+      changed_when: false
+      # Error Handling: Catch specific FortiOS CLI error strings that might not trigger a non-zero exit code
+      failed_when:
+        - rip_output.stdout is not defined
+        - "'Command fail' in rip_output.stdout"
+        - "'parse error' in rip_output.stdout"
 
-    - name: Verify RIP status data integrity
-      # Observability: Assert that the command returned valid, non-empty output.
+    - name: Verify RIP status output integrity
+      # Observability: Assert that the command returned meaningful data before proceeding
       ansible.builtin.assert:
         that:
-          - rip_output.stdout is defined
           - rip_output.stdout | length > 0
-        fail_msg: "The RIP status output was empty or could not be retrieved."
-        success_msg: "RIP status data successfully captured."
+          - "'Codes:' in rip_output.stdout or 'RIP' in rip_output.stdout"
+        fail_msg: "RIP Status command returned invalid or empty response. Ensure RIP is configured and enabled."
+        success_msg: "RIP status successfully retrieved and validated for {{ inventory_hostname }}."
 
-    - name: Display RIP routing table
-      # Documentation: Providing a clean, formatted output for the network operator.
+    - name: Display Formatted RIP Routing Information
+      # Documentation: Providing a clear, structured view for operational observability
       ansible.builtin.debug:
         msg: |
           ==========================================================
-          FORTIG
+          DEVICE: {{ inventory_hostname }}
+          SERVICE: RIP Routing Table
+          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          ==========================================================
+          {{ rip_output.stdout }}
+```

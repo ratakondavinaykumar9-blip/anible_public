@@ -1,35 +1,36 @@
----
+MCP issues detected. Run /mcp list for status.---
 # Logging Configuration Audit
-# Purpose: Retrieves and verifies the logging status on ASA/Firepower devices.
-# This operation is inherently idempotent as it performs no state changes.
-
-- name: Get Logging Config
+# Purpose: Safely retrieve and validate logging state on ASA/Firepower devices.
+# Standards: Idempotency (Read-only), Observability (Assert), Error Handling (Failed_when), FQCN.
+- name: Retrieve and Validate Logging Configuration
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute 'show logging' command on the target device
-      # Using FQCN for consistent cross-platform execution.
+    - name: "Retrieve current logging configuration"
+      # Why: Fetches active logging setup to ensure operational visibility and compliance.
+      # Using FQCN for consistency and future-proofing.
       ansible.netcommon.cli_command:
         command: show logging
-      register: logging_result
-      # Error Handling: Define failure conditions to prevent silent failures on empty or invalid returns.
+      register: logging_config
+      # Error Handling: Ensure we fail if the output is undefined or contains error markers.
       failed_when:
-        - logging_result.stdout == ""
-        - "'Invalid input' in logging_result.stdout"
+        - logging_config.stdout is not defined
+        - "'invalid' in logging_config.stdout | lower"
 
-    - name: Verify logging output integrity
-      # Observability: Assert that the output contains expected markers to ensure the command returned actual data.
+    - name: "Verify logging data integrity"
+      # Observability: Assert ensures the captured output is not empty and contains valid data.
+      # This provides a guardrail against processing empty buffers in downstream automation.
       ansible.builtin.assert:
         that:
-          - "logging_result.stdout is defined"
-          - "'logging' in logging_result.stdout.lower()"
-        fail_msg: "Retrieved logging configuration appears invalid or incomplete for {{ inventory_hostname }}."
-        success_msg: "Logging configuration verified for {{ inventory_hostname }}."
+          - "logging_config.stdout | length > 0"
+          - "'logging' in logging_config.stdout"
+        fail_msg: "Logging configuration for {{ inventory_hostname }} could not be retrieved or is empty."
+        success_msg: "Logging configuration for {{ inventory_hostname }} successfully validated."
 
-    - name: Display retrieved logging configuration
-      # Observability: Provide formatted output for auditing and manual verification.
+    - name: "Display logging configuration for audit"
+      # Why: Provides human-readable observability for the NetLearner Architect review.
       ansible.builtin.debug:
         msg: |
-          ======================= LOGGING CONFIGURATION: {{ inventory_hostname }} =======================
-          {{ logging_result.stdout }}
+          ======================= LOGGING AUDIT: {{ inventory_hostname }} =======================
+          {{ logging_config.stdout }}

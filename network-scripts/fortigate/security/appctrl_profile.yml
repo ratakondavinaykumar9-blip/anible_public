@@ -1,36 +1,37 @@
----
-# FortiGate Application Control Profile Audit
-# Purpose: This playbook retrieves and validates the Application Control profiles 
-# from the FortiGate firewall to ensure configuration visibility and state audit.
-- name: Get App Control Profile
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Application Control Profile Status Audit
+# Purpose: Retrieves the current configuration state of Application Control profiles.
+# This ensures visibility into the security posture without modifying the device state (Idempotent).
+- name: Audit FortiGate Application Control
   hosts: fortigate
-  gather_facts: false # Optimization: Disabling fact gathering as it is not required for CLI command execution.
+  gather_facts: false # Facts disabled for performance; connection is verified via cli_command
 
   tasks:
-    - name: Retrieve application control profiles via CLI
-      # FQCN: Using the fully qualified collection name for clarity and consistency.
-      # Idempotency: This task is read-only; running it multiple times will not change the device state.
+    - name: Retrieve application control configuration via CLI
+      # Using FQCN for cross-platform network automation standards
       ansible.netcommon.cli_command:
-        command: "get firewall appctrl-list"
-      register: app_control_res
-      # Error Handling: Explicitly check for non-zero return codes or common failure strings.
-      failed_when:
-        - app_control_res.rc != 0
-        - "'Unknown command' in app_control_res.stdout"
-        - "'Command fail' in app_control_res.stdout"
+        command: get firewall appctrl
+      register: app_result
+      # Error Handling: Ensure the task fails if the device returns an error string or fails to respond
+      failed_when: 
+        - app_result.failed or "Unknown action" in app_result.stdout
+      ignore_errors: false
 
-    - name: Validate application control data integrity
-      # Observability: Using assertions to verify that the retrieved output is not empty.
+    - name: Validate data observability and integrity
+      # Observability: Verify that the device returned a non-empty configuration set
       ansible.builtin.assert:
         that:
-          - app_control_res.stdout is defined
-          - app_control_res.stdout | length > 0
-        fail_msg: "Failed to retrieve application control profiles or the configuration is empty."
-        success_msg: "Successfully retrieved and validated application control configuration."
+          - app_result.stdout is defined
+          - app_result.stdout | length > 0
+        fail_msg: "Failed to retrieve valid Application Control data from {{ inventory_hostname }}."
+        success_msg: "Successfully retrieved Application Control data from {{ inventory_hostname }}."
 
-    - name: Display Application Control Profiles
-      # Documentation: Providing a clean, formatted view of the retrieved operational state.
+    - name: Log Application Control state for architectural review
+      # Documentation: Providing a clear, formatted output of the current security state
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE APP CONTROL =======================
-          {{ app_control_res.stdout }}
+          ======================= APP CONTROL AUDIT =======================
+          Device: {{ inventory_hostname }}
+          Status: Success
+          Config Output:
+          {{ app_result.stdout }}

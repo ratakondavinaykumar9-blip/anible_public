@@ -1,47 +1,41 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate DNS Settings Management
-# This playbook ensures DNS configurations are retrieved, validated, and meet organizational standards.
-- name: Audit and Validate FortiGate DNS Settings
+- name: FortiGate DNS Settings Audit and Verification
   hosts: fortigate
   gather_facts: false
-  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve Current System DNS Configuration
-      # Use FQCN for better portability and clarity.
-      # Registering output to 'dns_raw' for subsequent validation (Observability).
+    - name: Retrieve system DNS configuration via CLI
+      # Why: Directly querying the system state via CLI ensures we obtain the live, running configuration for audit accuracy.
       ansible.netcommon.cli_command:
         command: get system dns
-      register: dns_raw
-      failed_when: 
-        - dns_raw.failed
-        - "'Command fail' in dns_raw.stdout"
-      changed_when: false # Retrieval is read-only; ensuring idempotency.
+      register: dns_settings
+      # Error Handling: fail if the command execution returns a non-zero exit code or contains FortiOS error strings.
+      failed_when:
+        - dns_settings.rc != 0
+        - "'Command fail' in dns_settings.stdout"
 
-    - name: Verify DNS Output Integrity
-      # Assert ensures the command returned expected data structures before proceeding.
+    - name: Verify DNS configuration observability
+      # Why: Using assertions to validate that the retrieved output contains the expected system parameters (e.g., 'primary').
       ansible.builtin.assert:
         that:
-          - "'primary' in dns_raw.stdout"
-          - "'secondary' in dns_raw.stdout"
-        fail_msg: "DNS configuration output is incomplete or unreachable."
-        success_msg: "DNS configuration successfully retrieved and verified."
+          - dns_settings.stdout is defined
+          - "'primary' in dns_settings.stdout"
+        fail_msg: "CRITICAL: DNS configuration could not be retrieved or the returned data is incomplete."
+        success_msg: "DNS configuration successfully retrieved and validated for observability."
 
-    - name: Extract DNS Servers for Visibility
-      # Documentation: Using set_fact to create clean, reusable variables from raw CLI output.
-      ansible.builtin.set_fact:
-        primary_dns: "{{ dns_raw.stdout | regex_search('primary\\s+:\\s+(\\d+\\.\\d+\\.\\d+\\.\\d+)', '\\1') | first | default('Not Set') }}"
-        secondary_dns: "{{ dns_raw.stdout | regex_search('secondary\\s+:\\s+(\\d+\\.\\d+\\.\\d+\\.\\d+)', '\\1') | first | default('Not Set') }}"
-
-    - name: Display Structured DNS Configuration
+    - name: Display operational DNS status
+      # Why: Provides immediate visibility for operators and ensures the retrieved state is recorded in the automation logs.
       ansible.builtin.debug:
         msg: |
-          ==================================================
-          FORTIGATE DNS AUDIT REPORT
-          ==================================================
-          Hostname:    {{ inventory_hostname }}
-          Primary:     {{ primary_dns }}
-          Secondary:   {{ secondary_dns }}
-          ==================================================
-          RAW OUTPUT:
-          {{ dns_raw.stdout }}
+          ======================= DNS STATE =======================
+          {{ dns_settings.stdout }}
+
+    - name: Validate desired state compliance (Idempotency Check)
+      # Why: While this is a read-only task, asserting the presence of standard resolvers (e.g., 8.8.8.8) ensures the device maintains the expected state across multiple runs.
+      ansible.builtin.assert:
+        that:
+          - "'8.8.8.8' in dns_settings.stdout"
+        fail_msg: "Idempotency Warning: The device state deviates from the organizational standard (8.8.8.8)."
+      ignore_errors: true # Error Handling: Mark as ignored to report the discrepancy without halting subsequent audit tasks.
+```

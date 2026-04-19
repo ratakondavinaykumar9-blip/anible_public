@@ -1,79 +1,91 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 # Backup ASA Configuration
-# Improved for: Idempotency, Observability, and Error Handling
-# Standards: FQCN usage, Assertions, and Contextual Documentation
-- name: Backup Cisco ASA Configuration
+# NetLearner Architect Improved Version
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+- name: Backup ASA Configuration
   hosts: asa_firepower
   gather_facts: no
   vars:
-    # Defined directory for local backup storage on the control node
-    backup_path: "/tmp/asa_backups"
-    # ISO8601 timestamp for unique file naming across multiple runs
-    timestamp: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
-    backup_name: "{{ inventory_hostname }}_{{ timestamp }}"
+    # Define the local directory on the Ansible controller for centralized storage
+    backup_root: "/tmp/asa_backups"
 
   tasks:
-    - name: "FACTS: Generate timestamp if not provided"
-      ansible.builtin.set_fact:
-        run_timestamp: "{{ timestamp }}"
-      run_once: true
+    - name: Collect timestamp facts from controller
+      # Why: Populate ansible_date_time for unique backup filenames using controller time
+      ansible.builtin.setup:
+        filter: "ansible_date_time"
+      delegate_to: localhost
 
-    - name: "DIR: Ensure backup directory exists on control node"
+    - name: Set backup filename variables
+      # Why: Consolidate naming logic after facts are gathered to ensure variable availability
+      ansible.builtin.set_fact:
+        backup_name: "{{ inventory_hostname }}_{{ ansible_date_time.iso8601 | regex_replace(':', '-') }}"
+
+    - name: Ensure backup directory exists on controller
+      # Why: Idempotent task ensuring the destination path is available before writing
       ansible.builtin.file:
-        path: "{{ backup_path }}"
+        path: "{{ backup_root }}"
         state: directory
         mode: '0755'
-      delegate_to: localhost
       run_once: true
+      delegate_to: localhost
+      register: dir_creation
 
-    - name: "ASA: Retrieve running-config from device"
+    - name: Verify backup directory accessibility
+      # Why: Observability - Ensure the playbook doesn't proceed if it cannot write to the destination
+      ansible.builtin.assert:
+        that:
+          - dir_creation is success
+        fail_msg: "Cannot access or create backup directory: {{ backup_root }}"
+
+    - name: Capture running configuration from ASA
+      # Why: Retrieve the current active device configuration via CLI
       ansible.netcommon.cli_command:
         command: show running-config
-      register: running_output
-      failed_when: 
-        - running_output.stdout is not defined
-        - "'Invalid' in running_output.stdout"
+      register: running_config
+      # Why: Error Handling - Fail if output is empty or command is unrecognized
+      failed_when:
+        - "running_config.stdout | length == 0"
+        - "'Invalid input' in running_config.stdout"
 
-    - name: "OBSERVE: Verify running-config content is valid"
-      ansible.builtin.assert:
-        that:
-          - "running_output.stdout | length > 0"
-          - "': Saved' in running_output.stdout or 'description' in running_output.stdout"
-        fail_msg: "Running configuration retrieved from {{ inventory_hostname }} is empty or invalid."
-
-    - name: "ASA: Retrieve startup-config from device"
+    - name: Capture startup configuration from ASA
+      # Why: Retrieve the configuration stored in NVRAM
       ansible.netcommon.cli_command:
         command: show startup-config
-      register: startup_output
-      # Use ignore_errors if startup-config might not exist, but here we expect it
-      ignore_errors: yes
+      register: startup_config
+      failed_when:
+        - "startup_config.stdout | length == 0"
+        - "'Invalid input' in startup_config.stdout"
 
-    - name: "SAVE: Write running-config to local filesystem"
+    - name: Save running configuration to controller
+      # Why: Persist device config to local storage; delegated to controller
       ansible.builtin.copy:
-        content: "{{ running_output.stdout }}"
-        dest: "{{ backup_path }}/{{ backup_name }}_running.cfg"
-        mode: '0644'
+        content: "{{ running_config.stdout }}"
+        dest: "{{ backup_root }}/{{ backup_name }}_running.cfg"
+        mode: '0600'
       delegate_to: localhost
-      register: save_running
+      register: running_save
 
-    - name: "SAVE: Write startup-config to local filesystem"
+    - name: Save startup configuration to controller
+      # Why: Ensure persistent storage of device startup config
       ansible.builtin.copy:
-        content: "{{ startup_output.stdout }}"
-        dest: "{{ backup_path }}/{{ backup_name }}_startup.cfg"
-        mode: '0644'
+        content: "{{ startup_config.stdout }}"
+        dest: "{{ backup_root }}/{{ backup_name }}_startup.cfg"
+        mode: '0600'
       delegate_to: localhost
-      when: startup_output.stdout is defined and startup_output.stdout | length > 0
-      register: save_startup
+      register: startup_save
 
-    - name: "VERIFY: Ensure backup files were successfully created"
+    - name: Validate backup file persistence
+      # Why: Observability - Assert that both files were written successfully to disk
       ansible.builtin.assert:
         that:
-          - save_running.changed or save_running.dest is defined
-        fail_msg: "Failed to persist the running configuration for {{ inventory_hostname }}."
+          - running_save.dest is exists
+          - startup_save.dest is exists
+        fail_msg: "One or more backup files failed to write to {{ backup_root }}."
 
-    - name: "SUMMARY: Display backup location"
+    - name: Display backup summary
+      # Why: Provide feedback to the operator upon successful completion
       ansible.builtin.debug:
-        msg: 
-          - "Backup operation completed for {{ inventory_hostname }}"
-          - "Running: {{ save_running.dest | default('FAILED') }}"
-          - "Startup: {{ save_startup.dest | default('SKIPPED/FAILED') }}"
+        msg: "Backup for {{ inventory_hostname }} completed: {{ backup_root }}/{{ backup_name }}_*.cfg"
+```

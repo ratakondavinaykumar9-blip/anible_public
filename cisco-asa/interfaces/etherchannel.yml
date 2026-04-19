@@ -1,37 +1,38 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Etherchannel Status Retrieval
-# Purpose: This playbook retrieves and validates EtherChannel information from Cisco ASA/Firepower devices.
-# It follows NetLearner standards for idempotency, observability, and error handling.
-# Improved: 2026-03-15
+# Etherchannel Verification Playbook
+# This playbook retrieves and audits EtherChannel (LACP/Static) status on Cisco ASA/Firepower devices.
+# Regular audits ensure that port-channel interfaces are correctly bundled, maintaining network redundancy.
 
-- name: Get EtherChannel Information
+- name: Retrieve and Validate EtherChannel Info
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false  # Disabling fact gathering reduces overhead for simple operational checks.
 
   tasks:
-    - name: Execute 'show etherchannel' command
-      # Best Practice: Use Fully Qualified Collection Name (FQCN)
-      # Idempotency: Read-only commands are inherently idempotent and safe to repeat.
+    - name: Get EtherChannel status from device
+      # Using FQCN (Fully Qualified Collection Name) to ensure compatibility and standard adherence.
+      # This operation is read-only and inherently idempotent.
       ansible.netcommon.cli_command:
         command: show etherchannel
       register: ec_result
-      # Error Handling: Ensure the playbook fails if the command is unrecognized or execution fails.
-      failed_when:
-        - ec_result.failed
-        - "'Invalid input' in ec_result.stdout"
+      # Error Handling: Ensure the task fails if the command is unrecognized or returns an error string.
+      failed_when: 
+        - ec_result.failed or "Invalid input" in ec_result.stdout
 
-    - name: Verify command output
-      # Observability: Assert that the command returned valid data to ensure the device is responsive.
+    - name: Validate that EtherChannel data was received
+      # Observability: Assert that the output contains data to verify the command execution was meaningful.
       ansible.builtin.assert:
         that:
-          - ec_result.stdout is defined
-          - ec_result.stdout | length > 0
-        fail_msg: "EtherChannel information could not be retrieved or the command returned no data."
-        success_msg: "Successfully captured EtherChannel status."
+          - "ec_result.stdout | length > 0"
+        fail_msg: "No EtherChannel information returned. Check if any port-channels are configured on the target."
+        success_msg: "EtherChannel data retrieved successfully."
+        quiet: true
 
-    - name: Display EtherChannel details
-      # Documentation: Provide a formatted view of the current EtherChannel state for audit purposes.
+    - name: Display formatted EtherChannel details
+      # Providing a structured view of the output for improved observability during execution.
       ansible.builtin.debug:
         msg: |
-          ======================= ETHERCHANNEL SUMMARY =======================
+          ======================= ETHERCHANNEL STATUS =======================
           {{ ec_result.stdout }}
+      when: ec_result.stdout is defined
+```

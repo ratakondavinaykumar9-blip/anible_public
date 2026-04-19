@@ -1,36 +1,41 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: FortiGate IPS Profile Retrieval
-# Purpose: This playbook securely retrieves IPS profile configurations from FortiGate devices.
-# Standards: Implements FQCN, idempotency (read-only), observability, and explicit error handling.
-- name: Get IPS Profile
+# NetLearner Staging: FortiGate IPS Profile Audit
+# This playbook retrieves and validates the IPS profile configuration from a FortiGate device.
+# Standards: Idempotency (Read-only), Observability (Assert), FQCN usage.
+
+- name: Audit FortiGate IPS Profiles
   hosts: fortigate
   gather_facts: false
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve IPS profile configuration via CLI
-      # Use FQCN for reliability and to avoid module name conflicts.
-      # Idempotency: This is a read-only operation and does not modify the device state.
+    - name: Retrieve IPS profile configuration
+      # Using FQCN for cross-platform network CLI compatibility
       ansible.netcommon.cli_command:
         command: get firewall ipsprofile
-      register: ips_query_result
-      # Error Handling: Explicitly fail if the command returns an error or is not recognized.
+      register: ips_output
+      # Error Handling: Fail if the command returns a parser error or common failure string
       failed_when: 
-        - ips_query_result.failed | default(false)
-        - "'Unknown action' in ips_query_result.stdout"
-        - "'Command fail' in ips_query_result.stdout"
+        - ips_output.failed or "command parse error" in ips_output.stdout | lower
+        - "unknown command" in ips_output.stdout | lower
 
-    - name: Validate that IPS profile data was successfully captured
-      # Observability: Ensure the stdout contains actual data before proceeding.
+    - name: Validate IPS configuration response
+      # Observability: Ensure the output is not empty and contains expected profile headers
       ansible.builtin.assert:
         that:
-          - ips_query_result.stdout is defined
-          - ips_query_result.stdout | length > 0
-        fail_msg: "The IPS profile retrieval returned no data. Check device connectivity or profile existence."
-        success_msg: "IPS profile configuration successfully captured."
+          - ips_output.stdout is defined
+          - ips_output.stdout | length > 0
+          - "'name'" in ips_output.stdout
+        fail_msg: "IPS Profile data was empty or malformed. Verification failed."
+        success_msg: "IPS Profile data successfully retrieved and validated."
 
-    - name: Display the IPS Profile configuration
-      # Observability: Provide a structured view of the output for logging and auditing.
+    - name: Display formatted IPS profile data
+      # Observability: Provide clear visibility into the current security posture
       ansible.builtin.debug:
         msg: |
-          ======================= IPS PROFILE =======================
-          {{ ips_query_result.stdout }}
+          ======================= IPS PROFILE STATE =======================
+          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          OUTPUT:
+          {{ ips_output.stdout }}
+```

@@ -1,36 +1,42 @@
+MCP issues detected. Run /mcp list for status.---
+# Firewall Traffic History
+# Auto-improved: 2026-04-12 12:00
+# Author: Arjun (OpenClaw)
+# Improved by: NetLearner Architect
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
 ---
 # FortiGate Traffic History - High Reliability Version
-# This playbook retrieves operational data. Being read-only, it is inherently idempotent.
-- name: Retrieve FortiGate Traffic History
+- name: Get Traffic History
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: Facts are not required for read-only CLI commands
 
   tasks:
-    - name: Fetch traffic history via CLI
-      # Using FQCN ansible.netcommon.cli_command for broad compatibility with network devices.
-      # This command is read-only and does not modify device state, ensuring idempotency.
+    - name: Retrieve firewall traffic history via CLI
+      # Using FQCN (Fully Qualified Collection Name) for best practices and compatibility.
+      # Command is read-only, ensuring idempotency across multiple runs.
       ansible.netcommon.cli_command:
         command: get firewall traffic-history
-      register: traffic_history_raw
-      # Error Handling: Detect failures and handle cases where the command might be invalid for the firmware.
+      register: history
+      # Idempotency: Ensure this task is always marked as 'ok' and not 'changed' for read-only operations.
+      changed_when: false
+      # Error Handling: Fail if the device returns specific error messages in stdout or fails to execute.
       failed_when:
-        - "traffic_history_raw.failed"
-        - "'Unknown command' in traffic_history_raw.stdout"
-      ignore_errors: false
+        - history.failed or "'Unknown command'" in history.stdout or "'Command fail'" in history.stdout
 
-    - name: Validate traffic history retrieval
-      # Observability: Confirm the register contains valid data before concluding the task.
+    - name: Validate traffic history data integrity
+      # Observability: Use assert to verify that we received valid data before proceeding.
       ansible.builtin.assert:
         that:
-          - "traffic_history_raw.stdout is defined"
-          - "traffic_history_raw.stdout | length > 0"
-        fail_msg: "No traffic history data was returned from the device."
-        success_msg: "Traffic history data successfully captured."
+          - history.stdout is defined
+          - history.stdout | length > 0
+        fail_msg: "Traffic history retrieval failed or returned empty data."
+        success_msg: "Traffic history successfully retrieved and validated."
 
     - name: Display formatted traffic history
-      # Documentation: Outputs the results for immediate operator visibility.
+      # Documentation: Providing clear visual boundaries in audit logs for better observability.
       ansible.builtin.debug:
         msg: |
-          ======================= TRAFFIC HISTORY REPORT =======================
-          {{ traffic_history_raw.stdout }}
-          ======================================================================
+          ======================= TRAFFIC HISTORY START =======================
+          {{ history.stdout }}
+          ======================== TRAFFIC HISTORY END ========================

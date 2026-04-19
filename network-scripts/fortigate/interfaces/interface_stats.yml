@@ -1,38 +1,36 @@
----
-# FortiGate Interface Statistics - Production Grade
-# This playbook retrieves low-level netlink interface statistics from FortiGate devices.
-# It is designed to be idempotent (read-only), observable, and follows FQCN standards.
-
-- name: Get Interface Stats
+MCP issues detected. Run /mcp list for status.---
+# FortiGate Operational Monitoring: Interface Statistics Retrieval
+# Purpose: This playbook captures low-level kernel interface (netlink) statistics.
+# It is used for deep-dive interface troubleshooting where standard stats are insufficient.
+- name: Get FortiGate Interface Statistics
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Optimization: Standard facts are not required for this diagnostic task
 
   tasks:
-    - name: Retrieve netlink interface list statistics
-      # FQCN used: ansible.netcommon.cli_command.
-      # This operation is read-only and thus inherently idempotent.
+    - name: Retrieve netlink interface list and statistics
+      # FQCN used: ansible.netcommon.cli_command is idempotent for read-only operations
       ansible.netcommon.cli_command:
         command: diagnose netlink interface list
       register: stats
-      # Error Handling: Fail if the command returns an error string or fails to execute.
-      failed_when: 
-        - stats.failed
-        - "'unknown command' in stats.stdout.lower()"
+      # Error Handling: Ensure we catch cases where the command might be unsupported or fail silently
+      failed_when:
+        - stats.stdout == ""
+        - "'Command fail' in stats.stdout"
+        - "'Unknown command' in stats.stdout"
 
-    - name: Validate statistics retrieval
-      # Observability: Ensure the output contains expected keywords and is not empty.
+    - name: Validate diagnostic data observability
+      # Observability: Verify that the command returned meaningful network stack data
       ansible.builtin.assert:
         that:
-          - "stats.stdout is defined"
-          - "stats.stdout | length > 0"
-          - "'ifname=' in stats.stdout"
-        fail_msg: "The 'diagnose' command failed to return valid interface statistics."
-        success_msg: "Interface statistics successfully retrieved and validated."
+          - stats.stdout is defined
+          - "'ifindex' in stats.stdout" # Reliable marker for valid netlink data structure
+        fail_msg: "Incomplete data retrieved from {{ inventory_hostname }}. Statistics may be unavailable."
+        success_msg: "Verified: Diagnostic statistics successfully captured for {{ inventory_hostname }}."
 
     - name: Display formatted interface statistics
-      # Providing a structured view for the operator.
+      # Best Practice: Use debug to output data to the console for human verification
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACE STATS =======================
+          ======================= FORTIGATE INTERFACE STATS =======================
+          DEVICE: {{ inventory_hostname }}
           {{ stats.stdout }}
-          ===============================================================

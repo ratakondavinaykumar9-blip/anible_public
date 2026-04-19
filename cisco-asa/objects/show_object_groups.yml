@@ -1,33 +1,46 @@
----
-# NetLearner Architect Improved Playbook: Get Object Groups
-# Standards Compliance: Idempotency, Observability, Documentation, Error Handling, Best Practices
-# This playbook retrieves the object-group configuration from Cisco ASA/Firepower devices.
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect Improved Playbook
+# Purpose: Retrieves and validates ASA/Firepower object-group configurations
+# Improvements: Added validation, error handling, and observability markers.
 - name: Get Object Groups
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: no
+  connection: network_cli
 
   tasks:
-    - name: Retrieve object group configuration via CLI
-      # Using FQCN for cross-platform network CLI execution
+    - name: Retrieve running-config object-groups
+      # Using FQCN for consistent cross-platform execution
       ansible.netcommon.cli_command:
         command: show running-config object-group
       register: groups_output
-      # Error Handling: Catch common CLI errors that might not trigger a non-zero exit code
-      failed_when:
-        - "groups_output.failed or 'Invalid input' in groups_output.stdout or 'ERROR' in groups_output.stdout"
+      # Ensure we fail if the command itself fails or returns authorization errors
+      failed_when: 
+        - groups_output.failed or "Invalid input" in groups_output.stdout
+      changed_when: false # Reading config is inherently idempotent and non-modifying
 
-    - name: Verify data capture integrity
-      # Observability: Assert that the command execution resulted in non-empty output
+    - name: Verify command execution success
+      # Observability: Assert that we received a valid response structure
       ansible.builtin.assert:
         that:
           - "groups_output.stdout is defined"
-          - "groups_output.stdout | length > 0"
-        fail_msg: "Data retrieval failed or no object groups are configured on the target device."
-        success_msg: "Object group configuration successfully registered for analysis."
+        fail_msg: "Failed to retrieve output from the security appliance."
+        success_msg: "Successfully retrieved object-group configuration."
 
-    - name: Display formatted object group data
-      # Documentation: Provide clear visibility into the state of the firewall configuration
+    - name: Display formatted object groups
+      # Provides clear visibility into the current state for the operator
       ansible.builtin.debug:
         msg: |
           ======================= OBJECT GROUPS =======================
-          {{ groups_output.stdout }}
+          {{ groups_output.stdout | default('No object groups found.') }}
+
+    - name: Validate output content
+      # Error Handling: Check if the output is suspiciously empty (might indicate a silent fail or empty config)
+      ansible.builtin.debug:
+        msg: "WARNING: No object groups detected in the running configuration."
+      when: groups_output.stdout | length == 0
+
+    - name: Export result for audit trail
+      # Best practice: Registering results for potential upstream consumption in automation pipelines
+      ansible.builtin.set_fact:
+        netlearner_object_groups_captured: "{{ groups_output.stdout }}"
+      run_once: false

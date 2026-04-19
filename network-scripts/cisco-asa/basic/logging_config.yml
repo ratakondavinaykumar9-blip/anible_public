@@ -1,34 +1,33 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Logging Configuration Retrieval and Validation
-# Purpose: This playbook retrieves and validates the current logging configuration from Cisco ASA/Firepower devices.
-# Standards: Implements FQCN, observability via assertions, and robust error handling.
-- name: Get Logging Config
+- name: Retrieve and Validate Logging Configuration
   hosts: asa_firepower
-  gather_facts: no
+  gather_facts: false # Disabled fact gathering to improve performance as only CLI access is required.
 
   tasks:
-    - name: Retrieve logging configuration using FQCN
-      # Using ansible.netcommon.cli_command for standardized network CLI interaction
+    - name: Execute 'show logging' command
+      # Best Practices: Use Fully Qualified Collection Name (FQCN) for the network command module.
       ansible.netcommon.cli_command:
         command: show logging
-      register: logging_result
-      # Error Handling: Fail if the device returns an error string instead of the configuration
-      failed_when: 
-        - logging_result.stdout is search('Invalid input') or logging_result.stdout is search('ERROR')
-      # Idempotency: Read-only commands are inherently idempotent as they do not modify device state
+      register: log_result
+      # Error Handling: Fail the task if the device returns a CLI error or the command fails.
+      failed_when:
+        - log_result.failed | default(false)
+        - "'Invalid input' in log_result.stdout"
 
-    - name: Validate logging output observability
-      # Observability: Assert that the output is not empty to ensure data integrity
+    - name: Assert Logging Data Integrity
+      # Observability: Verify that the output is not empty to ensure the data was successfully captured.
       ansible.builtin.assert:
         that:
-          - "logging_result.stdout is defined"
-          - "logging_result.stdout | length > 0"
-        fail_msg: "Data retrieval failed: The 'show logging' command returned an empty or undefined result."
-        success_msg: "Logging configuration successfully captured."
+          - "log_result.stdout is defined"
+          - "log_result.stdout | length > 0"
+        fail_msg: "The 'show logging' command returned empty or invalid results for {{ inventory_hostname }}."
+        success_msg: "Logging configuration successfully retrieved and validated for {{ inventory_hostname }}."
 
-    - name: Display formatted logging configuration
-      # Documentation: Providing a clear visual delimiter for log inspection
+    - name: Display Formatted Logging Output
+      # Documentation: Provide a structured and human-readable view of the logging status for the operator.
       ansible.builtin.debug:
         msg: |
-          ======================= LOGGING CONFIGURATION =======================
-          {{ logging_result.stdout }}
+          ======================= LOGGING STATUS: {{ inventory_hostname }} =======================
+          {{ log_result.stdout }}
+```

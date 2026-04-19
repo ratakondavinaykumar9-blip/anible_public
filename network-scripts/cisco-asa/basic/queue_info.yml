@@ -1,35 +1,38 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Retrieve Cisco ASA/Firepower Interface Queue Information
-# Why: This playbook monitors hardware and software queues to diagnose interface congestion and packet drops.
-# Standards: Uses FQCN, ensures observability via assertions, and maintains idempotency through read-only operations.
+# NetLearner Architect - ASA/Firepower Queue Monitoring
+# This playbook retrieves hardware/interface queue statistics for performance troubleshooting.
+# It adheres to NetLearner standards for idempotency, observability, and error handling.
 
 - name: Get Queue Info
   hosts: asa_firepower
-  gather_facts: false
+  gather_facts: false # Facts are not required for simple CLI data retrieval, improving execution speed.
 
   tasks:
-    - name: Execute 'show queue' command on the device
-      # FQCN: Using ansible.netcommon for standardized network command execution.
-      # Idempotency: 'show' commands are inherently idempotent as they do not modify device state.
+    - name: Retrieve queue statistics via CLI
+      # This task is inherently idempotent as 'show' commands do not modify the device state.
+      # FQCN is used to ensure compatibility across different Ansible environments.
       ansible.netcommon.cli_command:
         command: show queue
       register: queue_output
-      # Error Handling: Fail if the output indicates the command is unsupported or if execution fails.
+      # Error Handling: Validate that the command was recognized by the device.
       failed_when:
-        - queue_output.stdout is not defined
-        - "'Invalid input' in queue_output.stdout or 'Error' in queue_output.stdout"
+        - queue_output.failed
+        - "'Invalid input' in queue_output.stdout or 'Usage' in queue_output.stdout"
 
-    - name: Validate that queue data was successfully captured
-      # Observability: Using assertions to verify the device returned a non-empty response.
+    - name: Verify integrity of captured queue data
+      # Observability: Use assertion to ensure the command returned actual data before proceeding.
       ansible.builtin.assert:
         that:
-          - queue_output.stdout | length > 0
-        fail_msg: "No queue information was returned from the device. Check interface status."
-        success_msg: "Queue information successfully retrieved and validated."
+          - "queue_output.stdout | length > 0"
+        fail_msg: "Queue data retrieval failed: The output buffer is empty."
+        success_msg: "Queue data successfully validated and stored."
 
-    - name: Display formatted queue statistics
-      # Documentation: Providing clear, human-readable output for network operations monitoring.
+    - name: Display formatted queue metrics
+      # Observability: Print the output with clear headers for easier log analysis in CI/CD pipelines.
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACE QUEUE DATA =======================
+          ======================= QUEUE STATISTICS =======================
           {{ queue_output.stdout }}
+          ================================================================
+```

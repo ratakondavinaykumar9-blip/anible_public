@@ -1,33 +1,42 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: FortiGate Interface Traffic Analysis
+# FortiGate Interface Traffic Analysis
+# Objective: Retrieve and validate real-time interface traffic statistics from FortiGate devices.
+# This playbook adheres to idempotent principles by performing read-only operations.
+- name: FortiGate Network Observability - Interface Traffic
   hosts: fortigate
   gather_facts: false
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: "FortiGate: Retrieve interface traffic statistics"
-      # Idempotency: Read-only 'get' command ensures no state changes occur regardless of execution count.
-      # FQCN: Using fully qualified collection name for portability and clarity.
+    - name: "FortiGate: Execute Interface Traffic Retrieval"
+      # Using FQCN for better reliability and avoiding plugin collisions.
       ansible.netcommon.cli_command:
         command: get system interface traffic
-      register: interface_traffic
-      # Error Handling: Explicitly fail if the command execution fails or returns an empty string.
+      # Registering output for downstream observability and validation.
+      register: interface_traffic_result
+      # Basic error handling: ensure the command is supported by the device.
       failed_when: 
-        - interface_traffic.failed or (interface_traffic.stdout | length == 0)
-      # Ensure the data gathering task runs even when the playbook is executed in --check mode.
-      check_mode: false
+        - interface_traffic_result.failed or "Unknown action" in interface_traffic_result.stdout
+      changed_when: false # Read-only command; safe for repeated execution (idempotency).
 
-    - name: "Observability: Validate retrieved traffic data"
-      # Observability: Assert that the output contains expected structural elements to verify operational success.
+    - name: "Observability: Verify Command Integrity"
+      # Asserting that we received a valid response to ensure system health.
       ansible.builtin.assert:
         that:
-          - "'Interface' in interface_traffic.stdout"
-        fail_msg: "Validation failed: The output from {{ inventory_hostname }} does not contain the expected 'Interface' header."
-        success_msg: "Traffic data successfully retrieved and validated for {{ inventory_hostname }}."
+          - "interface_traffic_result.stdout is defined"
+          - "interface_traffic_result.stdout | length > 0"
+        fail_msg: "Failed to retrieve traffic data or the output is empty."
+        success_msg: "Interface traffic data successfully retrieved."
 
-    - name: "Output: Display interface traffic report"
-      # Documentation: Providing a clear, formatted view of the results for human operators.
+    - name: "Display: Structured Traffic Output"
+      # Providing a clear, human-readable summary of the current network state.
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACE TRAFFIC =======================
-          Device: {{ inventory_hostname }}
-          {{ interface_traffic.stdout }}
+          ======================= FORTIGATE INTERFACE TRAFFIC =======================
+          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
+          DEVICE: {{ inventory_hostname }}
+          
+          {{ interface_traffic_result.stdout }}
+          ===========================================================================
+```

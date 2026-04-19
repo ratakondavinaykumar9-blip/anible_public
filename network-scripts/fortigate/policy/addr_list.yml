@@ -1,41 +1,42 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Address Objects Retrieval and Validation Playbook
-# Purpose: Safely retrieve and audit firewall address objects from FortiGate devices.
-# Standards: FQCN, Idempotency, Observability, Documentation, Error Handling.
-
-- name: Retrieve and Validate FortiGate Address Objects
+# ==============================================================================
+# PLAYBOOK: FortiGate Address Object Retrieval
+# ARCHITECT: NetLearner Architect
+# DESCRIPTION: Performs an idempotent retrieval of firewall address objects 
+#              with built-in validation and robust error handling.
+# ==============================================================================
+- name: Get FortiGate Address Objects
   hosts: fortigate
   gather_facts: false
 
   tasks:
-    - name: Fetch firewall address objects via CLI
-      # FQCN: Using ansible.netcommon.cli_command for cross-platform compatibility
-      # Idempotency: Read-only 'get' operations are inherently idempotent
+    - name: Fetch address objects via CLI command
+      # BEST PRACTICES: Using Fully Qualified Collection Names (FQCN)
       ansible.netcommon.cli_command:
         command: get firewall address
-      register: address_retrieval
-      # Error Handling: Define failure conditions based on FortiOS CLI error patterns
+      register: addr_output
+      # IDEMPOTENCY: Read-only 'get' commands must never report a 'changed' state
+      changed_when: false
+      # ERROR HANDLING: Catch CLI failures that may not return a non-zero exit code
       failed_when:
-        - address_retrieval.failed
-        - "'Command fail' in address_retrieval.stdout"
-        - "'Unknown action' in address_retrieval.stdout"
+        - "addr_output.rc | default(0) != 0"
+        - "'Command fail' in addr_output.stdout"
+        - "'error' in addr_output.stdout.lower()"
 
-    - name: Validate retrieval observability
-      # Observability: Ensure the output is not empty and contains expected metadata
+    - name: Validate data observability
+      # OBSERVABILITY: Assert that the command returned valid data before proceeding
       ansible.builtin.assert:
         that:
-          - address_retrieval.stdout is defined
-          - address_retrieval.stdout | length > 0
-        fail_msg: "The firewall returned an empty response for address objects."
-        success_msg: "Address objects successfully retrieved and validated."
+          - "addr_output.stdout is defined"
+          - "addr_output.stdout | length > 0"
+        fail_msg: "Critical Error: Received empty or invalid response from {{ inventory_hostname }}"
+        quiet: true
 
-    - name: Display formatted address object report
-      # Documentation: Provide a clear, human-readable view of the operational state
+    - name: Display address objects summary
+      # OBSERVABILITY: Provide a clear, formatted view of the retrieved data
       ansible.builtin.debug:
         msg: |
-          ======================= FORTIGATE ADDRESS OBJECTS =======================
-          Device: {{ inventory_hostname }}
-          Status: SUCCESS
-          -------------------------------------------------------------------------
-          {{ address_retrieval.stdout }}
-          =========================================================================
+          ======================= ADDRESS OBJECTS: {{ inventory_hostname }} =======================
+          {{ addr_output.stdout }}
+```

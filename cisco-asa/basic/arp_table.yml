@@ -1,35 +1,39 @@
+MCP issues detected. Run /mcp list for status.---
+# Arp Table - Improved for Production
+# Auto-improved: 2026-04-12
+# Author: NetLearner Architect
+#
+# Standards: Idempotency, Observability, FQCN, Error Handling
 ---
-# Improved ARP Table Retrieval Playbook
-# This playbook retrieves the ARP table from Cisco ASA/Firepower devices with enhanced observability and error handling.
-# Standards: Idempotency (Read-only), Observability (Assert), Documentation (Comments), Error Handling (Failed_when), FQCN.
-
 - name: Get ARP Table
   hosts: asa_firepower
-  gather_facts: false  # Facts are not required for this operation, improving execution speed.
+  gather_facts: false
 
   tasks:
-    - name: Retrieve ARP table via CLI
-      # Using Fully Qualified Collection Name (FQCN) for the network CLI module.
+    - name: Get ARP table from device
       ansible.netcommon.cli_command:
         command: show arp
       register: arp_result
-      # Error Handling: Catch cases where the command execution fails or the device rejects the input.
-      failed_when: 
-        - arp_result.failed or "Invalid input" in arp_result.stdout
+      # Idempotency: 'show' commands are read-only and safe to run repeatedly.
+      # Error Handling: Catch CLI-specific error strings that may not trigger a non-zero exit code.
+      failed_when: >
+        (arp_result.stdout is not defined) or
+        ('Invalid input' in arp_result.stdout) or
+        ('Incomplete' in arp_result.stdout)
+      # check_mode: false ensures the command executes even during dry-runs/audits.
+      check_mode: false
 
-    - name: Verify ARP table content
-      # Observability: Assert that the output is not empty to ensure data was actually captured.
+    - name: Validate ARP output integrity
       ansible.builtin.assert:
+        # Observability: Verify that the response contains the expected 'Address' header.
         that:
-          - arp_result.stdout is defined
           - arp_result.stdout | length > 0
-        fail_msg: "ARP table data is missing or empty."
-        success_msg: "Successfully captured ARP table data."
+          - "'Address' in arp_result.stdout"
+        fail_msg: "ARP table retrieval failed or returned invalid data."
+        success_msg: "ARP table successfully retrieved and validated."
 
     - name: Display ARP Table
-      # Formatted debug output for operator visibility.
       ansible.builtin.debug:
         msg: |
           ======================= ARP TABLE =======================
           {{ arp_result.stdout }}
-          =========================================================

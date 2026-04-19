@@ -1,59 +1,56 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: Audit SSL VPN and Tunnel Group Configuration
+# SSL VPN Configuration Audit and Verification
+# This playbook retrieves and validates the SSL VPN configuration for Cisco ASA/Firepower devices.
+- name: Audit SSL VPN Configuration
   hosts: asa_firepower
   gather_facts: false
-  # Purpose: This playbook retrieves, validates, and displays the SSL VPN configuration.
-  # It ensures state visibility and provides structured observability for network audits.
 
   tasks:
-    - name: Retrieve WebVPN running configuration
-      # Using FQCN for cross-platform compatibility and standardizing execution.
+    - name: Retrieve WebVPN Global Configuration
+      # Fetching the 'webvpn' section of the running-config to audit SSL portal and cipher settings.
+      # We use ansible.netcommon.cli_command for broad compatibility with network CLI interfaces.
       ansible.netcommon.cli_command:
         command: show run webvpn
       register: webvpn_output
-      # Error Handling: Identify cases where the command is unsupported or fails silently.
       failed_when: 
-        - webvpn_output.failed
+        - webvpn_output.stdout is not defined
         - "'Invalid input' in webvpn_output.stdout"
 
-    - name: Verify WebVPN configuration response
-      # Observability: Assert that the command returned data to prevent downstream processing errors.
+    - name: Verify WebVPN Configuration Presence
+      # Observability: Asserting that the command returned data ensures we are not auditing an empty state.
+      # This provides a clear failure message if the feature is not configured.
       ansible.builtin.assert:
         that:
-          - webvpn_output.stdout is defined
           - webvpn_output.stdout | length > 0
         fail_msg: "WebVPN configuration is missing or could not be retrieved from {{ inventory_hostname }}."
         quiet: true
 
-    - name: Retrieve Tunnel Group running configuration
-      # Captures connection profiles which define authentication and address pool assignments.
+    - name: Retrieve Tunnel-Group Configuration
+      # Retrieving tunnel-group definitions to verify connection profiles and group-policy mapping.
       ansible.netcommon.cli_command:
         command: show run tunnel-group
-      register: tg_output
-      failed_when: 
-        - tg_output.failed
-        - "'Invalid input' in tg_output.stdout"
+      register: tunnel_group_output
+      failed_when:
+        - tunnel_group_output.stdout is not defined
+        - "'Invalid input' in tunnel_group_output.stdout"
 
-    - name: Verify Tunnel Group configuration response
-      # Observability: Ensure the Tunnel Group section exists in the running-config.
+    - name: Verify Tunnel-Group Configuration Presence
       ansible.builtin.assert:
         that:
-          - tg_output.stdout is defined
-          - tg_output.stdout | length > 0
-        fail_msg: "Tunnel-group configuration is empty or inaccessible on {{ inventory_hostname }}."
+          - tunnel_group_output.stdout | length > 0
+        fail_msg: "Tunnel-Group configuration is missing or could not be retrieved from {{ inventory_hostname }}."
         quiet: true
 
-    - name: Display SSL VPN Audit Report
-      # Documentation: Provides a human-readable summary of the current state.
+    - name: Display Consolidated SSL VPN Audit Logs
+      # Idempotency: This task is read-only and provides consistent observability across multiple runs.
       ansible.builtin.debug:
         msg: |
-          ========================================================================
-          SSL VPN AUDIT REPORT: {{ inventory_hostname }}
-          TIMESTAMP: {{ lookup('pipe', 'date +%Y-%m-%d %H:%M:%S') }}
-          ========================================================================
-          WEBVPN CONFIGURATION:
+          ======================= SSL VPN CONFIG AUDIT: {{ inventory_hostname }} =======================
+          
+          --- WEBVPN CONFIGURATION ---
           {{ webvpn_output.stdout }}
-
-          TUNNEL-GROUP CONFIGURATION:
-          {{ tg_output.stdout }}
-          ========================================================================
+          
+          --- TUNNEL-GROUP CONFIGURATION ---
+          {{ tunnel_group_output.stdout }}
+```

@@ -1,56 +1,51 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-- name: Audit FortiGate Firewall Service Objects and Groups
+- name: FortiGate Service and Group Audit
   hosts: fortigate
   gather_facts: false
-  # Standardized metadata for tracking and maintenance
-  vars:
-    ansible_network_os: fortinet.fortios.fortios
+  # Why: This playbook performs a read-only audit of FortiGate service objects and groups.
+  # It is designed to be idempotent and provides observability for security compliance.
 
   tasks:
-    - name: Retrieve Custom Firewall Service Objects
-      # Best Practice: Use Fully Qualified Collection Names (FQCN)
-      # 'show' is preferred over 'get' to capture the configuration-level objects
+    - name: Retrieve Service Objects
+      # Why: Fetches custom and predefined service objects to verify existing network definitions.
       ansible.netcommon.cli_command:
-        command: "show firewall service custom"
+        command: get firewall service
       register: svc_output
-      # Error Handling: Identify FortiOS-specific error strings to fail early
-      failed_when: 
-        - svc_output.failed or "Command fail" in svc_output.stdout or "Unknown action" in svc_output.stdout
-      tags: [services, audit]
+      # Error Handling: Ensure the command executed successfully on the device.
+      failed_when: svc_output.rc != 0
 
     - name: Validate Service Objects Data
-      # Observability: Assert that the command returned meaningful content
+      # Observability: Assert that the retrieval returned a non-empty result.
       ansible.builtin.assert:
         that:
           - svc_output.stdout is defined
           - svc_output.stdout | length > 0
-        fail_msg: "Service objects retrieval returned empty or failed state."
-        success_msg: "Successfully retrieved firewall service objects."
+        fail_msg: "Service object retrieval failed or returned an empty response."
+        quiet: true
 
-    - name: Retrieve Firewall Service Groups
-      # Idempotency: Read-only operations are inherently safe for multiple runs
+    - name: Retrieve Service Groups
+      # Why: Fetches service group definitions to audit object aggregation in policies.
       ansible.netcommon.cli_command:
-        command: "show firewall service group"
-      register: group_output
-      failed_when:
-        - group_output.failed or "Command fail" in group_output.stdout
-      tags: [groups, audit]
+        command: get firewall service group
+      register: groups_output
+      failed_when: groups_output.rc != 0
 
     - name: Validate Service Groups Data
+      # Observability: Verify that group data was successfully captured.
       ansible.builtin.assert:
         that:
-          - group_output.stdout is defined
-          - group_output.stdout | length > 0
-        fail_msg: "Service groups retrieval returned empty or failed state."
-        success_msg: "Successfully retrieved firewall service groups."
+          - groups_output.stdout is defined
+          - groups_output.stdout | length > 0
+        fail_msg: "Service group retrieval failed or returned an empty response."
+        quiet: true
 
-    - name: Display Service Configuration Summary
-      # Documentation: Clear separation of output for human operators/auditors
+    - name: Display Configuration Results
+      # Observability: Structured debug output for audit logging and operator visibility.
       ansible.builtin.debug:
-        msg: |
-          ======================= SERVICE OBJECTS =======================
-          {{ svc_output.stdout }}
-
-          ======================= SERVICE GROUPS ========================
-          {{ group_output.stdout }}
-      when: not ansible_check_mode
+        msg:
+          - "======================= SERVICE OBJECTS ======================="
+          - "{{ svc_output.stdout }}"
+          - "======================= SERVICE GROUPS ========================"
+          - "{{ groups_output.stdout }}"
+```

@@ -1,64 +1,50 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Description: Improved Routing Table Extraction for Cisco ASA/Firepower
-# Standards: Idempotency, Observability, FQCN, Error Handling, and Documentation
-- name: Get and Parse Routing Table
+- name: "NETLEARNER: Secure & Observable Routing Table Retrieval"
   hosts: asa_firepower
-  gather_facts: no
+  gather_facts: yes  # Required to populate ansible_date_time for the JSON report
   vars:
     output_format: text
-    backup_path: "/tmp/asa_routes_{{ inventory_hostname }}.json"
+    report_dest: "/tmp/asa_routes_{{ inventory_hostname }}.json"
 
   tasks:
-    - name: Gather minimal facts for timestamping
-      ansible.builtin.setup:
-        gather_subset:
-          - "!all"
-          - "date_time"
-      tags: [always]
-
-    - name: Retrieve routing table from device
-      # Using FQCN for cross-platform network command execution
+    - name: Fetch routing table via CLI
+      # Why: Use FQCN for predictable module resolution across different Ansible versions
       ansible.netcommon.cli_command:
         command: show route
       register: route_output
-      # Error Handling: Fail if the command returns no data or unexpected error messages
-      failed_when: 
+      # Idempotency: 'show' commands are read-only and should never trigger a 'changed' status
+      changed_when: false
+      # Error Handling: Explicitly fail if the command returns an error string or null output
+      failed_when:
+        - route_output.stdout is not defined
         - route_output.stdout == ""
-        - "'Invalid input' in route_output.stdout"
-      changed_when: false # Read-only command; maintain idempotency
+        - "'invalid input' in route_output.stdout | lower"
 
-    - name: Validate routing table content
-      # Observability: Assert that the output contains expected routing indicators
+    - name: Validate routing data integrity
+      # Observability: Assert that captured data contains expected routing markers
       ansible.builtin.assert:
         that:
+          - "route_output.stdout | length > 0"
           - "'Gateway of last resort' in route_output.stdout"
-          - "route_output.stdout_lines | length > 0"
-        fail_msg: "Routing table appears empty or malformed."
-        success_msg: "Successfully validated routing table output."
+        fail_msg: "Routing table on {{ inventory_hostname }} is empty or malformed."
+        success_msg: "Routing table data validated successfully."
 
-    - name: Display raw routing data
+    - name: Display routing table for operator audit
       ansible.builtin.debug:
-        var: route_output.stdout
-      when: output_format == 'text'
+        var: route_output.stdout_lines
 
-    - name: Generate and save structured JSON route report
-      # Idempotency: ansible.builtin.copy only updates the file if content changes
+    - name: Persist structured JSON artifact
+      # Idempotency: builtin.copy ensures the file is only updated if content actually changes
+      # Documentation: Saves state for NetLearner historical tracking and forensic analysis
       ansible.builtin.copy:
         content: |
           {
             "device": "{{ inventory_hostname }}",
-            "extracted_at": "{{ ansible_date_time.iso8601 }}",
-            "routing_table_raw": {{ route_output.stdout | to_json }}
+            "timestamp": "{{ ansible_date_time.iso8601 }}",
+            "routes_raw": {{ route_output.stdout | to_json }}
           }
-        dest: "{{ backup_path }}"
+        dest: "{{ report_dest }}"
         mode: '0644'
-      # Conditionality: Only executes if the user explicitly requests JSON format
       when: output_format | default('text') == 'json'
-      register: file_creation
-
-    - name: Confirm report generation
-      ansible.builtin.assert:
-        that:
-          - file_creation.dest is defined
-        fail_msg: "Failed to write the JSON report to {{ backup_path }}"
-      when: output_format | default('text') == 'json'
+```

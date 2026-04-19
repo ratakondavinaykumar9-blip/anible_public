@@ -1,38 +1,37 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
 # Playbook: Get NAT by Interface
-# Description: This playbook retrieves the Network Address Translation (NAT) configuration 
-# specifically mapped to interfaces on Cisco ASA or Firepower devices.
-# It adheres to enterprise standards for idempotency, observability, and error handling.
+# Purpose: Retrieves and validates NAT configuration from Cisco ASA/Firepower devices.
+# Standards: Idempotency (read-only), Observability (asserts), Documentation, Error Handling, FQCN.
 
-- name: Get NAT by Interface
+- name: Retrieve and Validate NAT by Interface
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Execute 'show nat interface' command on the device
-      # FQCN: Using the platform-specific module for optimal integration
-      cisco.asa.asa_command:
-        commands:
-          - show nat interface
+    - name: Execute 'show nat interface' on target device
+      # FQCN: ansible.netcommon.cli_command
+      # Idempotency: Read-only operational commands are inherently idempotent.
+      ansible.netcommon.cli_command:
+        command: show nat interface
       register: nat_intf
-      # Idempotency: Ensuring read-only commands do not report a 'changed' status
-      changed_when: false
-      # Error Handling: Explicitly check for command failures or syntax errors
+      # Error Handling: Explicitly catch common CLI error strings that might not trigger a module failure.
       failed_when:
-        - nat_intf.failed or 'Invalid input' in nat_intf.stdout[0]
+        - nat_intf.failed or 'Invalid input' in nat_intf.stdout
 
-    - name: Validate NAT data retrieval
-      # Observability: Assert that the command returned meaningful data
+    - name: Verify observability of NAT data
+      # Observability: Assert that the command returned data to ensure the operation was functionally successful.
       ansible.builtin.assert:
         that:
-          - "nat_intf.stdout is defined"
-          - "nat_intf.stdout[0] | length > 0"
-        fail_msg: "Failed to retrieve NAT information or the configuration is empty."
-        success_msg: "NAT interface configuration successfully captured."
+          - nat_intf.stdout is defined
+          - nat_intf.stdout | length > 0
+        fail_msg: "The NAT interface output is empty or undefined. Verify device configuration."
+        success_msg: "Successfully retrieved and validated NAT interface configuration."
 
     - name: Display formatted NAT configuration
-      # Documentation: Providing a clear, structured output for the operator
+      # Observability: Provides human-readable output for log verification and real-time monitoring.
       ansible.builtin.debug:
         msg: |
           ======================= NAT BY INTERFACE =======================
-          {{ nat_intf.stdout[0] }}
+          {{ nat_intf.stdout }}
+```

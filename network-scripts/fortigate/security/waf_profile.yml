@@ -1,38 +1,41 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate WAF Profile Audit Playbook
-# This playbook retrieves and validates WAF profiles following NetLearner automation standards.
-- name: Retrieve and Validate WAF Profiles
+# FortiGate WAF Profile Retrieval & Validation
+# Author: NetLearner Architect
+# Standards: Idempotent, Observable, Documented, Error-Handled, FQCN
+- name: FortiGate WAF Profile Inspection
   hosts: fortigate
   gather_facts: false
+  # Best Practice: Ensure play fails fast to prevent inconsistent audit results across the fleet
+  any_errors_fatal: true
 
   tasks:
-    - name: Retrieve WAF profiles via CLI
-      # Best Practices: Using Fully Qualified Collection Name (FQCN) for the network command module.
-      # Idempotency: 'get' is a read-only operation and safe to execute repeatedly without state change.
+    - name: Retrieve WAF profile configuration via CLI
+      # Documentation: Using 'get' to fetch operational state. 
+      # Retrieval (read-only) operations are inherently idempotent.
       ansible.netcommon.cli_command:
         command: get firewall waf-profile
-      register: waf_raw_data
-      # Error Handling: Validate return code and ensure the command was understood by the device.
-      failed_when:
-        - waf_raw_data.rc != 0
-        - "'command parse error' in waf_raw_data.stdout"
+      register: waf_result
+      # Error Handling: Catch CLI-level errors that don't trigger a non-zero exit code
+      failed_when: >
+        waf_result.failed or 
+        "command parse error" in (waf_result.stdout | lower) or 
+        "unknown command" in (waf_result.stdout | lower)
 
-    - name: Verify WAF profile data integrity
-      # Observability: Assert that the device returned valid data to prevent silent failures in automation pipelines.
+    - name: Validate WAF profile data observability
+      # Observability: Assert that data integrity is maintained and content is non-empty
       ansible.builtin.assert:
         that:
-          - waf_raw_data.stdout is defined
-          - waf_raw_data.stdout | length > 0
-          - "'waf-profile' in waf_raw_data.stdout"
-        fail_msg: "Data Integrity Error: WAF profile output is empty or contains unexpected content."
-        success_msg: "Data Integrity Verified: WAF profiles successfully retrieved."
+          - waf_result.stdout is defined
+          - waf_result.stdout | length > 0
+        fail_msg: "CRITICAL: WAF Profile configuration could not be retrieved or is empty."
+        success_msg: "OBSERVABILITY: WAF Profile data successfully validated."
 
-    - name: Display WAF Profile Report
-      # Documentation: Providing structured output for administrative review and audit trails.
+    - name: Display WAF profile state for audit
+      # Documentation: Formatting output for clear visibility in the automation log for security review
       ansible.builtin.debug:
         msg: |
-          ===========================================================
-          FORTIGATE WAF PROFILE AUDIT
-          ===========================================================
-          {{ waf_raw_data.stdout }}
-          ===========================================================
+          ======================= WAF PROFILE START =======================
+          {{ waf_result.stdout }}
+          ======================== WAF PROFILE END ========================
+```

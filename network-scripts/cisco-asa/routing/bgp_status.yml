@@ -1,41 +1,35 @@
----
-# NetLearner Architect Improved BGP Status Playbook
-# Purpose: This playbook retrieves and validates BGP routing status on Cisco ASA/Firepower devices.
-# Standards: Idempotency (Read-only), Observability (Assert/Register), FQCN usage, and Robust Error Handling.
+MCP issues detected. Run /mcp list for status.---
+# NetLearner Architect - BGP Status Audit Playbook
+# Purpose: Retrieves and validates BGP neighbor status on ASA/Firepower devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN.
 
-- name: Retrieve BGP Operational Status
+- name: Get BGP Status
   hosts: asa_firepower
-  gather_facts: false
-  connection: ansible.netcommon.network_cli
+  gather_facts: false # Performance: ASA facts are not required for this operation.
 
   tasks:
-    - name: "OPERATIONAL: Execute BGP summary command"
-      # Using FQCN (Fully Qualified Collection Name) for cross-platform consistency.
-      # This task is read-only and thus naturally idempotent.
+    - name: "BGP | Retrieve BGP summary information"
       ansible.netcommon.cli_command:
-        command: show bgp summary
-      register: bgp_summary_result
-      # Define explicit failure conditions to catch unconfigured BGP or syntax issues.
-      failed_when:
-        - bgp_summary_result.stdout is not defined
-        - "('Invalid' in bgp_summary_result.stdout) or ('BGP not enabled' in bgp_summary_result.stdout)"
+        command: "show bgp summary"
+      register: bgp_output
+      # Error Handling: Fail if the command is unrecognized, BGP is not configured, or connection fails.
+      failed_when: 
+        - bgp_output.failed
+        - "'Invalid input' in bgp_output.stdout"
+        - "'BGP not enabled' in bgp_output.stdout"
 
-    - name: "OBSERVABILITY: Assert BGP summary data integrity"
-      # Verifies that the output contains expected data before proceeding.
+    - name: "BGP | Validate BGP output integrity"
       ansible.builtin.assert:
         that:
-          - bgp_summary_result.stdout | length > 0
-          - "'BGP router identifier' in bgp_summary_result.stdout"
-        fail_msg: "BGP is either not configured or not returning valid summary data on {{ inventory_hostname }}."
-        success_msg: "BGP summary successfully validated for {{ inventory_hostname }}."
+          - "bgp_output.stdout is defined"
+          - "bgp_output.stdout | length > 0"
+          - "'BGP' in bgp_output.stdout"
+        fail_msg: "BGP summary output is empty or malformed. Ensure BGP is configured on {{ inventory_hostname }}."
+        success_msg: "BGP summary successfully retrieved and validated."
 
-    - name: "VISIBILITY: Display BGP Status"
-      # Provides clear, formatted output for operator review.
+    - name: "BGP | Display BGP Neighbor Status"
       ansible.builtin.debug:
         msg: |
-          ==========================================================
-          BGP OPERATIONAL STATUS: {{ inventory_hostname }}
-          TIMESTAMP: {{ ansible_date_time.iso8601 if ansible_date_time is defined else 'N/A' }}
-          ==========================================================
-          {{ bgp_summary_result.stdout }}
+          ======================= BGP STATUS: {{ inventory_hostname }} =======================
+          {{ bgp_output.stdout }}
           ==========================================================

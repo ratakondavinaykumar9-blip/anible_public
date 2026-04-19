@@ -1,40 +1,40 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate Security Fabric Status Monitoring Playbook
-# This playbook retrieves and validates the status of the Fortinet Security Fabric.
-# It adheres to standards for Idempotency (read-only), Observability, and FQCN usage.
+# FortiGate Fabric Status Retrieval - NetLearner Standard
+# Purpose: Retrieves and validates the Security Fabric operational status.
+# Standards: Idempotent (Read-only), Observability (Assert), Documentation (Why), 
+# Error Handling (Failed_when), Best Practices (FQCN).
 
-- name: FortiGate Security Fabric Status Analysis
+- name: FortiGate Fabric Status Check
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Optimization: Device-specific facts are not required for this operational check.
 
   tasks:
-    - name: Retrieve Security Fabric status from FortiGate
-      # Using FQCN for cli_command to ensure cross-platform consistency.
-      # This task is inherently idempotent as it only retrieves state without modification.
+    - name: Execute CLI command to get fabric status
+      # Use FQCN for consistency and future-proofing against collection shadowing.
       ansible.netcommon.cli_command:
         command: get fabric status
-      register: fabric_result
-      # Basic error handling: ensure the task fails if the command execution fails.
-      failed_when: fabric_result.failed | default(false)
+      register: fabric_status_raw
+      # Error Handling: Fail if the output indicates a command execution failure on the device.
+      failed_when: 
+        - "'Command fail' in fabric_status_raw.stdout"
+        - "'Unknown action' in fabric_status_raw.stdout"
 
-    - name: Validate Security Fabric status response
-      # Observability: Asserting that the output contains expected data to verify operational success.
-      # Prevents false positives from empty responses or "command not found" errors.
+    - name: Validate operational telemetry
+      # Observability: Ensure the device returned valid fabric data before proceeding with display.
       ansible.builtin.assert:
         that:
-          - "fabric_result.stdout is defined"
-          - "fabric_result.stdout | length > 0"
-          - "'Unknown command' not in fabric_result.stdout"
-        fail_msg: "Security Fabric status could not be retrieved or the command is not supported on this version."
-        success_msg: "Security Fabric status successfully retrieved and validated."
+          - fabric_status_raw.stdout is defined
+          - fabric_status_raw.stdout | length > 0
+          - "'Fabric' in fabric_status_raw.stdout"
+        fail_msg: "Telemetry validation failed: The device did not return a valid fabric status response."
+        success_msg: "Telemetry validation passed: Fabric status is intact."
+        quiet: true # Reduces verbosity in successful runs.
 
     - name: Display formatted Security Fabric status
-      # Documentation: Provides structured output for logs and operator visibility.
+      # Observability: Provide a clean, human-readable view of the operational state for the architect.
       ansible.builtin.debug:
         msg: |
-          ======================================================================
-          FABRIC STATUS FOR: {{ inventory_hostname }}
-          TIMESTAMP: {{ ansible_date_time.iso8601 | default('N/A') }}
-          ======================================================================
-          {{ fabric_result.stdout }}
-          ======================================================================
+          ======================= FABRIC STATUS =======================
+          {{ fabric_status_raw.stdout }}
+```

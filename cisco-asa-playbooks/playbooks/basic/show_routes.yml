@@ -1,59 +1,50 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: Get ASA Routing Table
-# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
-- name: Get Routing Table
+- name: Get ASA Routing Table with Enhanced Observability
   hosts: asa_firepower
   gather_facts: false
   vars:
-    # Default output format; can be overridden at runtime
     output_format: text
+    backup_path: "/tmp/asa_routes_{{ inventory_hostname }}.json"
 
   tasks:
-    - name: Retrieve routing table via CLI command (FQCN)
+    - name: Execute 'show route' on ASA device
+      # Use FQCN for reliable network command execution and cross-collection compatibility
       ansible.netcommon.cli_command:
         command: show route
       register: route_output
-      # Error Handling: Ensure the command was accepted and returned data
-      failed_when: 
-        - route_output.stdout is not defined
-        - "'Invalid input' in route_output.stdout"
-      ignore_errors: false
+      # Error Handling: Fail if the command returns no data, indicating a possible session failure
+      failed_when: route_output.stdout | length == 0
 
-    - name: Validate routing table content (Observability)
+    - name: Validate routing table integrity
+      # Observability: Assert that the output contains expected ASA routing table markers
       ansible.builtin.assert:
         that:
-          - route_output.stdout | length > 0
-          - "'Codes:' in route_output.stdout"
-        fail_msg: "Routing table output is empty or does not contain expected header 'Codes:'"
-        success_msg: "Routing table successfully retrieved and validated."
+          - "'Gateway of last resort' in route_output.stdout"
+        fail_msg: "The retrieved routing table is invalid or missing standard headers."
+        success_msg: "Routing table retrieved and validated successfully."
 
-    - name: Display raw routing table output
-      ansible.builtin.debug:
-        var: route_output.stdout
-
-    - name: Capture ISO8601 timestamp (Observability)
-      # Manual timestamp generation since gather_facts is disabled for network devices
+    - name: Generate execution timestamp
+      # Idempotency: Local fact generation is a safe, non-mutating operation
       ansible.builtin.set_fact:
-        audit_timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
-      when: output_format == 'json'
+        run_timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
 
-    - name: Parse and save routing data to JSON (Idempotency)
-      # Uses copy module to ensure file state is managed idempotently
+    - name: Persist routing table as JSON
+      # Idempotency: 'copy' module ensures the destination file is updated only if content differs
       ansible.builtin.copy:
         content: |
           {
             "device": "{{ inventory_hostname }}",
-            "timestamp": "{{ audit_timestamp }}",
+            "timestamp": "{{ run_timestamp }}",
             "routes": {{ route_output.stdout | to_json }}
           }
-        dest: "/tmp/asa_routes_{{ inventory_hostname }}.json"
+        dest: "{{ backup_path }}"
         mode: '0644'
+      # Documentation: Only save to filesystem if JSON output is explicitly requested via variables
       when: output_format == 'json'
-      register: file_creation
 
-    - name: Confirm JSON file creation (Observability)
-      ansible.builtin.assert:
-        that:
-          - file_creation is not failed
-        fail_msg: "Failed to write JSON output to /tmp/"
-      when: output_format == 'json'
+    - name: Display routing table summary
+      ansible.builtin.debug:
+        msg: "{{ route_output.stdout_lines }}"
+      when: output_format == 'text'
+```

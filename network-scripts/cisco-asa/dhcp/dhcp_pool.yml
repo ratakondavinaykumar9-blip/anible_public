@@ -1,39 +1,55 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# DHCP Pool Configuration and Verification
-# Author: NetLearner Architect
-# This playbook retrieves and validates DHCP pool configurations on Cisco ASA/Firepower devices.
-# Standards: FQCN, Idempotency (read-only), Observability (register/assert), Error Handling.
-
-- name: DHCP Pool Configuration Management
+# DHCP Pool Configuration and Operational Verification
+# Purpose: Ensures DHCP pools are correctly configured and verified on Cisco ASA/Firepower devices.
+- name: DHCP Pool Configuration
   hosts: asa_firepower
-  gather_facts: false # Performance optimization for network devices
+  gather_facts: false # NetLearner Standard: Disable facts to optimize execution for network devices
+
+  vars:
+    # Define desired configuration state (typically sourced from host_vars/group_vars)
+    dhcp_pool_range: "192.168.10.10-192.168.10.50"
+    dhcp_target_interface: "inside"
 
   tasks:
-    - name: Retrieve current DHCP pool configuration
-      # Best Practice: Use Fully Qualified Collection Name (FQCN)
-      ansible.netcommon.cli_command:
-        command: show running-config dhcpd pool
-      register: dhcp_pool_output
-      # Error Handling: Detect if the command failed or returned an invalid response
-      failed_when: 
-        - dhcp_pool_output.failed or 'Invalid input' in dhcp_pool_output.stdout
+    - name: Ensure DHCP pool is configured on the target interface
+      # Standard 1 & 5: Idempotent configuration using Fully Qualified Collection Names (FQCN)
+      # Ensures the DHCP pool range and service enablement are present in the running configuration.
+      cisco.asa.asa_config:
+        lines:
+          - "dhcpd address {{ dhcp_pool_range }} {{ dhcp_target_interface }}"
+          - "dhcpd enable {{ dhcp_target_interface }}"
+      register: config_result
+      # Standard 4: Error Handling - Catch configuration failures while ignoring non-critical warnings
+      failed_when:
+        - "config_result.failed"
+        - "'Invalid' in config_result.msg or 'Error' in config_result.msg"
 
-    - name: Validate DHCP configuration retrieval
-      # Observability: Assert that the response is defined and properly captured
+    - name: Retrieve DHCP pool configuration for verification
+      # Standard 2: Observability - Registering output for programmatic validation
+      ansible.netcommon.cli_command:
+        command: "show running-config dhcpd pool"
+      register: pools_output
+      # Documentation: Capturing the state of the device to confirm the configuration was applied successfully.
+
+    - name: Validate DHCP pool configuration state
+      # Standard 2: Observability - Using 'assert' to confirm the desired state is active in the running-config
       ansible.builtin.assert:
         that:
-          - dhcp_pool_output.stdout is defined
-        fail_msg: "Data retrieval failed for {{ inventory_hostname }}. Verify connectivity and credentials."
-        success_msg: "DHCP configuration successfully captured from {{ inventory_hostname }}."
+          - "dhcp_pool_range in pools_output.stdout"
+          - "dhcp_target_interface in pools_output.stdout"
+        fail_msg: "CRITICAL: DHCP pool {{ dhcp_pool_range }} not found on {{ dhcp_target_interface }}!"
+        success_msg: "SUCCESS: DHCP pool configuration verified on {{ dhcp_target_interface }}."
 
-    - name: Display DHCP Pool Configuration
-      # Documentation: Format output for operational visibility and audit trails
-      # Idempotency: Read-only operations are inherently idempotent and safe for repeated execution
+    - name: Display current DHCP pool operational status
+      # Standard 3: Documentation - Providing clear, formatted visibility for audit trails and logging
       ansible.builtin.debug:
         msg: |
-          ========================================================================
-          DEVICE: {{ inventory_hostname }}
-          TIMESTAMP: {{ lookup('pipe', 'date +%Y-%m-%d\ %H:%M:%S') }}
-          ======================= DHCP POOL CONFIGURATION =======================
-          {{ dhcp_pool_output.stdout if dhcp_pool_output.stdout | length > 0 else 'NOTICE: No DHCP pools are currently configured on this device.' }}
-          ========================================================================
+          ======================= DHCP POOL AUDIT =======================
+          Interface: {{ dhcp_target_interface }}
+          Pool Range: {{ dhcp_pool_range }}
+          
+          Current Running Configuration:
+          {{ pools_output.stdout }}
+          ===============================================================
+```

@@ -1,36 +1,34 @@
----
-- name: Cisco ASA/Firepower Inspection Statistics Audit
+MCP issues detected. Run /mcp list for status.---
+# Inspection Stats Detail
+# Purpose: Retrieve and display service-policy inspection statistics from ASA/Firepower devices.
+# Standards: Idempotency, Observability, Documentation, Error Handling, Best Practices.
+- name: Inspection Stats
   hosts: asa_firepower
   gather_facts: false
 
   tasks:
-    - name: Retrieve service-policy inspection statistics via CLI
-      # Use FQCN for portability and consistency across environments
+    - name: Retrieve service-policy inspection statistics
+      # Standard: Best Practice - Use Fully Qualified Collection Name (FQCN)
       ansible.netcommon.cli_command:
         command: show service-policy inspect
-      register: inspection_output
-      # Error Handling: Ensure we catch unrecognized commands or device communication failures
+      # Standard: Observability - Register output for downstream verification
+      register: inspect_result
+      # Standard: Error Handling - Define explicit failure conditions based on output content
       failed_when:
-        - inspection_output.failed | default(false)
-        - "'Invalid input' in inspection_output.stdout"
-      # Idempotency: Read-only operations are inherently idempotent; 
-      # check_mode is supported to prevent accidental changes if command syntax varied.
-      check_mode: false
+        - inspect_result.stdout is not defined
+        - "'Invalid' in inspect_result.stdout or 'Error' in inspect_result.stdout"
 
-    - name: Verify integrity of retrieved inspection data
-      # Observability: Assert that the output contains data to ensure the device is responding correctly
+    - name: Verify that inspection statistics were retrieved
+      # Standard: Observability - Use assertion to ensure the command returned non-empty data
       ansible.builtin.assert:
         that:
-          - inspection_output.stdout is defined
-          - inspection_output.stdout | length > 0
-        fail_msg: "Data retrieval failed: Inspection statistics are empty or unavailable."
-        success_msg: "Successfully validated inspection statistics retrieval."
+          - inspect_result.stdout | length > 0
+        fail_msg: "Inspection statistics retrieval failed or returned empty content."
+        success_msg: "Inspection statistics successfully retrieved and verified."
 
-    - name: Present formatted inspection statistics for audit
-      # Documentation: Display the raw inspection counters to the console for real-time visibility
+    - name: Display formatted inspection statistics
+      # Standard: Idempotency - This is a read-only operation and is safe for repeated execution
       ansible.builtin.debug:
         msg: |
-          ==================================================================
-          INSPECTION STATS FOR {{ inventory_hostname }}
-          ==================================================================
-          {{ inspection_output.stdout }}
+          ======================= INSPECTION STATS =======================
+          {{ inspect_result.stdout }}

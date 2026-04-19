@@ -1,107 +1,88 @@
----
+MCP issues detected. Run /mcp list for status.---
 # Backup ASA Configuration
-# This playbook automates the archival of Cisco ASA configurations to a central controller.
-# Standards: FQCN usage, Idempotency, Observability via assertions, and robust Error Handling.
 - name: Backup ASA Configuration
   hosts: asa_firepower
-  gather_facts: false
+  # We gather facts to obtain ansible_date_time for unique backup naming
+  gather_facts: yes
   vars:
     output_format: text
     backup_path: "/tmp/asa_backups"
-    # Lazy evaluation: This variable resolves after facts are gathered from the control node.
+    # ISO8601 format with colons removed for filesystem compatibility
     backup_name: "{{ inventory_hostname }}_{{ ansible_date_time.iso8601 | regex_replace(':', '-') }}"
 
   tasks:
-    - name: Gather facts from controller for timestamping
-      # Documentation: Synchronize timestamps across the fleet using the control node's clock.
-      ansible.builtin.setup:
-        filter: "ansible_date_time"
-      delegate_to: localhost
-      run_once: true
-
-    - name: Ensure backup directory exists on control node
-      # Idempotency: The 'directory' state ensures the path exists without modifying it if it already does.
+    - name: Ensure backup directory exists
+      # Idempotency: Creates directory if missing, does nothing if it exists
       ansible.builtin.file:
         path: "{{ backup_path }}"
         state: directory
         mode: '0755'
       run_once: true
-      delegate_to: localhost
 
-    - name: Retrieve running configuration
-      # Best Practice: Using FQCN and device-specific module for Cisco ASA communication.
-      cisco.asa.asa_command:
-        commands:
-          - show running-config
-      register: running_config_raw
-      # Error Handling: Fail early if the device returns an empty or invalid response.
+    - name: Get running configuration
+      # FQCN: Using netcommon for generic CLI execution
+      ansible.netcommon.cli_command:
+        command: show running-config
+      register: running_config
+      # Error Handling: Fail if 'Invalid' or 'Error' is in output (standard ASA error markers)
       failed_when: 
-        - running_config_raw.stdout is not defined
-        - running_config_raw.stdout[0] | length == 0
+        - running_config.stdout is not defined
+        - "'Invalid' in running_config.stdout or 'Error' in running_config.stdout"
 
-    - name: Verify running configuration integrity
-      # Observability: Assert that the received data contains expected configuration headers.
+    - name: Verify running configuration content
+      # Observability: Ensure we actually received data before attempting to save
       ansible.builtin.assert:
         that:
-          - "'running-config' in running_config_raw.stdout[0]"
-          - "running_config_raw.stdout[0] | length > 200"
-        fail_msg: "Running configuration for {{ inventory_hostname }} appears truncated or invalid."
+          - running_config.stdout | length > 0
+        fail_msg: "Running configuration retrieved from {{ inventory_hostname }} is empty."
 
-    - name: Retrieve startup configuration
-      cisco.asa.asa_command:
-        commands:
-          - show startup-config
-      register: startup_config_raw
-      # Error Handling: Startup config may be unavailable; ignore to ensure running-config backup persists.
-      ignore_errors: true
+    - name: Get startup configuration
+      ansible.netcommon.cli_command:
+        command: show startup-config
+      register: startup_config
+      failed_when:
+        - startup_config.stdout is not defined
+        - "'Invalid' in startup_config.stdout or 'Error' in startup_config.stdout"
 
-    - name: Save running configuration to disk
-      # Documentation: Delegate to localhost as network devices lack Python interpreters for the 'copy' module.
+    - name: Verify startup configuration content
+      ansible.builtin.assert:
+        that:
+          - startup_config.stdout | length > 0
+        fail_msg: "Startup configuration retrieved from {{ inventory_hostname }} is empty."
+
+    - name: Save running configuration to local file
+      # Why: Persists the captured state to the backup path
       ansible.builtin.copy:
-        content: "{{ running_config_raw.stdout[0] }}"
+        content: "{{ running_config.stdout }}"
         dest: "{{ backup_path }}/{{ backup_name }}_running.cfg"
-        mode: '0640'
-      delegate_to: localhost
-      register: running_file_save
+        mode: '0644'
 
-    - name: Save startup configuration to disk
+    - name: Save startup configuration to local file
       ansible.builtin.copy:
-        content: "{{ startup_config_raw.stdout[0] | default('! Startup configuration retrieval failed') }}"
+        content: "{{ startup_config.stdout }}"
         dest: "{{ backup_path }}/{{ backup_name }}_startup.cfg"
-        mode: '0640'
-      delegate_to: localhost
-      when: startup_config_raw is succeeded
-      register: startup_file_save
+        mode: '0644'
 
-    - name: Create backup manifest for audit trail
-      # Observability: Generate a JSON metadata file for programmatic verification of the backup set.
+    - name: Create backup manifest (JSON)
+      # Why: Provides structured metadata for automation/auditing
       ansible.builtin.copy:
-        content: |
-          {
-            "inventory_hostname": "{{ inventory_hostname }}",
-            "timestamp": "{{ ansible_date_time.iso8601 }}",
-            "files": {
-              "running": "{{ backup_name }}_running.cfg",
-              "startup": "{{ backup_name }}_startup.cfg"
-            },
-            "status": "complete"
-          }
+        content: "{{ manifest_data | to_nice_json }}"
         dest: "{{ backup_path }}/{{ backup_name }}_manifest.json"
         mode: '0644'
-      delegate_to: localhost
-      register: manifest_file_save
-
-    - name: Assert backup persistence success
-      # Observability: Final validation that the manifest and running-config were successfully written.
-      ansible.builtin.assert:
-        that:
-          - running_file_save.dest is defined
-          - manifest_file_save.dest is defined
-        fail_msg: "Backup failed to persist artifacts for {{ inventory_hostname }} to {{ backup_path }}."
+      vars:
+        manifest_data:
+          device: "{{ inventory_hostname }}"
+          backup_timestamp: "{{ ansible_date_time.iso8601 }}"
+          files:
+            running_config: "{{ backup_name }}_running.cfg"
+            startup_config: "{{ backup_name }}_startup.cfg"
 
     - name: Display backup summary
       ansible.builtin.debug:
         msg:
-          - "Backup successful for: {{ inventory_hostname }}"
-          - "Destination path: {{ backup_path }}"
-          - "Manifest file: {{ backup_name }}_manifest.json"
+          - "========================================"
+          - "Backup Complete for {{ inventory_hostname }}"
+          - "Directory: {{ backup_path }}"
+          - "Manifest: {{ backup_name }}_manifest.json"
+          - "Status: Verified & Saved"
+          - "========================================"

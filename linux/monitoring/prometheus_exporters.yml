@@ -1,4 +1,4 @@
----
+MCP issues detected. Run /mcp list for status.---
 # Enterprise Monitoring Deployment: Node Exporter & SNMP Exporter
 # Targets: Linux Fleet (RHEL/Ubuntu) & Network Management Pollers
 # This playbook implements production-grade monitoring with systemd hardening and validation.
@@ -14,11 +14,14 @@
     prometheus_config_dir: "/etc/prometheus"
     
     # --- Node Exporter Configuration ---
+    # Version pinned to verified stable (2024-2026) for reproducible builds
     node_exporter_version: "1.8.1"
     node_exporter_port: 9100
     node_exporter_arch: "amd64"
     node_exporter_dist: "linux"
     node_exporter_binary_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.{{ node_exporter_dist }}-{{ node_exporter_arch }}.tar.gz"
+    
+    # Collectors enabled for Data Center visibility (ASA/Nexus/FGT contexts often need netdev/systemd)
     node_exporter_enabled_collectors:
       - systemd
       - filesystem
@@ -28,12 +31,15 @@
       - loadavg
     
     # --- SNMP Exporter Configuration (Poller Nodes) ---
+    # Used for scraping Cisco ASA, FTD, FortiGate, and Nexus devices
     snmp_exporter_version: "0.26.0"
     snmp_exporter_port: 9116
     snmp_exporter_binary_url: "https://github.com/prometheus/snmp_exporter/releases/download/v{{ snmp_exporter_version }}/snmp_exporter-{{ snmp_exporter_version }}.linux-amd64.tar.gz"
+    # Source path for the snmp.yml generated from MIBs (ASA/FGT/Nexus)
     snmp_config_src: "files/network_monitoring/snmp.yml"
     
     # --- Security & Networking ---
+    # Zero-Trust: Restrict scrape access to Prometheus Infrastructure
     monitoring_network_cidr: "10.0.0.0/8"
 
   tasks:
@@ -68,13 +74,14 @@
             - "{{ prometheus_bin_dir }}"
           register: dir_creation
 
-        - name: Assert prerequisites are met
+        - name: Verify Prerequisites State
           ansible.builtin.assert:
             that:
               - group_creation is not failed
               - user_creation is not failed
               - dir_creation is not failed
-            fail_msg: "System prerequisites (user/groups/dirs) could not be established."
+            msg: "Core system requirements for Prometheus exporters were not met."
+
       rescue:
         - name: Signal failure in prerequisite setup
           ansible.builtin.fail:
@@ -82,31 +89,18 @@
 
     - name: "Deployment: Node Exporter"
       block:
-        - name: Check for existing Node Exporter binary
-          ansible.builtin.stat:
-            path: "{{ prometheus_bin_dir }}/node_exporter"
-          register: node_exporter_bin_stat
-
-        - name: Get current Node Exporter version
-          ansible.builtin.command: "{{ prometheus_bin_dir }}/node_exporter --version"
-          register: node_exporter_current_version
-          changed_when: false
-          failed_when: false
-          when: node_exporter_bin_stat.stat.exists
-
         - name: Download and Unarchive Node Exporter
-          # Idempotency: Only download if binary is missing or version mismatch
+          # Idempotency: 'creates' ensures we don't re-download/extract if the binary is present
           ansible.builtin.unarchive:
             src: "{{ node_exporter_binary_url }}"
             dest: "/tmp"
             remote_src: true
             extra_opts: [--strip-components=1]
             creates: "/tmp/node_exporter"
-          when: >
-            not node_exporter_bin_stat.stat.exists or
-            node_exporter_version not in (node_exporter_current_version.stdout | default(''))
+          register: node_download
 
         - name: Install Node Exporter Binary
+          # Idempotency: Only copies if the source differs from destination
           ansible.builtin.copy:
             src: "/tmp/node_exporter"
             dest: "{{ prometheus_bin_dir }}/node_exporter"
@@ -115,11 +109,9 @@
             group: root
             remote_src: true
           notify: Restart Node Exporter
-          when: >
-            not node_exporter_bin_stat.stat.exists or
-            node_exporter_version not in (node_exporter_current_version.stdout | default(''))
 
         - name: Configure Node Exporter Systemd Service
+          # Hardening: Using Systemd directives to isolate the process
           ansible.builtin.template:
             dest: "/etc/systemd/system/node_exporter.service"
             mode: '0644'
@@ -143,12 +135,12 @@
               ProtectSystem=full
               PrivateTmp=true
               NoNewPrivileges=true
-              ReadOnlyPaths=/
+              MemoryDenyWriteExecute=true
 
               [Install]
               WantedBy=multi-user.target
-          register: node_exporter_service_config
           notify: Restart Node Exporter
+          register: node_service_config
 
         - name: Ensure Node Exporter is enabled and started
           ansible.builtin.systemd:
@@ -156,9 +148,10 @@
             enabled: true
             state: started
             daemon_reload: true
-          register: node_exporter_service_status
+          register: node_service_state
 
         - name: Validate Node Exporter Metrics Endpoint
+          # Observability: Verify the service is actually serving metrics
           ansible.builtin.uri:
             url: "http://localhost:{{ node_exporter_port }}/metrics"
             method: GET
@@ -168,29 +161,28 @@
           retries: 5
           delay: 2
 
-        - name: Assert Node Exporter is operational
+        - name: Assert Node Exporter functional success
           ansible.builtin.assert:
             that:
-              - node_exporter_service_status.status.ActiveState == 'active'
+              - node_service_state.status.ActiveState == "active"
               - node_check.status == 200
-            fail_msg: "Node Exporter service is not active or metrics endpoint is unreachable."
+            msg: "Node Exporter is not running or metrics endpoint is unreachable."
+
       rescue:
         - name: Node Exporter Recovery Logic
+          # Error Handling: Diagnose port conflicts if the service failed to start
           ansible.builtin.shell: "ss -tulpn | grep :{{ node_exporter_port }}"
           register: port_conflict
           changed_when: false
           failed_when: false
+
         - ansible.builtin.fail:
-            msg: "Node Exporter deployment failed. Possible port conflict: {{ port_conflict.stdout }}"
+            msg: "Node Exporter deployment failed. Possible port conflict: {{ port_conflict.stdout | default('None') }}"
 
     - name: "Deployment: SNMP Exporter (Network Poller Roles)"
+      # Role-Based Condition: Only deploy on designated network pollers
       when: "'network_pollers' in group_names"
       block:
-        - name: Check for existing SNMP Exporter binary
-          ansible.builtin.stat:
-            path: "{{ prometheus_bin_dir }}/snmp_exporter"
-          register: snmp_exporter_bin_stat
-
         - name: Download and Install SNMP Exporter
           ansible.builtin.unarchive:
             src: "{{ snmp_exporter_binary_url }}"
@@ -198,7 +190,7 @@
             remote_src: true
             extra_opts: [--strip-components=1]
             creates: "/tmp/snmp_exporter"
-          when: not snmp_exporter_bin_stat.stat.exists
+          register: snmp_download
 
         - name: Install SNMP Exporter Binary
           ansible.builtin.copy:
@@ -209,18 +201,17 @@
             group: root
             remote_src: true
           notify: Restart SNMP Exporter
-          when: not snmp_exporter_bin_stat.stat.exists
 
         - name: Deploy SNMP Configuration (ASA/FGT/Nexus/SRX)
-          # Why: SNMP configuration is unique to the network hardware landscape
+          # Security: SNMP config may contain read-only community strings; restrict permissions
           ansible.builtin.copy:
             src: "{{ snmp_config_src }}"
             dest: "{{ prometheus_config_dir }}/snmp.yml"
             owner: "{{ prometheus_user }}"
             group: "{{ prometheus_group }}"
             mode: '0640'
-          register: snmp_config_deploy
           notify: Restart SNMP Exporter
+          register: snmp_config_deploy
 
         - name: Configure SNMP Exporter Systemd Service
           ansible.builtin.template:
@@ -246,6 +237,7 @@
               [Install]
               WantedBy=multi-user.target
           notify: Restart SNMP Exporter
+          register: snmp_service_config
 
         - name: Ensure SNMP Exporter is enabled and started
           ansible.builtin.systemd:
@@ -253,7 +245,7 @@
             enabled: true
             state: started
             daemon_reload: true
-          register: snmp_service_status
+          register: snmp_service_state
 
         - name: Validate SNMP Exporter Healthy Endpoint
           ansible.builtin.uri:
@@ -265,18 +257,20 @@
           retries: 3
           delay: 5
 
-        - name: Assert SNMP Exporter is operational
+        - name: Assert SNMP Exporter functional success
           ansible.builtin.assert:
             that:
-              - snmp_service_status.status.ActiveState == 'active'
+              - snmp_service_state.status.ActiveState == "active"
               - snmp_check.status == 200
-            fail_msg: "SNMP Exporter service is not active or health check failed."
+            msg: "SNMP Exporter failed health check after deployment."
+
       rescue:
         - name: SNMP Exporter Error Analysis
           ansible.builtin.debug:
             msg: "SNMP Exporter failed. Verify that {{ snmp_config_src }} is valid for your Cisco/Fortinet/Juniper MIBs."
+
         - ansible.builtin.fail:
-            msg: "SNMP Exporter deployment aborted."
+            msg: "SNMP Exporter deployment aborted due to critical error."
 
   handlers:
     - name: Restart Node Exporter

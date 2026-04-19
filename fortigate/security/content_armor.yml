@@ -1,37 +1,40 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Playbook: FortiGate Content Armor Retrieval
-# Auto-improved: 2026-03-15 (NetLearner Architect)
-# Purpose: Safely retrieves and validates firewall profile-group configuration.
-# Standards: FQCN, Idempotency (Read-only), Observability (Register/Assert), Error Handling.
----
-- name: Get Content Armor
+# FortiGate Content Armor Retrieval
+# Purpose: Audit firewall profile-group configuration for security compliance.
+# Standards: This playbook is idempotent (read-only) and includes validation for production safety.
+- name: FortiGate Content Armor Audit
   hosts: fortigate
-  gather_facts: false
+  gather_facts: false # Performance: Fact gathering is disabled as we only require specific CLI output.
 
   tasks:
     - name: Retrieve firewall profile-group configuration
-      # Using FQCN for network CLI operations. 
-      # Read-only 'get' operations are idempotent as they do not modify device state.
+      # Using Fully Qualified Collection Name (FQCN) for cross-platform reliability.
       ansible.netcommon.cli_command:
-        command: "get firewall profile-group"
+        command: get firewall profile-group
       register: armor_result
-      # Error Handling: Identify failure if the command fails or returns an empty string.
-      failed_when: 
-        - armor_result.failed 
-        - armor_result.stdout == ""
+      # Error Handling: Ensure we catch unrecognized commands or internal device failures.
+      failed_when: >
+        armor_result.failed or 
+        "Unknown" in armor_result.stdout or 
+        "Command fail" in armor_result.stdout
 
-    - name: Validate configuration retrieval
-      # Observability: Assert that the command output contains expected FortiOS structural patterns.
+    - name: Validate retrieved armor data integrity
+      # Observability: Assert that the output is not empty to verify the audit is meaningful.
       ansible.builtin.assert:
         that:
           - armor_result.stdout is defined
-          - "'profile-group' in armor_result.stdout or '==' in armor_result.stdout"
-        fail_msg: "The retrieved Content Armor configuration is invalid or the output is empty."
-        success_msg: "Content Armor configuration successfully retrieved and verified."
+          - armor_result.stdout | length > 0
+        fail_msg: "Audit Failed: No Content Armor configuration was returned by the device."
+        success_msg: "Audit Verified: Content Armor configuration successfully retrieved and validated."
 
-    - name: Display Content Armor details
-      # Formatted output for human-readable verification.
+    - name: Display Content Armor Audit Results
+      # Observability: Provide a structured view of the security profiles for logging and human review.
       ansible.builtin.debug:
         msg: |
-          ======================= CONTENT ARMOR =======================
+          ======================= NETLEARNER: CONTENT ARMOR =======================
+          DEVICE: {{ inventory_hostname }}
+          -------------------------------------------------------------------------
           {{ armor_result.stdout }}
+          =========================================================================
+```

@@ -1,43 +1,47 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# Interface IP Configuration Audit
-# Improved: 2026-03-15
-# Author: NetLearner Architect
-# Standards: Idempotency, FQCN, Observability, Documentation, Error Handling
----
-- name: Interface IP Config
+# NetLearner Architect - Standardized IP Verification Playbook
+# Purpose: Idempotent retrieval and verification of Interface IP assignments.
+# Standards: Idempotency, Observability, Documentation, Error Handling, FQCN
+#
+# WHY: This playbook provides consistent visibility into the operational state 
+# of network interfaces without modifying configuration (ensuring idempotency).
+
+- name: Interface IP Configuration Audit
   hosts: asa_firepower
   gather_facts: false
+  connection: network_cli
 
   tasks:
-    - name: Retrieve current interface IP configuration
-      # Using FQCN (cisco.asa.asa_command) for platform-specific execution
-      # This task is inherently idempotent as it only retrieves state without modification
-      cisco.asa.asa_command:
-        commands:
-          - show ip address
-      register: ip_result
-      # Error Handling: Ensure the command was accepted and returned the expected address table
+    - name: Retrieve current interface IP address table
+      # FQCN: Using ansible.netcommon for cross-platform network CLI compatibility
+      # IDEMPOTENCY: "show" commands are read-only and inherently safe for repeat execution
+      ansible.netcommon.cli_command:
+        command: show ip address
+      register: ip_telemetry
+      # ERROR HANDLING: Catch cases where the CLI returns an error string despite a successful connection
       failed_when:
-        - ip_result.failed
-        - "'Address' not in ip_result.stdout[0]"
+        - ip_telemetry.stdout is not defined or
+          'Invalid input' in ip_telemetry.stdout or
+          '% Invalid' in ip_telemetry.stdout
 
-    - name: Verify IP configuration data integrity
-      # Observability: Validate that the output contains the expected ASA headers
-      # This ensures subsequent tasks or automation rely on valid data
+    - name: Validate telemetry integrity for {{ inventory_hostname }}
+      # OBSERVABILITY: Ensure a valid, non-empty response was captured before proceeding
       ansible.builtin.assert:
         that:
-          - "'Interface' in ip_result.stdout[0]"
-          - "'IP-Address' in ip_result.stdout[0]"
-        fail_msg: "The 'show ip address' command returned invalid or incomplete data from {{ inventory_hostname }}."
-        success_msg: "Interface IP configuration successfully captured and validated."
-        quiet: true
+          - ip_telemetry.stdout is defined
+          - ip_telemetry.stdout | length > 0
+        fail_msg: "CRITICAL: No IP configuration data retrieved from {{ inventory_hostname }}."
+        success_msg: "TELEMETRY: Successfully captured IP configuration data."
 
-    - name: Display formatted interface IP report
-      # Observability: Provide a clean, readable report for the operator
+    - name: Output formatted interface IP data
+      # OBSERVABILITY: Log structured results for human audit and system logging
       ansible.builtin.debug:
         msg: |
-          ======================= INTERFACE IP REPORT =======================
-          DEVICE: {{ inventory_hostname }}
-          STATE:  Verified
-          -------------------------------------------------------------------
-          {{ ip_result.stdout[0] }}
+          ======================================================================
+          HOST: {{ inventory_hostname }}
+          STATUS: Telemetry Captured Successfully
+          ======================= INTERFACE IP =================================
+          {{ ip_telemetry.stdout }}
+          ======================================================================
+```

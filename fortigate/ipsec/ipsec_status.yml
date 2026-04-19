@@ -1,35 +1,44 @@
+MCP issues detected. Run /mcp list for status.```yaml
 ---
-# FortiGate IPSec Status - Improved by NetLearner Architect
-# Purpose: Retrieve and verify the operational status of IPSec tunnels.
-# Standards: Idempotency (Read-only), Observability (Assert), Best Practices (FQCN).
-
-- name: FortiGate IPSec Status
+# ==============================================================================
+# Playbook: FortiGate IPSec VPN Status Audit
+# Purpose: Retrieves and validates the operational state of IPSec tunnels.
+# Standards: Idempotent, Observable, and FQCN compliant.
+# ==============================================================================
+- name: FortiGate IPSec Status Monitoring
   hosts: fortigate
   gather_facts: false
+  connection: ansible.netcommon.network_cli
 
   tasks:
-    - name: Retrieve IPSec tunnel status
-      # Use FQCN for network common CLI command execution.
-      # This operation is inherently idempotent as it does not modify configuration.
+    - name: Retrieve IPSec tunnel status from FortiGate CLI
+      # Using FQCN for cross-platform network command execution.
+      # This task is inherently idempotent as it is a read-only 'get' operation.
       ansible.netcommon.cli_command:
-        command: "get vpn ipsec status"
-      register: ipsec_result
-      # Error Handling: Detect command failure or unrecognized command syntax.
-      failed_when:
-        - ipsec_result.failed or "Unknown action" in ipsec_result.stdout
+        command: get vpn ipsec status
+      register: ipsec_output
+      # Ensure we fail if the command returns an error or empty result.
+      failed_when: 
+        - ipsec_output.rc != 0
+        - "'' == ipsec_output.stdout"
+      changed_when: false
 
-    - name: Verify IPSec command output integrity
-      # Observability: Confirm the command returned meaningful output.
+    - name: Validate IPSec output observability
+      # Assert ensures the response contains expected FortiOS operational data.
+      # This provides a safety gate before any parsing or display logic.
       ansible.builtin.assert:
         that:
-          - "ipsec_result.stdout is defined"
-          - "ipsec_result.stdout | length > 0"
-        fail_msg: "The command 'get vpn ipsec status' returned no output."
-        success_msg: "IPSec status successfully retrieved."
+          - "'IPsec' in ipsec_output.stdout"
+        fail_msg: "Invalid response received from FortiGate. IPSec data missing."
+        success_msg: "Successfully retrieved IPSec telemetry."
 
-    - name: Display Formatted IPSec Status
-      # Provides visual confirmation for the network administrator.
+    - name: Display formatted IPSec tunnel metrics
+      # Structured display for human-readable audit logs.
       ansible.builtin.debug:
-        msg: |
-          ======================= IPSEC STATUS =======================
-          {{ ipsec_result.stdout }}
+        msg:
+          - "==========================================================="
+          - "               FORTIGATE IPSEC STATUS REPORT               "
+          - "==========================================================="
+          - "{{ ipsec_output.stdout }}"
+          - "==========================================================="
+```
